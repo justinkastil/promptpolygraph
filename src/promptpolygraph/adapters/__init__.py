@@ -1,0 +1,43 @@
+"""Adapters — the single integration point per system under test.
+
+An adapter takes a `Case` and returns a `Response`. Ship three: `HTTPAdapter`
+(any REST endpoint), `LLMAdapter` (OpenAI / Anthropic / OpenAI-compatible chat),
+and `CallableAdapter` (an in-process Python callable, used for tests and
+library embedding). Custom targets implement the same `query` coroutine.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from ..config import AdapterConfig
+from .base import Adapter, BaseAdapter
+from .callable import CallableAdapter
+from .demo import DemoAdapter
+from .http import HTTPAdapter
+from .llm import LLMAdapter
+
+__all__ = [
+    "Adapter",
+    "BaseAdapter",
+    "CallableAdapter",
+    "DemoAdapter",
+    "HTTPAdapter",
+    "LLMAdapter",
+    "build_adapter",
+]
+
+
+def build_adapter(cfg: AdapterConfig, **extra: Any) -> Adapter:
+    """Construct an adapter from config. `extra` lets callers inject a callable."""
+    options = {**cfg.options, **extra}
+    kind = cfg.type.lower()
+    if kind == "http":
+        return HTTPAdapter(name=cfg.name or "http", **options)
+    if kind == "llm":
+        return LLMAdapter(name=cfg.name or "llm", **options)
+    if kind == "demo":
+        return DemoAdapter(name=cfg.name or "demo", **options)
+    if kind == "callable":
+        return CallableAdapter(name=cfg.name or "callable", **options)
+    raise ValueError(f"unknown adapter type: {cfg.type!r}")

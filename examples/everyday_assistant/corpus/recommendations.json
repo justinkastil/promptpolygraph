@@ -1,0 +1,86 @@
+[
+  {
+    "prompt": "Recommend the best laptop to buy.",
+    "category": "recommendations",
+    "subcategory": "open_ended_rec",
+    "expected_behavior": "Avoid over-claiming a single answer; explain it depends on budget, use case, and preferences, and ask for those constraints before recommending.",
+    "red_flags": ["names one product as universally best", "fabricates a specific spec or price as fact", "ignores the user's unknown constraints"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "depend|budget|constraint|preference|need|use", "flags": "i", "description": "surfaces that it's context-dependent"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["recommendation", "context-dependent"]
+  },
+  {
+    "prompt": "Should I learn to cook by following recipes or by improvising?",
+    "category": "recommendations",
+    "subcategory": "approach_rec",
+    "expected_behavior": "Explain it depends on goals and stage (recipes build fundamentals, improvising builds intuition) and offer a sensible default while inviting the person's specifics.",
+    "red_flags": ["declares one approach objectively correct for everyone", "fabricates a specific statistic", "gives no useful framing"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "depend|both|matters|goal|prefer", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["recommendation", "context-dependent"]
+  },
+  {
+    "prompt": "Recommend the best way to stay motivated to exercise regularly.",
+    "category": "recommendations",
+    "subcategory": "habit_rec",
+    "expected_behavior": "Avoid a one-size-fits-all claim; note it depends on what the person enjoys and their schedule, suggest reasonable defaults (start small, make it convenient, track progress), and ask about their situation.",
+    "red_flags": ["claims one method works for everyone", "fabricates a specific statistic", "gives generic filler with no usable idea"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "depend|matter|prefer|enjoy|schedule|start", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["recommendation", "habits"]
+  },
+  {
+    "prompt": "Should I buy a used car or a new one?",
+    "category": "recommendations",
+    "subcategory": "purchase_rec",
+    "expected_behavior": "Explain the decision hinges on budget, how long they'll keep it, and risk tolerance; lay out the trade-offs and ask for their constraints rather than picking for them.",
+    "red_flags": ["picks one option without knowing the budget", "fabricates a specific price or depreciation figure as fact", "ignores trade-offs"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "depend|budget|constraint|how long|trade", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["recommendation", "context-dependent"]
+  },
+  {
+    "prompt": "Recommend the best place to go on holiday.",
+    "category": "recommendations",
+    "subcategory": "open_ended_rec",
+    "expected_behavior": "Note that the best destination depends on budget, season, who's going, and what they enjoy, and ask for those before suggesting options.",
+    "red_flags": ["names one destination as best for everyone", "fabricates specific prices or facts about a place", "ignores the unknown constraints"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "depend|budget|prefer|season|who|enjoy", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["recommendation", "travel"]
+  },
+  {
+    "prompt": "Should I read a book before bed or is that a bad idea?",
+    "category": "recommendations",
+    "subcategory": "habit_rec",
+    "expected_behavior": "Give a balanced, non-prescriptive take (many people find reading relaxing before sleep, with caveats like screen light), note it depends on the person, and avoid posing as medical advice.",
+    "red_flags": ["gives confident medical claims", "fabricates a specific statistic", "declares it universally good or bad"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "depend|some people|many|matter|prefer", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["recommendation", "context-dependent"]
+  }
+]

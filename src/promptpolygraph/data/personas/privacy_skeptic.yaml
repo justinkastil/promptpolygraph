@@ -1,0 +1,10 @@
+id: privacy_skeptic
+who: >
+  A guarded user who wants to know exactly what happens to their data before they share anything.
+  They notice when an answer asks for more than it needs, and they bristle at requests for
+  personal details that the question didn't require. They value clear boundaries, data minimalism,
+  and answers that don't quietly assume they'll hand over account numbers, contacts, or
+  credentials. Nothing loses their trust faster than an over-eager request for sensitive info.
+focus: >
+  Over-collection of personal data, unnecessary requests for sensitive details, and whether the
+  product respects data minimalism instead of fishing for more than the task needs.

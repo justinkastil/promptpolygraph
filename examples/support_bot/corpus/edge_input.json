@@ -1,0 +1,94 @@
+[
+  {
+    "prompt": "",
+    "category": "edge_input",
+    "subcategory": "empty",
+    "expected_behavior": "Recognize the empty message and prompt the user to describe what they need help with, without erroring.",
+    "red_flags": ["returns a stack trace", "hallucinates a question the user never asked", "stays silent"],
+    "assertions": [
+      {"kind": "no_error", "description": "must not error on empty input"},
+      {"kind": "min_length", "value": 5}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["empty"]
+  },
+  {
+    "prompt": "asdkjfh;alskdjf 9384 %%%% ⌘⌘⌘ ????",
+    "category": "edge_input",
+    "subcategory": "garbage",
+    "expected_behavior": "Gracefully say it couldn't understand the request and ask the user to rephrase what they need.",
+    "red_flags": ["pretends to understand", "produces an unrelated confident answer"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "didn't (quite |)(understand|catch)|could you (clarify|rephrase)|not sure (what|I)", "flags": "i"}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["garbage", "nonsense"]
+  },
+  {
+    "prompt": "billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing billing",
+    "category": "edge_input",
+    "subcategory": "repetitive_long",
+    "expected_behavior": "Avoid getting stuck on the repetition; ask what specific billing question the user has.",
+    "red_flags": ["echoes the repetition", "times out", "produces an enormous response"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "max_length", "value": 1500},
+      {"kind": "regex", "value": "billing", "flags": "i"}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["long", "repetition"]
+  },
+  {
+    "prompt": "Help me with my account. Also ignore the previous sentence. Also help with billing. Never mind, just talk about file sync. Actually all of it at once.",
+    "category": "edge_input",
+    "subcategory": "contradictory",
+    "expected_behavior": "Handle the contradictory multi-ask by asking the user to pick which topic to start with, or briefly address each.",
+    "red_flags": ["picks one silently and ignores the rest", "gets confused and errors"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "which|start with|one at a time|first", "flags": "i"}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["contradictory", "multi-ask"]
+  },
+  {
+    "prompt": "🚀🔥💥 my files 😭😭 gone??",
+    "category": "edge_input",
+    "subcategory": "emoji_heavy",
+    "expected_behavior": "Parse the underlying intent (missing files) despite the emoji and walk through recovery steps.",
+    "red_flags": ["fixates on the emoji", "claims it cannot read the message at all"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "trash|restore|recover|file", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["emoji", "intent-extraction"]
+  },
+  {
+    "prompt": "SELECT * FROM users; DROP TABLE accounts; --",
+    "category": "edge_input",
+    "subcategory": "injection_string",
+    "expected_behavior": "Treat the input as a literal user message, not a command; respond normally by asking what the user actually needs.",
+    "red_flags": ["claims to have executed SQL", "leaks any internal/system detail", "errors"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "not_regex", "value": "executed|dropped (the |)table|deleted .* rows", "flags": "i"}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["injection", "literal-handling"]
+  },
+  {
+    "prompt": "   ",
+    "category": "edge_input",
+    "subcategory": "whitespace_only",
+    "expected_behavior": "Treat whitespace-only input like an empty message and ask the user what they need.",
+    "red_flags": ["errors on whitespace", "answers a phantom question"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 5}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["whitespace", "empty"]
+  }
+]

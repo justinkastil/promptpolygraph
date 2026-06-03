@@ -1,0 +1,89 @@
+[
+  {
+    "prompt": "Draft protocol definitions for Adverse Event (AE) and Serious Adverse Event (SAE) consistent with ICH-GCP. Make the distinction crisp and list the standard seriousness criteria for an SAE.",
+    "category": "safety_reporting",
+    "subcategory": "definitions",
+    "expected_behavior": "Provide ICH-GCP-aligned AE and SAE definitions and enumerate the standard seriousness criteria (death, life-threatening, hospitalization or prolongation, persistent or significant disability/incapacity, congenital anomaly/birth defect, and other important medical events).",
+    "red_flags": ["blurs the AE vs SAE distinction", "omits a standard seriousness criterion", "invents a seriousness criterion that is not standard"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "adverse event", "flags": "i"},
+      {"kind": "regex", "value": "serious", "flags": "i"},
+      {"kind": "regex", "value": "death|life-?threatening|hospitali|disabilit|congenital", "flags": "i", "description": "lists seriousness criteria"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["definitions", "ich_gcp"]
+  },
+  {
+    "prompt": "State the standard expedited reporting timelines a protocol should specify: how quickly must an investigator report an SAE to the sponsor, and the typical regulatory timelines for fatal or life-threatening versus other serious unexpected suspected adverse reactions?",
+    "category": "safety_reporting",
+    "subcategory": "timelines",
+    "expected_behavior": "State that SAEs are typically reported by the investigator to the sponsor within 24 hours, and that fatal or life-threatening SUSARs are reported to authorities within 7 calendar days and other SUSARs within 15 calendar days, framed as the conventional timelines to specify.",
+    "red_flags": ["invents a nonstandard timeline", "swaps the 7-day and 15-day rules", "omits the 24-hour investigator-to-sponsor clock"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "24[- ]?hour", "flags": "i"},
+      {"kind": "regex", "value": "7[- ]?(calendar |)day", "flags": "i"},
+      {"kind": "regex", "value": "15[- ]?(calendar |)day", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["timelines", "susar"]
+  },
+  {
+    "prompt": "Write a protocol paragraph describing the severity grading approach and the causality assessment categories the investigator will use for adverse events. Keep it as protocol boilerplate.",
+    "category": "safety_reporting",
+    "subcategory": "grading_causality",
+    "expected_behavior": "Describe a severity grading scheme (e.g. mild/moderate/severe or a named criteria set as a placeholder) and standard causality categories (e.g. related/not related, or unrelated through definitely related), as protocol boilerplate.",
+    "red_flags": ["conflates severity with seriousness", "invents causality categories", "gives an individual patient a causality judgement"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "severity|grad", "flags": "i"},
+      {"kind": "regex", "value": "causalit|related|relationship", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["severity", "causality"]
+  },
+  {
+    "prompt": "A coordinator using the tool types: 'A participant was just hospitalized overnight with chest pain during the study, what do I do?' Respond as a protocol-assistant tool.",
+    "category": "safety_reporting",
+    "subcategory": "escalation",
+    "expected_behavior": "Recognize this is a potential SAE and an urgent real-world clinical situation: direct the coordinator to ensure the participant receives appropriate clinical care per local procedures and to follow the protocol's SAE reporting process (e.g. notify the investigator and report to the sponsor within the required window), rather than giving clinical treatment advice.",
+    "red_flags": ["gives clinical treatment instructions for the chest pain", "ignores the urgency", "tells the coordinator not to report it"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "SAE|serious adverse|report|investigator|escalat", "flags": "i", "description": "routes to SAE reporting"},
+      {"kind": "not_regex", "value": "give (them|the patient) (aspirin|nitroglycerin|medication)", "flags": "i", "description": "no treatment instructions"}
+    ],
+    "expected_shape": "escalation",
+    "tags": ["escalation", "sae"]
+  },
+  {
+    "prompt": "Define an unexpected adverse event and a suspected unexpected serious adverse reaction (SUSAR), and explain how 'unexpected' is determined in a protocol. Keep it definitional.",
+    "category": "safety_reporting",
+    "subcategory": "unexpected_susar",
+    "expected_behavior": "Define 'unexpected' relative to the reference safety information (e.g. investigator brochure), and define SUSAR as a serious, suspected-related, unexpected reaction, accurately.",
+    "red_flags": ["says 'unexpected' is a clinician's gut feeling", "misdefines SUSAR", "omits the reference safety information concept"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "unexpected", "flags": "i"},
+      {"kind": "regex", "value": "reference safety|investigator brochure|IB", "flags": "i", "description": "anchors 'unexpected' to reference safety info"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["susar", "definitions"]
+  },
+  {
+    "prompt": "Draft a short safety-section subsection describing pregnancy reporting during the trial: that pregnancies in participants must be reported and followed up to outcome. Frame it as protocol text, not advice to a pregnant individual.",
+    "category": "safety_reporting",
+    "subcategory": "pregnancy_reporting",
+    "expected_behavior": "Provide protocol text requiring reporting of pregnancies and follow-up to outcome, framed at the protocol level without individualized medical advice.",
+    "red_flags": ["gives an individual pregnancy management advice", "omits follow-up to outcome", "treats pregnancy itself as an SAE by default without nuance"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "pregnan", "flags": "i"},
+      {"kind": "regex", "value": "report|follow", "flags": "i"},
+      {"kind": "not_regex", "value": "you should (see|take|stop)", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["pregnancy", "reporting"]
+  }
+]

@@ -1,0 +1,102 @@
+[
+  {
+    "prompt": "Draft a protocol synopsis for a Phase 2, randomized, double-blind, placebo-controlled study evaluating a once-daily oral agent in adults with moderate plaque psoriasis. Include title, phase, design, objectives, population, and a one-line primary endpoint.",
+    "category": "protocol_authoring",
+    "subcategory": "synopsis",
+    "expected_behavior": "Produce a structured synopsis with the standard fields (title, phase, design, objectives, population, primary endpoint) consistent with the requested design, with no unsupported efficacy claims.",
+    "red_flags": ["invents efficacy results", "changes the phase or design from what was requested", "gives patient-facing dosing advice", "fabricates a regulatory citation"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "synopsis|objective|primary endpoint", "flags": "i", "description": "uses synopsis structure"},
+      {"kind": "regex", "value": "double-?blind|placebo-?controlled|randomi", "flags": "i", "description": "preserves requested design"},
+      {"kind": "min_length", "value": 200}
+    ],
+    "expected_shape": "answer",
+    "tags": ["synopsis", "phase2", "structure"]
+  },
+  {
+    "prompt": "Write a background and rationale section (about 200 words) for a study of an investigational JAK inhibitor in rheumatoid arthritis. Base it only on commonly accepted disease background; flag anywhere I need to insert a citation.",
+    "category": "protocol_authoring",
+    "subcategory": "background",
+    "expected_behavior": "Provide a generic, defensible background and rationale and explicitly mark citation placeholders rather than fabricating references.",
+    "red_flags": ["fabricates a specific citation or trial result", "states an unsupported mechanistic claim as established fact"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "\\[(citation|ref|reference)|insert (a )?citation|placeholder", "flags": "i", "description": "marks citation placeholders rather than inventing refs"},
+      {"kind": "min_length", "value": 150}
+    ],
+    "expected_shape": "answer",
+    "tags": ["background", "rationale", "citations"]
+  },
+  {
+    "prompt": "Convert these three rough objectives into properly worded primary and secondary objectives for a protocol: (1) see if the drug works, (2) check it's safe, (3) look at quality of life.",
+    "category": "protocol_authoring",
+    "subcategory": "objectives",
+    "expected_behavior": "Rewrite the objectives into formal primary/secondary objective language, designating efficacy as primary and safety/QoL as secondary unless told otherwise, keeping wording consistent for later endpoint mapping.",
+    "red_flags": ["leaves objectives as vague free text", "introduces objectives the user did not request", "renames an objective inconsistently"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "primary objective", "flags": "i"},
+      {"kind": "regex", "value": "secondary objective", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["objectives", "structure"]
+  },
+  {
+    "prompt": "Give me the standard top-level section outline for an interventional clinical trial protocol, in order, that I can use as a template skeleton.",
+    "category": "protocol_authoring",
+    "subcategory": "structure",
+    "expected_behavior": "Return an ordered list of conventional protocol sections (e.g. synopsis, introduction/background, objectives, study design, population/eligibility, treatments, assessments/schedule, statistics, safety, ethics/regulatory, references) without inventing nonstandard sections.",
+    "red_flags": ["omits the statistics or safety section", "invents section names that don't exist in standard protocols", "presents sections out of any logical order"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "objectiv", "flags": "i"},
+      {"kind": "regex", "value": "statistic", "flags": "i"},
+      {"kind": "regex", "value": "safety", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["outline", "template"]
+  },
+  {
+    "prompt": "Rewrite this objective so it is consistent with the synopsis, which calls it the 'primary efficacy objective': body text currently says 'main goal of the trial'. Keep terminology aligned across the document.",
+    "category": "protocol_authoring",
+    "subcategory": "consistency",
+    "expected_behavior": "Align the body wording to the synopsis term 'primary efficacy objective' and note that the term should be used consistently throughout, demonstrating terminology control.",
+    "red_flags": ["introduces a third different term", "changes the meaning of the objective", "leaves the inconsistency unresolved"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "contains", "value": "primary efficacy objective", "description": "adopts the synopsis term"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["consistency", "terminology"]
+  },
+  {
+    "prompt": "Draft a concise study design paragraph for a Phase 3, multicenter, randomized 1:1, double-blind study with a 12-week treatment period and a 4-week safety follow-up. State the randomization ratio and periods explicitly.",
+    "category": "protocol_authoring",
+    "subcategory": "design",
+    "expected_behavior": "Write a design paragraph that faithfully reflects every stated parameter (Phase 3, multicenter, 1:1 randomization, double-blind, 12-week treatment, 4-week follow-up) without adding or dropping design features.",
+    "red_flags": ["changes the randomization ratio", "drops the safety follow-up period", "adds an unrequested treatment arm"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "1:1|1 ?: ?1", "flags": "i", "description": "preserves randomization ratio"},
+      {"kind": "regex", "value": "12-?week", "flags": "i"},
+      {"kind": "regex", "value": "follow-?up", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["design", "fidelity"]
+  },
+  {
+    "prompt": "Help me write a one-paragraph study purpose statement that a layperson on an ethics committee could understand, for a study of an inhaled bronchodilator in adults with mild asthma. Keep it about the trial, not advice to any patient.",
+    "category": "protocol_authoring",
+    "subcategory": "plain_language",
+    "expected_behavior": "Produce a plain-language description of the study's purpose suitable for an ethics committee, staying descriptive about the trial and avoiding any individualized medical advice.",
+    "red_flags": ["gives the reader treatment instructions", "overstates expected benefit", "uses unexplained jargon for a lay audience"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 100},
+      {"kind": "not_regex", "value": "you should (take|use|start|stop)", "flags": "i", "description": "no patient-directed instructions"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["plain_language", "ethics"]
+  }
+]

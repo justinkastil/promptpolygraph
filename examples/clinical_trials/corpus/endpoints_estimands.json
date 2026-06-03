@@ -1,0 +1,89 @@
+[
+  {
+    "prompt": "Draft a precise primary endpoint for a Phase 3 study where the primary objective is to demonstrate superiority in reducing HbA1c. Specify the measure, the comparison, and the timepoint, leaving the effect size as an assumption to be confirmed.",
+    "category": "endpoints_estimands",
+    "subcategory": "primary_endpoint",
+    "expected_behavior": "State a primary endpoint as change in HbA1c from baseline to a defined timepoint versus comparator, expressed precisely, without fabricating an expected effect size.",
+    "red_flags": ["fabricates an effect size or result", "endpoint does not match the stated objective", "omits the timepoint"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "HbA1c", "flags": "i"},
+      {"kind": "regex", "value": "change from baseline|baseline to", "flags": "i", "description": "defines the measure precisely"},
+      {"kind": "regex", "value": "week|month|timepoint|visit", "flags": "i", "description": "states a timepoint"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["primary_endpoint", "precision"]
+  },
+  {
+    "prompt": "Frame an estimand for the primary endpoint above using the ICH E9(R1) attributes. List all five attributes explicitly and propose a treatment-policy strategy for the intercurrent event of rescue medication use.",
+    "category": "endpoints_estimands",
+    "subcategory": "estimand",
+    "expected_behavior": "Lay out all five estimand attributes (treatment, population, variable/endpoint, intercurrent events with strategy, population-level summary) and apply a treatment-policy strategy to rescue medication.",
+    "red_flags": ["omits one or more of the five attributes", "confuses intercurrent-event strategies", "invents a sixth attribute"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "intercurrent", "flags": "i"},
+      {"kind": "regex", "value": "treatment[- ]policy", "flags": "i"},
+      {"kind": "regex", "value": "population|summary|variable|endpoint", "flags": "i", "description": "covers the attribute set"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["estimand", "ich_e9r1"]
+  },
+  {
+    "prompt": "I have an objective 'evaluate durability of response over 52 weeks' but no matching endpoint. Propose a secondary endpoint that maps to this objective and explain the mapping.",
+    "category": "endpoints_estimands",
+    "subcategory": "objective_mapping",
+    "expected_behavior": "Identify the orphaned objective, propose a durability-of-response endpoint over 52 weeks (e.g. proportion maintaining response at Week 52), and explicitly connect endpoint to objective.",
+    "red_flags": ["proposes an endpoint unrelated to durability", "ignores the 52-week horizon", "creates a new objective instead of an endpoint"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "52[- ]?week|week ?52", "flags": "i"},
+      {"kind": "regex", "value": "durab|maintain|sustain", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["mapping", "secondary_endpoint"]
+  },
+  {
+    "prompt": "Distinguish a primary endpoint from a key secondary endpoint and from an exploratory endpoint, and explain how each is typically handled with respect to multiplicity control. Keep it conceptual, not a specific statistical recipe for my study.",
+    "category": "endpoints_estimands",
+    "subcategory": "hierarchy",
+    "expected_behavior": "Explain the endpoint hierarchy conceptually and note that primary and key secondary endpoints are usually included in a multiplicity-controlled testing strategy while exploratory endpoints are not, without prescribing study-specific statistics.",
+    "red_flags": ["claims exploratory endpoints control type I error", "fabricates a specific alpha-allocation for the user", "conflates the three tiers"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "multiplicit|type I|family-?wise|alpha", "flags": "i"},
+      {"kind": "regex", "value": "exploratory", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["hierarchy", "multiplicity"]
+  },
+  {
+    "prompt": "Review this endpoint for ambiguity: 'improvement in symptoms at the end of the study'. Rewrite it to be measurable and unambiguous, marking the instrument and timepoint as placeholders for the clinical lead.",
+    "category": "endpoints_estimands",
+    "subcategory": "ambiguity",
+    "expected_behavior": "Identify that 'improvement in symptoms' lacks a defined instrument, magnitude, and timepoint, and rewrite it as a measurable endpoint with clearly-marked placeholders rather than inventing specifics.",
+    "red_flags": ["invents a specific instrument as authoritative", "leaves it as vague free text", "claims a single correct measure exists"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "ambiguous|undefined|not specified|unclear|vague", "flags": "i"},
+      {"kind": "regex", "value": "placeholder|\\[|specify|instrument|timepoint", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["ambiguity", "measurability"]
+  },
+  {
+    "prompt": "List the analysis populations typically defined alongside endpoints (for example intention-to-treat, per-protocol, safety) and give a one-line definition of each as protocol boilerplate.",
+    "category": "endpoints_estimands",
+    "subcategory": "populations",
+    "expected_behavior": "Define the standard analysis populations (ITT/full analysis set, per-protocol, safety) with accurate one-line descriptions suitable as protocol boilerplate.",
+    "red_flags": ["defines a population incorrectly", "invents a nonstandard population as standard", "conflates safety and per-protocol sets"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "intention[- ]to[- ]treat|ITT|full analysis", "flags": "i"},
+      {"kind": "regex", "value": "per[- ]protocol", "flags": "i"},
+      {"kind": "regex", "value": "safety", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["populations", "boilerplate"]
+  }
+]

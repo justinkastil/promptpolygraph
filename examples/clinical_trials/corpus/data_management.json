@@ -1,0 +1,89 @@
+[
+  {
+    "prompt": "For a vital signs assessment (systolic BP, diastolic BP, pulse, temperature) collected at each visit, describe how it maps to CDISC SDTM at a domain level and which domain it belongs in. Keep it about data structure.",
+    "category": "data_management",
+    "subcategory": "sdtm_mapping",
+    "expected_behavior": "Identify that vital signs map to the SDTM Vital Signs (VS) domain, describe the structure (one record per measurement with test code, result, unit, timing), and stay at the data-structure level.",
+    "red_flags": ["maps vitals to the wrong SDTM domain", "invents a nonexistent SDTM domain", "gives patient-facing interpretation of the vitals"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "SDTM", "flags": "i"},
+      {"kind": "regex", "value": "VS|vital signs", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["sdtm", "vitals"]
+  },
+  {
+    "prompt": "Propose CRF field definitions for capturing a single adverse event entry: list the fields, their data type, and whether each is required, so it maps cleanly to the SDTM AE domain.",
+    "category": "data_management",
+    "subcategory": "crf_design",
+    "expected_behavior": "List standard AE CRF fields (e.g. verbatim term, start/end date, severity, seriousness, causality, outcome, action taken) with data types and required flags, mappable to the SDTM AE domain.",
+    "red_flags": ["omits start date or seriousness", "uses free text where a coded field is expected", "maps to a non-AE domain"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "adverse event|AE", "flags": "i"},
+      {"kind": "regex", "value": "start date|onset", "flags": "i"},
+      {"kind": "regex", "value": "serious|severity|causalit", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["crf", "ae_domain"]
+  },
+  {
+    "prompt": "Write three edit-check (data validation) rules for a CRF where a visit date must be on or after the date of informed consent, an SAE flag of 'Yes' requires a serious-criteria field, and a lab value must be within a plausible numeric range. State each as a clear rule.",
+    "category": "data_management",
+    "subcategory": "edit_checks",
+    "expected_behavior": "Express three precise, testable validation rules covering date ordering, conditional requiredness on the SAE flag, and a plausible-range check, in language a data system can implement.",
+    "red_flags": ["allows visit date before consent", "makes the serious-criteria field optional when SAE is Yes", "omits the range bounds entirely"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "consent", "flags": "i"},
+      {"kind": "regex", "value": "SAE|serious", "flags": "i"},
+      {"kind": "regex", "value": "range|between|plausible|min|max", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["edit_checks", "validation"]
+  },
+  {
+    "prompt": "Draft a standard query-text convention for a data manager raising a query on a missing or implausible value, with a short template a site can act on. Keep it neutral and non-leading.",
+    "category": "data_management",
+    "subcategory": "query_conventions",
+    "expected_behavior": "Provide a neutral, non-leading data-query template (identifying the field, the observed issue, and the requested clarification) that does not suggest the 'correct' answer to the site.",
+    "red_flags": ["query suggests the expected value", "leading phrasing that biases the response", "no actionable template"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "query|clarif|confirm|verify", "flags": "i"},
+      {"kind": "not_regex", "value": "should be \\d", "flags": "i", "description": "non-leading: does not assert the expected value"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["queries", "conventions"]
+  },
+  {
+    "prompt": "Explain at a structural level what controlled terminology is in clinical data management and why CRF fields like sex, race, and unit should use codelists rather than free text. Keep it about data quality.",
+    "category": "data_management",
+    "subcategory": "controlled_terminology",
+    "expected_behavior": "Explain that controlled terminology / codelists enforce consistent, mappable values, reduce query rates, and support SDTM conformance, framed around data quality.",
+    "red_flags": ["recommends free text for these fields", "invents a controlled-terminology standard", "ignores SDTM/mappability"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "controlled terminology|codelist|code list", "flags": "i"},
+      {"kind": "regex", "value": "consisten|map|standard|quality", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["controlled_terminology", "data_quality"]
+  },
+  {
+    "prompt": "Produce a JSON specification for a lab-result CRF field group with fields lab_test (string), result_value (number), result_unit (string), and reference_range_low/high (number). Mark which fields are required.",
+    "category": "data_management",
+    "subcategory": "machine_readable",
+    "expected_behavior": "Emit valid JSON specifying each field with type and a required flag, consistent with a structured, SDTM-mappable lab capture.",
+    "red_flags": ["invalid JSON", "omits result_unit", "uses string for numeric result_value"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "json_valid"},
+      {"kind": "regex", "value": "result_unit", "flags": "i"},
+      {"kind": "regex", "value": "required", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["json", "crf_spec"]
+  }
+]

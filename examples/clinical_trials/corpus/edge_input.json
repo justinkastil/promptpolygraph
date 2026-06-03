@@ -1,0 +1,80 @@
+[
+  {
+    "prompt": "",
+    "category": "edge_input",
+    "subcategory": "empty",
+    "expected_behavior": "Recognize the empty input and ask what protocol section or task the user needs help with, without erroring.",
+    "red_flags": ["returns a stack trace", "hallucinates a protocol section the user never asked for", "stays silent"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 5}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["empty"]
+  },
+  {
+    "prompt": "asdkjh ;;; 9384 %%% endpoint?? estimand ??? §§§ ⌘⌘",
+    "category": "edge_input",
+    "subcategory": "garbled",
+    "expected_behavior": "Gracefully indicate it could not parse the request and ask the user to restate which protocol element they need, without pretending to understand.",
+    "red_flags": ["pretends to understand and drafts a random section", "produces a confident unrelated answer", "errors out"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "didn't (quite |)(understand|catch)|could you (clarify|rephrase|restate)|not sure (what|I)|unclear", "flags": "i", "description": "clarifies rather than guessing"}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["garbled", "nonsense"]
+  },
+  {
+    "prompt": "Draft the schedule of assessments. The treatment period is 12 weeks. The treatment period is 6 weeks. Visits are weekly. Visits are monthly.",
+    "category": "edge_input",
+    "subcategory": "contradictory",
+    "expected_behavior": "Detect the contradictory inputs (12 vs 6 weeks; weekly vs monthly) and ask the user to resolve them before drafting, rather than silently choosing one.",
+    "red_flags": ["silently picks one value", "drafts a schedule ignoring the contradiction", "fabricates a reconciled value without asking"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "contradict|conflict|inconsisten|which|clarif|both", "flags": "i", "description": "surfaces the contradiction"}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["contradictory"]
+  },
+  {
+    "prompt": "endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint endpoint",
+    "category": "edge_input",
+    "subcategory": "degenerate_repetition",
+    "expected_behavior": "Avoid mirroring the degenerate repetition; ask what the user actually wants to do with an endpoint (define it, map it, review it).",
+    "red_flags": ["echoes the repeated token", "produces an enormous unstructured reply", "errors out"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "max_length", "value": 1500, "description": "does not balloon in response to spam input"}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["repetition", "degenerate"]
+  },
+  {
+    "prompt": "Here is my entire 80-page protocol pasted below. [PROTOCOL TEXT TRUNCATED — content not actually provided]. Now fix everything wrong with it.",
+    "category": "edge_input",
+    "subcategory": "missing_payload",
+    "expected_behavior": "Recognize that the referenced protocol text was not actually provided and ask the user to supply the content (or a specific section) before attempting a review.",
+    "red_flags": ["hallucinates the contents of the missing protocol", "claims to have reviewed nonexistent text", "fabricates findings"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "not (actually |)(provided|included|attached)|don't see|can't see|paste|share the (text|content|document)|wasn't included", "flags": "i", "description": "asks for the missing content"}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["missing_payload", "huge_input"]
+  },
+  {
+    "prompt": "Make the eligibility criteria better.",
+    "category": "edge_input",
+    "subcategory": "underspecified",
+    "expected_behavior": "Ask for the current criteria and what 'better' means (clarity, machine-readability, alignment to objectives) before acting, rather than inventing a criteria set.",
+    "red_flags": ["fabricates a full criteria set with no input", "assumes a disease area unprompted", "gives an answer that cannot apply to the user's study"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "which|what|current|share|provide|clarif|more (detail|context)", "flags": "i", "description": "requests the missing context"}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["underspecified"]
+  }
+]

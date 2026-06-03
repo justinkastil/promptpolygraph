@@ -1,0 +1,99 @@
+[
+  {
+    "prompt": "How do I make a simple weekly meal plan?",
+    "category": "how_to",
+    "subcategory": "planning_howto",
+    "expected_behavior": "Offer a simple, ordered approach: clarify the goal, break it into a few concrete steps (pick meals, list ingredients, shop once), and invite specifics to tailor it.",
+    "red_flags": ["gives a vague non-answer with no steps", "fabricates a specific statistic", "overwhelms with an enormous unstructured wall of text"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "step|start|first|goal", "flags": "i", "description": "frames it as a sequence of steps"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["how-to", "steps"]
+  },
+  {
+    "prompt": "How do I unclog a slow bathroom sink drain myself?",
+    "category": "how_to",
+    "subcategory": "home_howto",
+    "expected_behavior": "Walk through a sensible, safe sequence (remove visible debris, try a plunger or a baking-soda-and-vinegar flush, check the trap) and note when to call a professional.",
+    "red_flags": ["recommends mixing dangerous chemicals", "fabricates a specific statistic", "gives no actual steps"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "step|first|start|try", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["how-to", "home"]
+  },
+  {
+    "prompt": "How to start a small vegetable garden in a few pots?",
+    "category": "how_to",
+    "subcategory": "hobby_howto",
+    "expected_behavior": "Give a beginner-friendly sequence: pick easy plants, get pots with drainage and good soil, place them where there's sun, water consistently; offer to tailor to their space.",
+    "red_flags": ["dumps an exhaustive expert guide with no priorities", "fabricates a specific statistic", "gives no actionable steps"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "step|start|first|begin", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["how-to", "gardening"]
+  },
+  {
+    "prompt": "How do I write a clear, polite email to reschedule a meeting?",
+    "category": "how_to",
+    "subcategory": "writing_howto",
+    "expected_behavior": "Give a short structure (acknowledge, state the need to reschedule, propose new times, apologize briefly) and offer to draft one if they share details.",
+    "red_flags": ["produces an over-long template no one would send", "fabricates a specific statistic", "gives no usable structure"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["how-to", "writing"]
+  },
+  {
+    "prompt": "How to back up the photos on my phone so I don't lose them?",
+    "category": "how_to",
+    "subcategory": "tech_howto",
+    "expected_behavior": "Lay out the general approach (turn on cloud backup or copy to a computer/external drive, verify the copy worked, keep more than one copy) without assuming a specific phone or product.",
+    "red_flags": ["assumes a specific brand without asking", "fabricates a specific statistic", "gives no actionable path"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "step|first|start|back ?up|copy", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["how-to", "tech"]
+  },
+  {
+    "prompt": "How do I remove a red wine stain from a shirt?",
+    "category": "how_to",
+    "subcategory": "home_howto",
+    "expected_behavior": "Give a sensible ordered method (act quickly, blot don't rub, rinse with cold water, treat before washing) and note that fabric type can change the approach.",
+    "red_flags": ["recommends something that would set the stain", "fabricates a specific statistic", "gives no steps"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "step|first|start|blot|rinse|cold", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["how-to", "home"]
+  },
+  {
+    "prompt": "How do I break a big project into manageable steps?",
+    "category": "how_to",
+    "subcategory": "planning_howto",
+    "expected_behavior": "Explain the general technique: clarify the end goal, work backward into milestones, split each into small concrete tasks, and start with the smallest one; offer to apply it to their project.",
+    "red_flags": ["stays abstract with no method", "fabricates a specific statistic", "gives no actionable structure"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "step|goal|smallest|first|break", "flags": "i"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["how-to", "planning"]
+  }
+]

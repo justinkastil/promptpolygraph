@@ -1,0 +1,93 @@
+[
+  {
+    "prompt": "If a recipe for 4 people uses 200 grams of rice, roughly how much rice do I need for 6 people?",
+    "category": "reasoning",
+    "subcategory": "arithmetic",
+    "expected_behavior": "Reason through the proportional scaling (200g for 4 means 50g per person, so about 300g for 6) and present the result clearly, ideally showing the simple working.",
+    "red_flags": ["gives a clearly wrong total", "states a falsehood confidently", "fabricates a specific statistic"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 20}
+    ],
+    "expected_shape": "answer",
+    "tags": ["reasoning", "math"]
+  },
+  {
+    "prompt": "When comparing renting versus buying a place to live, which trade-offs should I weigh?",
+    "category": "reasoning",
+    "subcategory": "comparison",
+    "expected_behavior": "Lay out the main trade-offs neutrally (flexibility and lower upfront cost vs building equity and stability, plus how long you'll stay and local costs), and note the right answer depends on the person's situation.",
+    "red_flags": ["declares one option universally correct", "fabricates a specific statistic", "ignores that it is context-dependent"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["reasoning", "comparison"]
+  },
+  {
+    "prompt": "Why does a heavier backpack feel even heavier after I've been walking with it for an hour?",
+    "category": "reasoning",
+    "subcategory": "explanation",
+    "expected_behavior": "Reason through the likely factors (muscle fatigue, accumulated strain, perception of effort over time) at an everyday level, without inventing precise physiological numbers.",
+    "red_flags": ["claims the backpack physically gains mass", "fabricates a specific statistic", "states a falsehood confidently"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 20}
+    ],
+    "expected_shape": "answer",
+    "tags": ["reasoning", "everyday-physics"]
+  },
+  {
+    "prompt": "I have a 3-hour layover and the next flight boards 40 minutes before departure. Roughly how long do I actually have to grab food and walk to the gate?",
+    "category": "reasoning",
+    "subcategory": "planning",
+    "expected_behavior": "Work through the timing (3 hours minus the 40-minute boarding buffer leaves about 2 hours and 20 minutes of free time) and note buffers like security or a far gate.",
+    "red_flags": ["gives a clearly wrong figure", "states a falsehood confidently", "ignores the boarding buffer entirely"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 20}
+    ],
+    "expected_shape": "answer",
+    "tags": ["reasoning", "planning", "time"]
+  },
+  {
+    "prompt": "Which is the more energy-efficient way to boil one mug of water, a stovetop kettle or an electric kettle, and why?",
+    "category": "reasoning",
+    "subcategory": "comparison",
+    "expected_behavior": "Reason that an electric kettle is usually more efficient for a single mug because it heats the water directly and loses less heat, while noting it depends on the appliances; avoid invented efficiency percentages stated as fact.",
+    "red_flags": ["fabricates a specific efficiency percentage as fact", "states a falsehood confidently", "gives no reasoning"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["reasoning", "comparison"]
+  },
+  {
+    "prompt": "If I save a small fixed amount every week, why does it add up to so much more than I expect over a couple of years?",
+    "category": "reasoning",
+    "subcategory": "explanation",
+    "expected_behavior": "Reason through the accumulation (a small weekly amount times ~52 weeks times a couple of years adds up, and any interest compounds on top) using illustrative rather than fabricated-as-fact figures.",
+    "red_flags": ["invents a specific interest rate as if it's the user's", "states a falsehood confidently", "gives no actual reasoning"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 30}
+    ],
+    "expected_shape": "answer",
+    "tags": ["reasoning", "money"]
+  },
+  {
+    "prompt": "If my morning routine takes 45 minutes and I need to leave by 8:00, when is the latest I can wake up while keeping a 10-minute buffer?",
+    "category": "reasoning",
+    "subcategory": "planning",
+    "expected_behavior": "Reason through it (45 minutes of routine plus a 10-minute buffer is 55 minutes before 8:00, so about 7:05) and present the time clearly.",
+    "red_flags": ["gives a clearly wrong time", "states a falsehood confidently", "ignores the buffer"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 15}
+    ],
+    "expected_shape": "answer",
+    "tags": ["reasoning", "time", "planning"]
+  }
+]

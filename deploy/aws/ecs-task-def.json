@@ -1,0 +1,80 @@
+{
+  "_comment": "Sample ECS Fargate task definition running both roles (api + worker) from one image. Replace 123456789012, the region, image ref, and secret ARNs. For higher scale, split into two task definitions (one per container) and run the worker as its own Service with desiredCount > 1.",
+  "family": "promptpolygraph",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/promptpolygraph-exec",
+  "taskRoleArn": "arn:aws:iam::123456789012:role/promptpolygraph-task",
+  "volumes": [
+    {
+      "name": "out",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-0123456789abcdef0",
+        "transitEncryption": "ENABLED",
+        "rootDirectory": "/promptpolygraph-out"
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/promptpolygraph:latest",
+      "essential": true,
+      "command": ["polygraph-server"],
+      "portMappings": [{ "containerPort": 8080, "protocol": "tcp" }],
+      "environment": [
+        { "name": "POLYGRAPH_OUT_DIR", "value": "/data/out" },
+        { "name": "POLYGRAPH_CONFIG_DIR", "value": "/app/configs" },
+        { "name": "POLYGRAPH_INPROCESS_WORKER", "value": "false" },
+        { "name": "POLYGRAPH_DEFAULT_MOCK", "value": "false" }
+      ],
+      "secrets": [
+        { "name": "POLYGRAPH_DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:promptpolygraph/database-url" },
+        { "name": "POLYGRAPH_API_KEYS", "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:promptpolygraph/api-keys" },
+        { "name": "ANTHROPIC_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:promptpolygraph/anthropic-api-key" }
+      ],
+      "mountPoints": [{ "sourceVolume": "out", "containerPath": "/data/out" }],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 20
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/promptpolygraph",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    },
+    {
+      "name": "worker",
+      "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/promptpolygraph:latest",
+      "essential": true,
+      "command": ["polygraph-worker"],
+      "environment": [
+        { "name": "POLYGRAPH_OUT_DIR", "value": "/data/out" },
+        { "name": "POLYGRAPH_CONFIG_DIR", "value": "/app/configs" },
+        { "name": "POLYGRAPH_DEFAULT_MOCK", "value": "false" }
+      ],
+      "secrets": [
+        { "name": "POLYGRAPH_DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:promptpolygraph/database-url" },
+        { "name": "ANTHROPIC_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:promptpolygraph/anthropic-api-key" }
+      ],
+      "mountPoints": [{ "sourceVolume": "out", "containerPath": "/data/out" }],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/promptpolygraph",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "worker"
+        }
+      }
+    }
+  ]
+}

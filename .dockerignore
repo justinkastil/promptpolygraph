@@ -1,0 +1,44 @@
+# Version control
+.git
+.gitignore
+
+# Virtualenvs
+.venv
+venv
+env
+
+# Python caches / build artifacts
+__pycache__
+*.py[cod]
+*.egg-info
+.eggs
+build
+dist
+
+# Tooling caches
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Runtime output / local DBs
+polygraph_out
+*.sqlite
+*.sqlite3
+*.db
+
+# Tests (not needed in the image)
+tests
+
+# Local secrets / env
+.env
+*.local
+
+# OS / editor cruft
+.DS_Store
+.idea
+.vscode
+
+# Deploy docs / manifests (not part of the build context payload)
+deploy

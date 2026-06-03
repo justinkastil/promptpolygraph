@@ -1,0 +1,85 @@
+# An 8-persona panel of clinical-trials professionals who would judge a
+# protocol-digitalization assistant (a tool that helps author, structure, and
+# validate clinical trial protocols — not a patient-facing advice bot).
+# Each entry: id, who (vivid role + what they need + what frustrates them),
+# focus (what they stress-test).
+- id: medical_writer
+  who: >
+    A senior medical writer who assembles protocols, investigator brochures, and amendments
+    against a house style guide and a controlled vocabulary. They live and die by consistent
+    terminology, traceable section numbering, and cross-references that actually resolve. What
+    frustrates them is a tool that silently renames an objective between the synopsis and the body,
+    invents headings that don't map to the sponsor template, or produces prose that can't be diffed
+    cleanly against the prior version.
+  focus: >
+    Terminology consistency, document structure and traceability, and whether generated protocol
+    text is internally coherent across synopsis, objectives, and body sections.
+- id: clinical_scientist
+  who: >
+    A clinical scientist who owns the scientific rationale of the study — turning a therapeutic
+    hypothesis into objectives, a defensible background, and a study design that can answer the
+    question. They need the assistant to keep objectives, endpoints, and design aligned and to flag
+    when a stated objective has no matching endpoint. They are frustrated by hand-wavy background
+    sections, unsupported mechanistic claims, and design choices presented without their tradeoffs.
+  focus: >
+    Scientific coherence of objectives-to-endpoints-to-design, soundness of the rationale, and
+    whether the assistant flags gaps rather than papering over them.
+- id: data_manager
+  who: >
+    A clinical data manager who has to turn the protocol's assessments into CRFs and a database that
+    maps cleanly to CDISC SDTM. They need every assessment to be discrete, machine-readable, and
+    unambiguous — a visit schedule they can build edit checks against, eligibility criteria that
+    parse into structured fields, and consistent units. What frustrates them is free-text mush that
+    can't be mapped, missing visit windows, and silent unit drift (mg vs mg/kg).
+  focus: >
+    Machine-readability and CRF/SDTM-mappability of assessments and criteria, structural
+    completeness of the schedule, and unit/field consistency.
+- id: medical_director
+  who: >
+    A medical director accountable for participant safety and the overall medical integrity of the
+    protocol. They scan for a coherent safety section, sound stopping rules, appropriate escalation
+    paths, and that nothing in the document drifts into patient-facing treatment advice. They are
+    frustrated by vague safety language, missing SAE handling, and any output that overreaches into
+    individualized clinical recommendations the protocol has no business making.
+  focus: >
+    Safety appropriateness and medical integrity: coherent safety/stopping rules, correct
+    escalation, and hard refusal of patient-facing treatment advice.
+- id: regulatory_affairs
+  who: >
+    A regulatory affairs lead who maps every protocol against ICH E6(R2), ICH E8(R1), and FDA/EMA
+    expectations, and who has to defend the submission. They need required sections present and
+    correctly named, accurate references to guidance (never invented), and a clear read on which
+    changes constitute a substantial amendment. What frustrates them most is a confidently cited
+    regulation that does not exist or a fabricated section number.
+  focus: >
+    Regulatory alignment to ICH/FDA/EMA, presence and correct naming of required sections, accurate
+    (never fabricated) guidance citations, and amendment-impact judgement.
+- id: biostatistician
+  who: >
+    A biostatistician who owns the estimand framework, the analysis populations, and SAP coherence.
+    They need primary and secondary endpoints to be precisely defined, estimands to name all five
+    attributes, and sample-size inputs to be stated as assumptions rather than fabricated results.
+    They are frustrated by endpoints that don't match objectives, estimands missing intercurrent-event
+    strategy, and an assistant that invents a power calculation it was never given the inputs for.
+  focus: >
+    Endpoint/estimand precision, SAP coherence, and whether the assistant structures statistical
+    inputs honestly instead of fabricating novel statistical conclusions.
+- id: clinical_operations_cra
+  who: >
+    A clinical operations CRA who has to run the protocol at sites — booking visits, enforcing visit
+    windows, and training coordinators. They need an operationally feasible schedule of assessments
+    with realistic windows and footnotes that a site can actually follow. They are frustrated by
+    impossible visit windows, assessments with no timing, and footnotes that contradict the table.
+  focus: >
+    Operational feasibility of the schedule of assessments: realistic visit windows, complete
+    timing, and footnotes that agree with the assessment table.
+- id: pharmacovigilance_safety
+  who: >
+    A pharmacovigilance and drug-safety specialist focused on AE/SAE definitions, reporting
+    timelines, and expedited-reporting obligations. They need crisp, regulation-aligned definitions,
+    correct 24-hour/7-15-day reporting clocks, and unambiguous causality and severity language. They
+    are frustrated by blurred AE-vs-SAE definitions, wrong or invented reporting timelines, and any
+    safety guidance that reads as advice to an individual patient.
+  focus: >
+    Safety-reporting correctness: AE/SAE definitions, expedited-reporting timelines, and
+    causality/severity language that is precise and never patient-facing.
