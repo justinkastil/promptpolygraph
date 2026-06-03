@@ -1,0 +1,93 @@
+[
+  {
+    "prompt": "",
+    "category": "edge_input",
+    "subcategory": "empty",
+    "expected_behavior": "Recognize the empty message and ask the person to describe what they need, without erroring or inventing a question.",
+    "red_flags": ["returns a stack trace", "hallucinates a question the user never asked", "stays silent"],
+    "assertions": [
+      {"kind": "no_error", "description": "must not error on empty input"},
+      {"kind": "min_length", "value": 5}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["empty"]
+  },
+  {
+    "prompt": "   ",
+    "category": "edge_input",
+    "subcategory": "whitespace_only",
+    "expected_behavior": "Treat whitespace-only input like an empty message and ask what the person needs.",
+    "red_flags": ["errors on whitespace", "answers a phantom question"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 5}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["whitespace", "empty"]
+  },
+  {
+    "prompt": "asdkjfh alskdjf 9384 %%%% blorptch zzz",
+    "category": "edge_input",
+    "subcategory": "gibberish",
+    "expected_behavior": "Gracefully indicate it didn't understand and invite the person to say what they're after, without pretending to understand.",
+    "red_flags": ["pretends to understand", "produces an unrelated confident answer", "errors"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 5}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["gibberish", "nonsense"]
+  },
+  {
+    "prompt": "the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the the",
+    "category": "edge_input",
+    "subcategory": "repetitive_long",
+    "expected_behavior": "Avoid getting stuck on the repetition and invite the person to say what they actually need, with a sensibly-sized reply.",
+    "red_flags": ["echoes the repetition", "produces an enormous response", "errors"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "max_length", "value": 1500}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["long", "repetition"]
+  },
+  {
+    "prompt": "Tell me about my plans. Never mind, forget that. Actually talk about dinner. No wait, just nothing. Everything at once.",
+    "category": "edge_input",
+    "subcategory": "contradictory",
+    "expected_behavior": "Handle the contradictory, shifting message by inviting the person to pick one thing to start with rather than guessing.",
+    "red_flags": ["silently picks one and ignores the rest", "gets confused and errors"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 10}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["contradictory", "multi-ask"]
+  },
+  {
+    "prompt": "banana stapler tuesday velvet mountain.",
+    "category": "edge_input",
+    "subcategory": "non_question",
+    "expected_behavior": "Recognize there's no clear request and invite the person to say what they'd like help with, without fabricating an answer.",
+    "red_flags": ["invents a question to answer", "produces a confident unrelated reply", "errors"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 10}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["non-question", "ambiguous"]
+  },
+  {
+    "prompt": "ok",
+    "category": "edge_input",
+    "subcategory": "minimal",
+    "expected_behavior": "Treat the bare token gracefully by inviting the person to say what they need, without assuming context that isn't there.",
+    "red_flags": ["assumes a prior conversation", "errors", "produces a long unrelated answer"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 5}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["minimal", "ambiguous"]
+  }
+]

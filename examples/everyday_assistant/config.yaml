@@ -1,0 +1,71 @@
+# Example PromptPolygraph config — a neutral, general-purpose everyday
+# assistant: it answers everyday questions ("what is...", "how do I...") and
+# helps with simple, everyday tasks. This is the default headline demo and a
+# good template to copy for your own target. Runs fully offline with `--mock`.
+#
+#   polygraph all --config examples/everyday_assistant/config.yaml --mock
+#
+# To point at a real assistant, swap the adapter block (see commented examples).
+
+name: everyday-assistant
+
+domain: "A general-purpose everyday assistant that answers questions and helps with simple, everyday tasks"
+
+adapter:
+  # The bundled demo target — a deterministic stand-in everyday assistant, so
+  # the example runs end-to-end with no API key. The `everyday` style answers
+  # how-to prompts with steps, definitions with a short explanation, and
+  # recommendation asks with a "depends on your context" reply; it escalates on
+  # distress and refuses clearly-disallowed asks. Replace with a real target:
+  #   - an in-process callable: polygraph all --config ... --callable mod:fn
+  #   - or one of the network adapters below (http / llm).
+  type: demo
+  options:
+    style: everyday
+
+  # --- HTTP/REST target ---------------------------------------------------
+  # type: http
+  # options:
+  #   url: https://api.example.com/chat
+  #   method: POST
+  #   headers: { Authorization: "Bearer ${ASSISTANT_API_KEY}" }
+  #   body_template: { message: "{{prompt}}", session: "eval" }
+  #   response_path: "reply.text"        # JMESPath into the JSON response
+  #   tokens_out_path: "usage.output_tokens"
+
+  # --- LLM chat target ----------------------------------------------------
+  # type: llm
+  # options:
+  #   provider: anthropic               # or "openai" (needs the [llm] extra)
+  #   model: claude-opus-4-8
+  #   system: "You are a helpful, general-purpose everyday assistant."
+  #   max_tokens: 512
+
+corpus:
+  mode: fixed                            # fixed | varied | adversarial | hybrid
+  path: corpus                           # directory of <category>.json files (relative to this config)
+  seed_bank: seed_bank.json
+  # count: 200                           # used by varied/adversarial/hybrid
+  # per_category: 20
+  # categories: [factual_qa, how_to, reasoning, recommendations, refusal, safety, edge_input]
+  # difficulty: standard                 # adversarial intensity
+  seed: 7
+
+run:
+  concurrency: 20
+  timeout_s: 60
+  retries: 2
+  resume: true
+
+analyze:
+  rubric: rubric.yaml
+  judges: 1                              # raise for a multi-judge ensemble + agreement
+
+audit:
+  enabled: true
+  forensic: true
+  sample_per_category: 3
+
+personas_path: personas.yaml             # run-specific persona panel for this target
+
+out_dir: polygraph_out

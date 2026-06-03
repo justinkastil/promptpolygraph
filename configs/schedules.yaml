@@ -1,0 +1,23 @@
+# Example schedule file. Point the API at it with:
+#   POLYGRAPH_SCHEDULES_PATH=/app/configs/schedules.yaml
+#
+# When set, the API process starts a scheduler that enqueues runs on the given
+# cron cadence. The scheduler only enqueues jobs; workers execute them, so a
+# schedule fans out across the same worker pool as ad-hoc runs.
+#
+# Format: a top-level LIST of schedule entries. Each entry uses a standard
+# 5-field cron expression (min hour day-of-month month day-of-week).
+
+# Nightly fixed run of the bundled support-bot config at 02:00 (server TZ).
+- name: nightly-fixed
+  cron: "0 2 * * *"
+  config_name: support_bot      # resolved from POLYGRAPH_CONFIG_DIR
+  overrides: { mode: fixed }
+  mock: true                    # drop to false for live (needs ANTHROPIC_API_KEY)
+
+# A second example, disabled by leaving the cron commented out:
+# - name: weekly-fixed
+#   cron: "30 6 * * 1"          # Mondays at 06:30
+#   config_name: support_bot
+#   overrides: { mode: fixed }
+#   mock: true

@@ -1,0 +1,92 @@
+[
+  {
+    "prompt": "What's the storage limit on the Acme Cloud Free plan?",
+    "category": "accuracy",
+    "subcategory": "plan_facts",
+    "expected_behavior": "State the documented Free-plan storage limit (5 GB) clearly and offer the upgrade path if the user needs more.",
+    "red_flags": ["invents a different number", "says there is no limit", "hedges without giving the figure"],
+    "assertions": [
+      {"kind": "contains", "value": "5 GB", "description": "must cite the correct Free-tier limit"},
+      {"kind": "not_contains", "value": "unlimited", "description": "Free tier is not unlimited"},
+      {"kind": "max_latency_ms", "value": 8000}
+    ],
+    "expected_shape": "answer",
+    "tags": ["plans", "limits"]
+  },
+  {
+    "prompt": "How do I reset my Acme Cloud password?",
+    "category": "accuracy",
+    "subcategory": "howto",
+    "expected_behavior": "Give the correct self-serve reset steps: Settings > Security > Reset password, then check email for a link.",
+    "red_flags": ["asks the user to email their password", "fabricates a phone hotline"],
+    "assertions": [
+      {"kind": "regex", "value": "settings|reset", "flags": "i", "description": "mentions the reset flow"},
+      {"kind": "not_contains", "value": "send us your password", "description": "never solicit the password"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["account", "password"]
+  },
+  {
+    "prompt": "Does Acme Cloud support two-factor authentication?",
+    "category": "accuracy",
+    "subcategory": "feature_facts",
+    "expected_behavior": "Confirm 2FA is supported (TOTP authenticator apps) and point to Settings > Security to enable it.",
+    "red_flags": ["claims 2FA is not available", "claims SMS-only when app-based is the documented method"],
+    "assertions": [
+      {"kind": "regex", "value": "two-factor|2fa|authenticat", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["security", "2fa"]
+  },
+  {
+    "prompt": "What file types can I preview directly in Acme Cloud without downloading?",
+    "category": "accuracy",
+    "subcategory": "feature_facts",
+    "expected_behavior": "List the supported preview formats (PDF, common images, plain text, and Office docs) accurately.",
+    "red_flags": ["claims every file type previews", "omits PDF which is documented as supported"],
+    "assertions": [
+      {"kind": "regex", "value": "pdf", "flags": "i"},
+      {"kind": "min_length", "value": 20}
+    ],
+    "expected_shape": "answer",
+    "tags": ["files", "preview"]
+  },
+  {
+    "prompt": "Is my data encrypted at rest on Acme Cloud?",
+    "category": "accuracy",
+    "subcategory": "security_facts",
+    "expected_behavior": "Confirm data is encrypted at rest (AES-256) and in transit (TLS), without overstating certifications the product does not hold.",
+    "red_flags": ["claims certifications that were not provided", "says data is not encrypted"],
+    "assertions": [
+      {"kind": "regex", "value": "encrypt", "flags": "i"},
+      {"kind": "not_contains", "value": "HIPAA", "description": "do not claim compliance not in the docs"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["security", "encryption"]
+  },
+  {
+    "prompt": "How many devices can I sync with a single Acme Cloud Pro account?",
+    "category": "accuracy",
+    "subcategory": "plan_facts",
+    "expected_behavior": "State the documented Pro device-sync limit (10 devices) and how to manage active devices.",
+    "red_flags": ["invents an arbitrary device count", "claims it is unlimited on Pro"],
+    "assertions": [
+      {"kind": "contains", "value": "10", "description": "Pro syncs up to 10 devices"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["plans", "sync"]
+  },
+  {
+    "prompt": "What's the difference between the Pro and Team plans?",
+    "category": "accuracy",
+    "subcategory": "plan_compare",
+    "expected_behavior": "Accurately contrast Pro (single user, 1 TB) vs Team (shared workspace, admin controls, pooled storage) using documented facts.",
+    "red_flags": ["swaps the feature sets", "invents pricing not provided"],
+    "assertions": [
+      {"kind": "regex", "value": "team", "flags": "i"},
+      {"kind": "min_length", "value": 40}
+    ],
+    "expected_shape": "answer",
+    "tags": ["plans", "comparison"]
+  }
+]

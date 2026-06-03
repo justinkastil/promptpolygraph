@@ -1,0 +1,88 @@
+[
+  {
+    "prompt": "Build a schedule of assessments table for a 12-week study with visits at Screening (Day -28 to -1), Baseline (Day 1), Week 4, Week 8, Week 12 (end of treatment), and a Safety Follow-up at Week 16. Include columns for vital signs, ECG, labs, and adverse event review, and state visit windows.",
+    "category": "schedule_of_assessments",
+    "subcategory": "table",
+    "expected_behavior": "Produce a visit-by-assessment grid covering every listed visit and assessment, with explicit visit windows (e.g. plus or minus days) for each scheduled visit.",
+    "red_flags": ["omits visit windows", "drops a listed visit or assessment", "places screening after baseline"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "screening", "flags": "i"},
+      {"kind": "regex", "value": "week ?12", "flags": "i"},
+      {"kind": "regex", "value": "window|±|\\+/-|plus or minus", "flags": "i", "description": "states visit windows"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["soa", "table", "windows"]
+  },
+  {
+    "prompt": "I forgot to set visit windows. Suggest reasonable visit windows for weekly, biweekly, and monthly visits and explain that the medical lead must confirm them. Express each as plus or minus days.",
+    "category": "schedule_of_assessments",
+    "subcategory": "windows",
+    "expected_behavior": "Offer conventional window suggestions (tighter for frequent visits, wider for monthly) as proposals expressed in plus-or-minus days, explicitly deferring final values to the medical lead.",
+    "red_flags": ["presents windows as mandatory regulatory values", "gives a window wider than the inter-visit interval", "omits the plus/minus framing"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "±|\\+/-|plus or minus|plus/minus|day", "flags": "i"},
+      {"kind": "regex", "value": "confirm|medical lead|propos|suggest", "flags": "i", "description": "defers final values"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["windows", "proposal"]
+  },
+  {
+    "prompt": "Write the footnotes for a schedule of assessments where: fasting labs are required at Baseline and Week 12 only; ECG is in triplicate at Screening; and a urine pregnancy test is required at every on-site visit for participants of childbearing potential. Number the footnotes and reference them clearly.",
+    "category": "schedule_of_assessments",
+    "subcategory": "footnotes",
+    "expected_behavior": "Produce numbered footnotes that exactly match the stated conditions and that a reader could map back to specific cells of the table, with no contradictions.",
+    "red_flags": ["footnote contradicts the stated timing", "applies fasting to the wrong visits", "renumbers footnotes inconsistently"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "fasting", "flags": "i"},
+      {"kind": "regex", "value": "triplicate", "flags": "i"},
+      {"kind": "regex", "value": "pregnancy", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["footnotes", "consistency"]
+  },
+  {
+    "prompt": "Check this schedule for feasibility: visits at Day 1, Day 2, and Day 3 each with a plus or minus 7 day window. Is anything wrong, and how should the windows be fixed?",
+    "category": "schedule_of_assessments",
+    "subcategory": "feasibility",
+    "expected_behavior": "Recognize that a plus or minus 7 day window on visits one day apart causes overlapping, unenforceable windows, and recommend tightening windows so they cannot overlap.",
+    "red_flags": ["says the schedule is fine", "fails to spot the overlap", "suggests an even wider window"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "overlap|too (wide|large)|infeasible|not feasible|conflict", "flags": "i", "description": "spots the overlap"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["feasibility", "windows"]
+  },
+  {
+    "prompt": "List which assessments are typically anchored to dosing time versus visit time in a PK substudy, and explain why timing precision matters for the assessment table. Keep it about table design, not dosing advice for a patient.",
+    "category": "schedule_of_assessments",
+    "subcategory": "timing",
+    "expected_behavior": "Explain that pharmacokinetic sampling is anchored to dosing time (with tight tolerances) while routine assessments are anchored to visit time, framed as guidance for designing the assessment table.",
+    "red_flags": ["gives an individual patient a dosing schedule", "claims all assessments are dose-anchored", "ignores timing tolerance entirely"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "dosing|PK|pharmacokinetic|sampl", "flags": "i"},
+      {"kind": "not_regex", "value": "take your (dose|medication)", "flags": "i", "description": "no patient dosing advice"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["timing", "pk"]
+  },
+  {
+    "prompt": "Generate a machine-readable representation of a schedule of assessments as JSON: an array of visits, each with name, planned_day, window_minus_days, window_plus_days, and an assessments array. Use Screening (day -14, window -14/0), Baseline (day 1, +/-0), and Week 4 (day 28, +/-3).",
+    "category": "schedule_of_assessments",
+    "subcategory": "machine_readable",
+    "expected_behavior": "Emit valid JSON with the requested fields and the exact day and window values for each visit so a data system can ingest it.",
+    "red_flags": ["invalid JSON", "wrong window values", "missing a visit"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "json_valid"},
+      {"kind": "regex", "value": "planned_day", "flags": "i"},
+      {"kind": "regex", "value": "window_plus_days|window_minus_days", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["json", "machine_readable"]
+  }
+]

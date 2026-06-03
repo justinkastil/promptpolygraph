@@ -1,0 +1,76 @@
+# Sample Cloud Run (Knative) service manifest for the API role.
+#
+#   gcloud run services replace deploy/gcp/cloudrun-api.yaml --region us-central1
+#
+# Replace PROJECT_ID, the image ref, the Cloud SQL instance connection name,
+# and the secret references. Cloud Run's filesystem is ephemeral: html/md and
+# the summary are re-rendered from the DB, so they survive instance churn;
+# docx/pdf written to OUT_DIR are per-instance only (push to GCS for durability
+# — future work).
+#
+# Two patterns:
+#   - Simple: this single service with POLYGRAPH_INPROCESS_WORKER=true.
+#   - Scaled: keep this api with INPROCESS_WORKER=false and deploy a second
+#     Cloud Run *service* for the worker with min-instances>=1 (Cloud Run Jobs
+#     are batch, not a long-lived claim loop).
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: promptpolygraph-api
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/cloudsql-instances: PROJECT_ID:us-central1:promptpolygraph-pg
+    spec:
+      containerConcurrency: 40
+      containers:
+        - image: us-central1-docker.pkg.dev/PROJECT_ID/promptpolygraph/promptpolygraph:latest
+          command: ["polygraph-server"]
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POLYGRAPH_OUT_DIR
+              value: "/data/out"
+            - name: POLYGRAPH_CONFIG_DIR
+              value: "/app/configs"
+            # Simple single-service setup runs the worker in-process. Set to
+            # "false" and deploy a separate worker service for scale.
+            - name: POLYGRAPH_INPROCESS_WORKER
+              value: "true"
+            - name: POLYGRAPH_DEFAULT_MOCK
+              value: "false"
+            # Cloud SQL Postgres over the unix socket provided by the connector.
+            - name: POLYGRAPH_DATABASE_URL
+              value: "postgresql+psycopg://polygraph:PASSWORD@/polygraph?host=/cloudsql/PROJECT_ID:us-central1:promptpolygraph-pg"
+            - name: POLYGRAPH_API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: promptpolygraph-api-keys
+                  key: latest
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: promptpolygraph-anthropic-api-key
+                  key: latest
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 30

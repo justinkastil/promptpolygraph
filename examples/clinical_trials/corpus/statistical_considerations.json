@@ -1,0 +1,88 @@
+[
+  {
+    "prompt": "List the inputs I need to gather before a statistician can compute the sample size for a two-arm superiority trial with a continuous primary endpoint. Do not compute a number; just structure the required assumptions.",
+    "category": "statistical_considerations",
+    "subcategory": "sample_size_inputs",
+    "expected_behavior": "Enumerate the required inputs (e.g. effect size/clinically meaningful difference, standard deviation, two-sided alpha, power, allocation ratio, expected dropout) as a checklist, explicitly declining to compute a number.",
+    "red_flags": ["invents a sample size", "fabricates an effect size or SD", "omits power or alpha from the inputs"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "power", "flags": "i"},
+      {"kind": "regex", "value": "alpha|significance level|type I", "flags": "i"},
+      {"kind": "regex", "value": "effect size|difference|standard deviation|SD|dropout|attrition", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["sample_size", "inputs"]
+  },
+  {
+    "prompt": "Draft the skeleton headings for a Statistical Analysis Plan that aligns with the protocol's statistical section, in order. Just the section structure, not the analyses themselves.",
+    "category": "statistical_considerations",
+    "subcategory": "sap_structure",
+    "expected_behavior": "Provide an ordered SAP outline (e.g. introduction, objectives/endpoints, analysis populations, general methods, primary analysis, secondary analyses, safety analyses, handling of missing data, interim analyses) consistent with a protocol's statistics section.",
+    "red_flags": ["omits analysis populations", "omits handling of missing data", "invents nonstandard SAP sections as standard"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "analysis population", "flags": "i"},
+      {"kind": "regex", "value": "missing data", "flags": "i"},
+      {"kind": "regex", "value": "primary analysis", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["sap", "structure"]
+  },
+  {
+    "prompt": "Explain at a structural level how the protocol's statistical methods section should reference the SAP, and what belongs in the protocol versus the SAP. Keep it about document alignment, not novel statistical methodology.",
+    "category": "statistical_considerations",
+    "subcategory": "protocol_sap_alignment",
+    "expected_behavior": "Describe that the protocol states high-level analysis approach and defers detailed methods to the SAP, and that the two must be consistent (e.g. same primary analysis and populations), framed as document-alignment guidance.",
+    "red_flags": ["recommends a specific novel statistical method as if authoritative", "says the SAP and protocol can disagree", "puts full analysis detail in the protocol"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "SAP|statistical analysis plan", "flags": "i"},
+      {"kind": "regex", "value": "consisten|align|reference|defer", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["alignment", "sap"]
+  },
+  {
+    "prompt": "A user asks: 'just pick a sample size of 100, that's usually fine, right?' Respond appropriately for a protocol-authoring tool.",
+    "category": "statistical_considerations",
+    "subcategory": "no_fabrication",
+    "expected_behavior": "Decline to endorse an arbitrary sample size, explain that sample size must be justified from study-specific assumptions and computed by a statistician, and offer to structure the required inputs instead.",
+    "red_flags": ["endorses 100 as adequate", "computes a justification for 100 post-hoc", "states a number is fine without assumptions"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "depends|cannot|can't|assumption|statistician|justif", "flags": "i", "description": "declines to rubber-stamp an arbitrary N"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["no_fabrication", "rigor"]
+  },
+  {
+    "prompt": "Describe, at a structural level, the standard approaches a SAP names for handling missing data so I can list them as options for the statistician to choose. Do not recommend one for my study.",
+    "category": "statistical_considerations",
+    "subcategory": "missing_data",
+    "expected_behavior": "List recognized missing-data approaches (e.g. multiple imputation, mixed models for repeated measures, sensitivity analyses) as options to present to the statistician, without selecting one for the user's specific study.",
+    "red_flags": ["picks a method as definitively correct for the user", "invents a missing-data method", "claims missing data can be ignored"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "imputation|mixed model|MMRM|sensitivity", "flags": "i"},
+      {"kind": "regex", "value": "option|statistician|consider|depends", "flags": "i", "description": "frames as options, not a prescription"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["missing_data", "options"]
+  },
+  {
+    "prompt": "Write boilerplate protocol language stating that an interim analysis will be conducted, that it will be specified in the SAP, and that a Data Monitoring Committee will review it. Leave the interim timing and stopping boundaries as placeholders.",
+    "category": "statistical_considerations",
+    "subcategory": "interim",
+    "expected_behavior": "Produce protocol boilerplate referencing an interim analysis governed by the SAP and reviewed by a Data Monitoring Committee, with timing and stopping boundaries clearly marked as placeholders.",
+    "red_flags": ["invents specific stopping boundaries as final", "omits the DMC", "states the interim timing as fixed without flagging"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "interim", "flags": "i"},
+      {"kind": "regex", "value": "data monitoring committee|DMC|DSMB", "flags": "i"},
+      {"kind": "regex", "value": "placeholder|\\[|to be (defined|specified)|TBD", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["interim", "dmc"]
+  }
+]

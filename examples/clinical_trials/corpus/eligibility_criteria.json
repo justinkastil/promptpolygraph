@@ -1,0 +1,101 @@
+[
+  {
+    "prompt": "Structure the following into numbered inclusion and exclusion criteria for adults with type 2 diabetes: must be 18 to 75, HbA1c between 7.0 and 10.0 percent, on stable metformin for at least 3 months; exclude pregnancy, eGFR under 30, and prior use of the study drug class.",
+    "category": "eligibility_criteria",
+    "subcategory": "structuring",
+    "expected_behavior": "Produce clearly numbered inclusion and exclusion lists that capture every stated criterion with explicit thresholds and units, suitable for downstream CRF mapping.",
+    "red_flags": ["merges inclusion and exclusion", "drops a stated threshold", "changes a numeric cutoff or its units"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "inclusion", "flags": "i"},
+      {"kind": "regex", "value": "exclusion", "flags": "i"},
+      {"kind": "regex", "value": "7\\.0|10\\.0|eGFR|HbA1c", "flags": "i", "description": "retains key thresholds"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["inclusion", "exclusion", "structure"]
+  },
+  {
+    "prompt": "This inclusion criterion is ambiguous: 'patients with adequate organ function'. Flag what's ambiguous and rewrite it so it is machine-readable with specific lab thresholds left as placeholders for the medical lead to confirm.",
+    "category": "eligibility_criteria",
+    "subcategory": "ambiguity",
+    "expected_behavior": "Identify that 'adequate organ function' is undefined, list the parameters that need explicit thresholds (e.g. liver, renal, hematologic), and provide a structured rewrite with clearly-marked placeholders rather than inventing cutoffs.",
+    "red_flags": ["invents specific lab thresholds as if authoritative", "leaves the criterion unchanged", "claims a single universal definition exists"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "ambiguous|undefined|not specified|unclear", "flags": "i", "description": "names the ambiguity"},
+      {"kind": "regex", "value": "placeholder|\\[|to be confirmed|TBC|specify", "flags": "i", "description": "uses placeholders not invented cutoffs"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["ambiguity", "machine_readable"]
+  },
+  {
+    "prompt": "Turn these inclusion criteria into a structured JSON array where each item has fields: id, type ('inclusion'), text, and a 'machine_readable' object with parameter, operator, value, unit when applicable. Criteria: age 18 or older; body mass index between 18.5 and 35 kg/m2.",
+    "category": "eligibility_criteria",
+    "subcategory": "machine_readable",
+    "expected_behavior": "Return valid JSON that encodes each criterion with parameter/operator/value/unit so a data system can parse it, preserving the stated numbers and units.",
+    "red_flags": ["emits invalid JSON", "loses the unit kg/m2", "collapses the BMI range into a single bound"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "json_valid", "description": "must be parseable JSON"},
+      {"kind": "regex", "value": "kg/m2|kg/m\\^?2", "flags": "i", "description": "preserves BMI units"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["json", "machine_readable"]
+  },
+  {
+    "prompt": "Check these two criteria for contradiction and tell me how to resolve it: Inclusion says 'age 18 to 65'; a separate exclusion says 'age over 60'. Which participants are actually eligible?",
+    "category": "eligibility_criteria",
+    "subcategory": "contradiction",
+    "expected_behavior": "Detect the overlap, explain that the exclusion narrows the effective eligible range to 18 to 60, and recommend reconciling the wording so the intended upper bound is explicit.",
+    "red_flags": ["misses the contradiction", "states the wrong effective range", "picks a bound arbitrarily without flagging the conflict"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "contradict|conflict|inconsisten|overlap", "flags": "i", "description": "identifies the conflict"},
+      {"kind": "regex", "value": "18.{0,6}60|60", "flags": "i", "description": "reasons about the 60 bound"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["contradiction", "reconciliation"]
+  },
+  {
+    "prompt": "Standardize the units in this criterion set so a data manager can build edit checks: 'serum creatinine below 1.5 mg/dL', 'creatinine clearance over 60 mL/min', and 'weight at least 50 kilograms'. Keep clinical meaning unchanged.",
+    "category": "eligibility_criteria",
+    "subcategory": "units",
+    "expected_behavior": "Present the criteria with consistent, explicit units and parameter names without altering the clinical thresholds, noting any unit it standardized.",
+    "red_flags": ["silently changes a numeric threshold", "drops a unit", "converts a value incorrectly"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "mg/dL", "flags": "i"},
+      {"kind": "regex", "value": "mL/min", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["units", "consistency"]
+  },
+  {
+    "prompt": "Draft a standard contraception and pregnancy-related eligibility criterion block appropriate for a trial of a drug with potential reproductive risk, written for the protocol document (not as advice to any individual).",
+    "category": "eligibility_criteria",
+    "subcategory": "special_populations",
+    "expected_behavior": "Provide protocol-level criteria covering pregnancy testing, contraception requirements for participants of childbearing potential, and exclusion of pregnant or breastfeeding participants, framed as protocol text rather than individual advice.",
+    "red_flags": ["gives an individual contraceptive recommendation", "omits pregnancy testing", "uses patient-directed advice phrasing"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "pregnan|contracept", "flags": "i"},
+      {"kind": "not_regex", "value": "you should (use|take|start)", "flags": "i", "description": "protocol text, not individual advice"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["special_populations", "reproductive"]
+  },
+  {
+    "prompt": "I have an exclusion criterion 'no significant cardiac history'. Make it auditable: list the specific conditions and time windows it should enumerate, and rewrite it as a discrete list a reviewer can verify per participant.",
+    "category": "eligibility_criteria",
+    "subcategory": "auditability",
+    "expected_behavior": "Break the vague exclusion into a discrete, enumerable list (e.g. specific events within a defined lookback window) and present it so each item is independently verifiable, marking any clinical specifics as placeholders for the medical lead.",
+    "red_flags": ["keeps the criterion as one vague phrase", "asserts specific time windows as definitive without flagging", "produces an unauditable narrative"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 120},
+      {"kind": "regex", "value": "within|months|years|prior|history of", "flags": "i", "description": "introduces time windows / enumerated items"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["auditability", "machine_readable"]
+  }
+]

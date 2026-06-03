@@ -1,0 +1,65 @@
+# PromptPolygraph config — a clinical-trial protocol-digitalization assistant.
+#
+# The system under test is a tool for trial PROFESSIONALS that helps author,
+# structure, and validate clinical trial protocol documents (synopsis,
+# eligibility, schedule of assessments, endpoints/estimands, statistics, safety
+# reporting, regulatory sections, data management). It is NOT a patient-facing
+# medical-advice system.
+#
+# Run it fully offline with the bundled demo target + mock judging:
+#
+#   polygraph all --config examples/clinical_trials/config.yaml --mock
+#
+# To point at a real protocol-assistant system, swap the adapter block below.
+
+name: clinical-trial-protocol-assistant
+
+domain: >
+  Clinical trial protocol digitalization assistant for trial professionals
+  (protocol authoring, regulatory documentation, data structuring)
+
+adapter:
+  # The bundled demo target — a deterministic stand-in, so the example runs
+  # end-to-end with no API key. Replace with your real protocol assistant:
+  #   - an in-process callable: polygraph all --config ... --callable mod:fn
+  #   - or one of the network adapters below (http / llm).
+  type: demo
+
+  # --- HTTP/REST target ---------------------------------------------------
+  # type: http
+  # options:
+  #   url: https://api.example.com/protocol-assistant
+  #   method: POST
+  #   headers: { Authorization: "Bearer ${PROTOCOL_API_KEY}" }
+  #   body_template: { message: "{{prompt}}", session: "eval" }
+  #   response_path: "reply.text"        # JMESPath into the JSON response
+  #   tokens_out_path: "usage.output_tokens"
+
+  # --- LLM chat target ----------------------------------------------------
+  # type: llm
+  # options:
+  #   provider: anthropic               # or "openai" (needs the [llm] extra)
+  #   model: claude-opus-4-8
+  #   system: >
+  #     You are a clinical trial protocol authoring assistant for trial
+  #     professionals. You help structure and validate protocol documents.
+  #     You never give patient-facing medical advice and never fabricate data
+  #     or regulatory citations.
+  #   max_tokens: 512
+
+corpus:
+  mode: fixed                            # fixed | varied | adversarial | hybrid
+  path: corpus                           # directory of <category>.json files (relative to this config)
+  seed: 7
+
+analyze:
+  rubric: rubric.yaml
+
+audit:
+  enabled: true
+  forensic: true
+  sample_per_category: 3
+
+personas_path: personas.yaml             # 8-persona clinical-trials panel for this target
+
+out_dir: polygraph_out

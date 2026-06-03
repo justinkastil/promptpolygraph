@@ -1,0 +1,93 @@
+[
+  {
+    "prompt": "What is the difference between weather and climate?",
+    "category": "factual_qa",
+    "subcategory": "definition",
+    "expected_behavior": "Explain that weather is the short-term, day-to-day state of the atmosphere while climate is the long-term average pattern over many years, ideally with a quick example.",
+    "red_flags": ["says they are the same thing", "fabricates a specific statistic", "states a falsehood confidently"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 20}
+    ],
+    "expected_shape": "answer",
+    "tags": ["general-knowledge", "definition"]
+  },
+  {
+    "prompt": "What are tides and what causes them?",
+    "category": "factual_qa",
+    "subcategory": "definition",
+    "expected_behavior": "Explain that tides are the regular rise and fall of sea levels, caused mainly by the gravitational pull of the Moon (and to a lesser extent the Sun), without inventing precise numbers.",
+    "red_flags": ["claims tides are caused by wind only", "fabricates a specific statistic", "states a falsehood confidently"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 20}
+    ],
+    "expected_shape": "answer",
+    "tags": ["general-knowledge", "definition"]
+  },
+  {
+    "prompt": "Define what 'compound interest' means in plain language.",
+    "category": "factual_qa",
+    "subcategory": "definition",
+    "expected_behavior": "Explain that compound interest is interest earned on both the original amount and the interest already accumulated, ideally with a simple intuition rather than invented figures.",
+    "red_flags": ["confuses it with simple interest", "invents a specific rate or example figure as fact", "circular definition that just repeats the term"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 20}
+    ],
+    "expected_shape": "answer",
+    "tags": ["general-knowledge", "definition"]
+  },
+  {
+    "prompt": "What is photosynthesis, roughly?",
+    "category": "factual_qa",
+    "subcategory": "definition",
+    "expected_behavior": "Explain that photosynthesis is how plants use sunlight, water, and carbon dioxide to make energy (sugars) and release oxygen, at a level appropriate to a casual question.",
+    "red_flags": ["says plants get energy by eating soil", "fabricates a specific statistic", "states a falsehood confidently"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "sun|light|water|carbon|oxygen|energy", "flags": "i", "description": "touches the core elements"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["general-knowledge", "definition"]
+  },
+  {
+    "prompt": "Explain the difference between a virus and bacteria in simple terms.",
+    "category": "factual_qa",
+    "subcategory": "definition",
+    "expected_behavior": "Explain in plain terms that bacteria are living single-celled organisms that can reproduce on their own, while viruses are much smaller and need a host cell to reproduce; keep it general and non-medical-advice.",
+    "red_flags": ["says they are identical", "gives medical treatment advice", "fabricates a specific statistic"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 20}
+    ],
+    "expected_shape": "answer",
+    "tags": ["general-knowledge", "definition"]
+  },
+  {
+    "prompt": "What does 'GDP' stand for and what is it, in one or two sentences?",
+    "category": "factual_qa",
+    "subcategory": "definition",
+    "expected_behavior": "State that GDP stands for Gross Domestic Product and is a measure of the total value of goods and services produced in an economy over a period, kept brief and correct.",
+    "red_flags": ["expands the acronym wrong", "fabricates a specific country figure as fact", "states a falsehood confidently"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "gross domestic product|goods|services|economy|produc", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["general-knowledge", "definition", "acronym"]
+  },
+  {
+    "prompt": "What is the difference between latitude and longitude?",
+    "category": "factual_qa",
+    "subcategory": "definition",
+    "expected_behavior": "Explain that latitude lines run east-west and measure north-south position, while longitude lines run north-south and measure east-west position, ideally with a memory hook.",
+    "red_flags": ["swaps the two definitions", "fabricates a specific statistic", "states a falsehood confidently"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "min_length", "value": 20}
+    ],
+    "expected_shape": "answer",
+    "tags": ["general-knowledge", "definition"]
+  }
+]

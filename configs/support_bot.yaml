@@ -1,0 +1,58 @@
+# Named config for in-container runs: `config_name: support_bot`.
+#
+# This is a copy of examples/support_bot/config.yaml with the corpus / rubric /
+# personas paths made ABSOLUTE to /app/examples/support_bot/... so the run
+# resolves correctly regardless of the working directory inside the container
+# (the image WORKDIR is /app).
+#
+# Runs fully offline with mock mode (POLYGRAPH_DEFAULT_MOCK=true).
+
+name: acme-support-bot
+
+adapter:
+  # Deterministic bundled demo target — no API key required.
+  type: demo
+
+  # --- HTTP/REST target ---------------------------------------------------
+  # type: http
+  # options:
+  #   url: https://api.example.com/chat
+  #   method: POST
+  #   headers: { Authorization: "Bearer ${ACME_API_KEY}" }
+  #   body_template: { message: "{{prompt}}", session: "eval" }
+  #   response_path: "reply.text"
+  #   tokens_out_path: "usage.output_tokens"
+
+  # --- LLM chat target ----------------------------------------------------
+  # type: llm
+  # options:
+  #   provider: anthropic
+  #   model: claude-opus-4-8
+  #   system: "You are the Acme Cloud customer-support assistant."
+  #   max_tokens: 512
+
+corpus:
+  mode: fixed                            # fixed | varied | adversarial | hybrid
+  path: /app/examples/support_bot/corpus
+  seed_bank: /app/examples/support_bot/seed_bank.json
+  seed: 7
+
+run:
+  concurrency: 20
+  timeout_s: 60
+  retries: 2
+  resume: true
+
+analyze:
+  rubric: /app/examples/support_bot/rubric.yaml
+  judges: 1
+
+audit:
+  enabled: true
+  persona_pool: 5
+  forensic: true
+  sample_per_category: 3
+
+personas_path: /app/examples/support_bot/personas.yaml
+
+out_dir: /data/out

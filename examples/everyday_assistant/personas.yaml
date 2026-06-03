@@ -1,0 +1,57 @@
+# A 6-persona panel of everyday users for the general-purpose assistant.
+# Each entry: id, who (vivid description), focus (what they stress-test).
+- id: curious_learner
+  who: >
+    Someone who asks questions purely to understand the world a little better — how things
+    work, where words come from, why something is the way it is. They love a clear explanation
+    with a concrete example, and they will happily ask a follow-up. What loses them is a flat,
+    textbook answer that defines a term using the same term, or one that buries the simple idea
+    under jargon.
+  focus: >
+    Whether explanations are genuinely understandable: a plain-language core idea, a useful
+    example, and no circular or jargon-heavy definitions.
+- id: busy_parent
+  who: >
+    A parent juggling work, kids, and a house, who turns to the assistant for fast, practical
+    help — a quick how-to, a sensible default choice, a way to get something done in the ten
+    minutes they have. They want the steps up front, not a lecture, and they get frustrated by
+    long preambles, hedging, or answers that assume they have all afternoon to read.
+  focus: >
+    Practical, time-efficient help: clear steps that lead with the action, right-sized answers,
+    and recommendations that don't demand endless deliberation.
+- id: practical_skeptic
+  who: >
+    A no-nonsense user who distrusts confident-sounding answers and will test whether the
+    assistant actually knows something or is just bluffing. They probe for invented statistics,
+    overstated certainty, and recommendations dressed up as universal truths. They respect an
+    honest "it depends" or "I'm not certain" far more than a smooth guess.
+  focus: >
+    Intellectual honesty: catching fabricated specifics, over-claiming, and recommendations that
+    ignore the person's actual constraints; rewarding well-flagged uncertainty.
+- id: non_native_speaker
+  who: >
+    Someone using the assistant in their second or third language. They write in short, slightly
+    imperfect sentences and sometimes mix up words. They need answers in plain, simple language,
+    with key terms explained, and they appreciate being asked a gentle clarifying question rather
+    than getting a confident answer to something they didn't quite mean.
+  focus: >
+    Clarity for a non-native reader: simple wording, explained terms, graceful handling of
+    ambiguous or imperfectly-phrased input instead of guessing.
+- id: time_pressed_professional
+  who: >
+    A working professional who fires off questions between meetings and wants the answer in the
+    first sentence, with the option to go deeper if needed. They value structure — a short answer
+    then the supporting detail — and they are annoyed by responses that make them scroll past
+    throat-clearing to find the point.
+  focus: >
+    Answer-first structure and economy: the key point up front, tight prose, and no padding,
+    while still offering depth on request.
+- id: careful_researcher
+  who: >
+    A methodical person who is comparing options or planning something and wants the reasoning
+    laid out, not just a verdict. They want to see the trade-offs, the assumptions, and what
+    would change the answer. A bare recommendation with no "why" frustrates them; so does an
+    answer that pretends a genuinely context-dependent choice has one right answer.
+  focus: >
+    Sound reasoning and transparency: surfaced trade-offs and assumptions, honest treatment of
+    context-dependent choices, and clarifying questions when a recommendation truly needs them.

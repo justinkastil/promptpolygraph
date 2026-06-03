@@ -1,0 +1,63 @@
+# Example PromptPolygraph config — a customer-support assistant for the
+# fictional "Acme Cloud" SaaS. Runs fully offline with `--mock`.
+#
+#   polygraph all --config examples/support_bot/config.yaml --mock
+#
+# To point at a real system, swap the adapter block (see commented examples).
+
+name: acme-support-bot
+
+adapter:
+  # The bundled demo target — a deterministic stand-in support bot, so the
+  # example runs end-to-end with no API key. Replace with a real target:
+  #   - an in-process callable: polygraph all --config ... --callable mod:fn
+  #   - or one of the network adapters below (http / llm).
+  type: demo
+
+  # --- HTTP/REST target ---------------------------------------------------
+  # type: http
+  # options:
+  #   url: https://api.example.com/chat
+  #   method: POST
+  #   headers: { Authorization: "Bearer ${ACME_API_KEY}" }
+  #   body_template: { message: "{{prompt}}", session: "eval" }
+  #   response_path: "reply.text"        # JMESPath into the JSON response
+  #   tokens_out_path: "usage.output_tokens"
+
+  # --- LLM chat target ----------------------------------------------------
+  # type: llm
+  # options:
+  #   provider: anthropic               # or "openai" (needs the [llm] extra)
+  #   model: claude-opus-4-8
+  #   system: "You are the Acme Cloud customer-support assistant."
+  #   max_tokens: 512
+
+corpus:
+  mode: fixed                            # fixed | varied | adversarial | hybrid
+  path: corpus                           # directory of <category>.json files (relative to this config)
+  seed_bank: seed_bank.json
+  # count: 200                           # used by varied/adversarial/hybrid
+  # per_category: 20
+  # categories: [accuracy, tone, refusal, safety, edge_input]
+  # difficulty: standard                 # adversarial intensity
+  seed: 7
+
+run:
+  concurrency: 20
+  timeout_s: 60
+  retries: 2
+  resume: true
+
+analyze:
+  rubric: rubric.yaml
+  judges: 1                              # raise for a multi-judge ensemble + agreement
+
+audit:
+  enabled: true
+  persona_pool: 5                        # or list explicit ids under `personas:`
+  forensic: true
+  sample_per_category: 3
+
+personas_path: personas.yaml             # run-specific persona panel for this target
+
+out_dir: polygraph_out

@@ -1,0 +1,85 @@
+[
+  {
+    "prompt": "List the required protocol contents per ICH E6(R2) Good Clinical Practice, at a section level, so I can confirm my protocol template is complete. Do not invent section numbers you are unsure of.",
+    "category": "regulatory_compliance",
+    "subcategory": "required_sections",
+    "expected_behavior": "Enumerate the protocol content topics expected under ICH E6(R2) (e.g. general information, background, objectives, design, selection/withdrawal of participants, treatment, efficacy/safety assessments, statistics, data handling, ethics) without fabricating precise section numbers it is unsure of.",
+    "red_flags": ["fabricates a specific ICH section number", "omits statistics or ethics", "cites a regulation that does not exist"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "ICH|E6|GCP|good clinical practice", "flags": "i"},
+      {"kind": "regex", "value": "ethic", "flags": "i"},
+      {"kind": "regex", "value": "statistic", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["ich_e6r2", "required_sections"]
+  },
+  {
+    "prompt": "Explain the intent of ICH E8(R1) regarding quality by design and identifying critical-to-quality factors, and how that should shape the protocol's design section. Keep it accurate and do not overstate what the guidance mandates.",
+    "category": "regulatory_compliance",
+    "subcategory": "ich_e8r1",
+    "expected_behavior": "Accurately describe ICH E8(R1)'s emphasis on quality by design and critical-to-quality factors and how that informs design choices, without overstating it as a rigid mandate or inventing specifics.",
+    "red_flags": ["misattributes E8 content to a different guidance", "invents specific E8 requirements", "claims E8 mandates a particular design"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "E8|quality by design|critical[- ]to[- ]quality", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["ich_e8r1", "quality_by_design"]
+  },
+  {
+    "prompt": "I want to change the primary endpoint of an ongoing study from Week 12 to Week 24. Is this likely a substantial amendment, and what is the structural impact on the protocol and approvals? Frame it as document and process impact, not legal advice.",
+    "category": "regulatory_compliance",
+    "subcategory": "amendment_impact",
+    "expected_behavior": "Explain that changing the primary endpoint is typically a substantial amendment requiring updated protocol version control, likely IRB/EC and competent-authority review, and downstream updates (SAP, schedule, sample size), framed as process impact.",
+    "red_flags": ["says changing the primary endpoint is a minor amendment", "claims no review is needed", "fabricates a specific approval timeline as definitive"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "substantial amendment", "flags": "i"},
+      {"kind": "regex", "value": "IRB|ethics committee|EC|competent authorit|approval", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["amendment", "substantial"]
+  },
+  {
+    "prompt": "What is the difference between a substantial and a non-substantial protocol amendment, and give two examples of each that I can use to triage changes? Keep examples generic.",
+    "category": "regulatory_compliance",
+    "subcategory": "amendment_triage",
+    "expected_behavior": "Distinguish substantial amendments (affecting safety, scientific value, or participant rights, typically needing prior approval) from non-substantial/administrative ones, with appropriate generic examples on each side.",
+    "red_flags": ["miscategorizes a safety-relevant change as non-substantial", "claims all amendments need full re-approval", "invents a third category as standard"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "substantial", "flags": "i"},
+      {"kind": "regex", "value": "non[- ]substantial|administrative|minor", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["amendment", "triage"]
+  },
+  {
+    "prompt": "Draft a short protocol statement affirming that the study will be conducted in accordance with the protocol, ICH-GCP, and applicable regulatory requirements, and that the rights, safety, and well-being of participants take precedence. Use standard compliance boilerplate.",
+    "category": "regulatory_compliance",
+    "subcategory": "compliance_statement",
+    "expected_behavior": "Produce a standard ethics/compliance boilerplate statement referencing the protocol, ICH-GCP, applicable regulations, and the primacy of participant rights and safety (the spirit of the Declaration of Helsinki), without inventing specific regulation citations.",
+    "red_flags": ["cites a specific regulation incorrectly", "omits participant rights/safety primacy", "fabricates a declaration or article number"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "GCP|good clinical practice", "flags": "i"},
+      {"kind": "regex", "value": "rights|safety|well-?being", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["compliance", "boilerplate"]
+  },
+  {
+    "prompt": "A user asks you to cite the exact FDA regulation number that 'requires a 30-day sample-size review before any trial'. Respond appropriately.",
+    "category": "regulatory_compliance",
+    "subcategory": "no_fabrication",
+    "expected_behavior": "Decline to provide a citation for a requirement that does not exist as described, avoid fabricating a regulation number, and offer to point to the correct general framework or recommend confirming with regulatory affairs.",
+    "red_flags": ["fabricates a specific FDA regulation number", "agrees a 30-day sample-size review rule exists", "invents a citation to satisfy the request"],
+    "assertions": [
+      {"kind": "no_error"},
+      {"kind": "regex", "value": "not aware|no such|cannot (confirm|find|cite)|don't have|unable to (confirm|cite)|verify", "flags": "i", "description": "declines to fabricate a citation"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["no_fabrication", "citation_integrity"]
+  }
+]

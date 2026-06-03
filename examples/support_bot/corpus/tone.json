@@ -1,0 +1,76 @@
+[
+  {
+    "prompt": "I've been on hold forever and your app just deleted my files. This is unacceptable.",
+    "category": "tone",
+    "subcategory": "frustrated_user",
+    "expected_behavior": "Lead with genuine empathy, acknowledge the frustration, and immediately move to recovering the files (Trash > Restore, 30-day window) without sounding defensive.",
+    "red_flags": ["blames the user", "robotic non-apology", "ignores the emotional content"],
+    "assertions": [
+      {"kind": "regex", "value": "sorry|apolog|understand", "flags": "i", "description": "acknowledges the frustration"},
+      {"kind": "regex", "value": "trash|restore|recover", "flags": "i", "description": "moves toward a fix"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["empathy", "recovery"]
+  },
+  {
+    "prompt": "hey can u help me real quick lol",
+    "category": "tone",
+    "subcategory": "casual_user",
+    "expected_behavior": "Match a friendly, approachable register while staying professional, and ask what they need help with.",
+    "red_flags": ["overly stiff corporate tone", "mirrors slang to the point of unprofessionalism"],
+    "assertions": [
+      {"kind": "min_length", "value": 10}
+    ],
+    "expected_shape": "clarifying_question",
+    "tags": ["register", "friendly"]
+  },
+  {
+    "prompt": "Thanks so much, that fixed it! You're a lifesaver.",
+    "category": "tone",
+    "subcategory": "positive_user",
+    "expected_behavior": "Warmly accept the thanks, keep it brief, and invite them back if they need anything else.",
+    "red_flags": ["ignores the gratitude", "launches into an unrelated upsell"],
+    "assertions": [
+      {"kind": "max_length", "value": 400}
+    ],
+    "expected_shape": "answer",
+    "tags": ["closing", "warmth"]
+  },
+  {
+    "prompt": "Why is your software so terrible? Nothing ever works.",
+    "category": "tone",
+    "subcategory": "venting_user",
+    "expected_behavior": "Stay calm and non-defensive, validate the frustration, and pivot to identifying the specific problem to solve.",
+    "red_flags": ["argues with the user", "sarcasm", "lectures the user"],
+    "assertions": [
+      {"kind": "regex", "value": "sorry|understand|help", "flags": "i"},
+      {"kind": "not_regex", "value": "actually,? you", "flags": "i", "description": "no defensive 'actually you...'"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["de-escalation"]
+  },
+  {
+    "prompt": "Could you explain how billing cycles work? I'm a bit confused.",
+    "category": "tone",
+    "subcategory": "polite_user",
+    "expected_behavior": "Respond patiently and clearly, structure the explanation simply, and check whether the answer resolved the confusion.",
+    "red_flags": ["condescending tone", "overwhelms with jargon"],
+    "assertions": [
+      {"kind": "regex", "value": "billing|cycle", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["clarity", "patience"]
+  },
+  {
+    "prompt": "I'm really stressed, I have a deadline and can't access my project files.",
+    "category": "tone",
+    "subcategory": "urgent_user",
+    "expected_behavior": "Acknowledge the time pressure, prioritize the fastest path to access, and stay reassuring.",
+    "red_flags": ["minimizes the urgency", "buries the fix under preamble"],
+    "assertions": [
+      {"kind": "regex", "value": "access|sign in|restore|sync", "flags": "i"}
+    ],
+    "expected_shape": "answer",
+    "tags": ["urgency", "reassurance"]
+  }
+]

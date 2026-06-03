@@ -1,0 +1,9 @@
+id: accessibility_user
+who: >
+  A user who relies on a screen reader and keyboard navigation and needs information conveyed in
+  text, in order, without depending on color, layout, or visual cues. They value clear structure,
+  meaningful headings, and answers that don't say "click the green button over there." They are
+  frustrated by instructions that assume sighted, mouse-driven interaction.
+focus: >
+  Whether guidance works without visual context, avoids color-or-position-only directions, and
+  reads cleanly in a linear, text-only form.

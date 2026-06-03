@@ -1,0 +1,79 @@
+# PromptPolygraph — one image, two roles (api + worker) sharing a Postgres DB
+# and a report-artifact volume.
+#
+#   docker compose up --build
+#   docker compose up --scale worker=4     # run more workers (stateless)
+#
+# Reports: html/md/summary are re-rendered from the DB by the API; docx/pdf
+# are read from OUT_DIR, so the api and worker mount the same `out` volume.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: polygraph
+      POSTGRES_PASSWORD: polygraph
+      POSTGRES_DB: polygraph
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polygraph -d polygraph"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: promptpolygraph:latest
+    command: ["polygraph-server"]
+    environment:
+      POLYGRAPH_DATABASE_URL: postgresql+psycopg://polygraph:polygraph@postgres:5432/polygraph
+      POLYGRAPH_API_KEYS: ${POLYGRAPH_API_KEYS:-change-me-dev-key}
+      POLYGRAPH_OUT_DIR: /data/out
+      POLYGRAPH_CONFIG_DIR: /app/configs
+      # API does not also work jobs — dedicated workers handle that.
+      POLYGRAPH_INPROCESS_WORKER: "false"
+      POLYGRAPH_SCHEDULES_PATH: ${POLYGRAPH_SCHEDULES_PATH:-}
+      POLYGRAPH_WEBHOOK_URL: ${POLYGRAPH_WEBHOOK_URL:-}
+      POLYGRAPH_DEFAULT_MOCK: ${POLYGRAPH_DEFAULT_MOCK:-true}
+      # Required only for real (non-mock) runs.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - out:/data/out
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    build: .
+    image: promptpolygraph:latest
+    command: ["polygraph-worker"]
+    environment:
+      POLYGRAPH_DATABASE_URL: postgresql+psycopg://polygraph:polygraph@postgres:5432/polygraph
+      POLYGRAPH_OUT_DIR: /data/out
+      POLYGRAPH_CONFIG_DIR: /app/configs
+      POLYGRAPH_DEFAULT_MOCK: ${POLYGRAPH_DEFAULT_MOCK:-true}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - out:/data/out
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    # Scale horizontally — workers are stateless and claim jobs via the DB
+    # (Postgres SKIP LOCKED keeps concurrent claims safe):
+    #   docker compose up --scale worker=4
+
+volumes:
+  pgdata:
+  out:
