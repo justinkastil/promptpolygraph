@@ -8,6 +8,7 @@ Subcommands:
   report    render markdown / docx / pdf / html
   compare   A/B two runs (pairwise win/loss/tie)
   personas  list the library / create one / generate a panel
+  redteam   authorized adversarial red-team of the target -> vuln report
   all       run -> analyze -> audit -> report, end to end
 
 Everything is driven by a YAML config (see examples/support_bot/config.yaml)
@@ -541,6 +542,145 @@ def cmd_tune(cfg: Config, args) -> None:
     print(f"\nrun it:  polygraph all --config {result['config']} --mock --format md,html")
 
 
+# ─── redteam ──────────────────────────────────────────────────────────────
+
+_ANSI = {
+    "green": "\033[32m", "red": "\033[31m", "yellow": "\033[33m",
+    "dim": "\033[2m", "bold": "\033[1m", "reset": "\033[0m",
+}
+
+
+def _color(text: str, name: str) -> str:
+    if not sys.stdout.isatty():
+        return text
+    return f"{_ANSI.get(name, '')}{text}{_ANSI['reset']}"
+
+
+def _trunc(text: str | None, n: int = 90) -> str:
+    t = " ".join((text or "").split())
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
+_SEV_COLOR = {"critical": "red", "high": "red", "medium": "yellow", "low": "yellow", "none": "green"}
+
+
+def _redteam_printer():
+    """A sync emit callback that prints a live console feed of the run."""
+    names: dict[str, str] = {}
+
+    def emit(ev) -> None:
+        t = ev.type
+        if t == "profile":
+            d = ev.data or {}
+            print(_color(f"red team '{d.get('name')}' vs {d.get('target')} "
+                         f"({len(d.get('attackers') or [])} agents, turns={d.get('turns')})", "bold"))
+        elif t == "agent_spawned":
+            d = ev.data or {}
+            label = f"{ev.strategy}@{d.get('provider')}/{d.get('model')}"
+            names[ev.attacker_id or ""] = ev.strategy or ""
+            print(_color(f"  + agent {ev.attacker_id} {label} [{d.get('intensity')}]", "dim"))
+        elif t == "attack":
+            print(f"  → [{ev.attacker_id} {ev.strategy} t{ev.turn}] {_trunc(ev.text)}")
+        elif t == "verdict":
+            v = ev.verdict or {}
+            if v.get("breached"):
+                sev = v.get("severity", "?")
+                msg = _color(f"    ✗ BREACH {sev} ({v.get('vuln_class')})", _SEV_COLOR.get(sev, "red"))
+            else:
+                msg = _color("    ✓ defended", "green")
+            print(msg)
+        elif t == "summary":
+            d = ev.data or {}
+            print(_color(f"\nsummary: {d.get('breaches')}/{d.get('attacks')} breached, "
+                         f"{d.get('defended')} defended", "bold"))
+
+    return emit
+
+
+def cmd_redteam(cfg: Config, args) -> int:
+    from .redteam import get_profile, run_redteam
+    from .redteam.report import render_html, render_json, render_md
+    from .redteam.models import severity_rank
+
+    prof = get_profile(args.profile or cfg.redteam.profile)
+    if getattr(args, "turns", None) is not None:
+        prof.turns = args.turns
+    elif cfg.redteam.turns is not None:
+        prof.turns = cfg.redteam.turns
+    prof.target_description = cfg.redteam.target_description or cfg.domain
+    if getattr(args, "guard", False):
+        prof.judge_kind = "llama_guard"
+
+    sources = (
+        [s.strip() for s in args.sources.split(",") if s.strip()]
+        if getattr(args, "sources", None) is not None
+        else list(cfg.redteam.sources)
+    )
+
+    try:
+        adapter = build_adapter(cfg.adapter)
+    except Exception:
+        # zero-config demo: fall back to the offline demo target (mirrors the Arena)
+        from .adapters import DemoAdapter
+        adapter = DemoAdapter(name="demo", style="everyday")
+    print(_color(f"redteam: profile={prof.name} target={adapter.name} "
+                 f"mock={_is_mock(cfg)}" + (f" sources={','.join(sources)}" if sources else ""), "dim"))
+
+    report = asyncio.run(
+        run_redteam(
+            adapter, prof, emit=_redteam_printer(),
+            mock=_is_mock(cfg), concurrency=cfg.redteam.concurrency,
+            extra_sources=sources, source_count=cfg.redteam.source_count,
+        )
+    )
+
+    rd = _run_dir(cfg, report.run_id)
+    formats = [f.strip() for f in (args.format or "md").split(",") if f.strip()]
+    written: list[Path] = []
+    if "md" in formats:
+        p = rd / "redteam.md"
+        p.write_text(render_md(report))
+        written.append(p)
+    if "html" in formats:
+        p = rd / "redteam.html"
+        p.write_text(render_html(report))
+        written.append(p)
+    if "json" in formats:
+        p = rd / "redteam.json"
+        _save_json(p, render_json(report))
+        written.append(p)
+    # always keep a machine-readable copy
+    if "json" not in formats:
+        _save_json(rd / "redteam.json", render_json(report))
+
+    st = report.stats or {}
+    print(_color(f"\nverdict: {st.get('breaches', 0)}/{st.get('attacks', 0)} attacks breached "
+                 f"({st.get('defended', 0)} defended)", "bold"))
+    if report.vulnerabilities:
+        print("top vulnerabilities:")
+        for v in report.vulnerabilities[:5]:
+            print(f"  {_color(v.severity.upper(), _SEV_COLOR.get(v.severity, 'red'))} "
+                  f"{v.vuln_class} ×{v.count} — {_trunc(v.mitigation, 80)}")
+    else:
+        print(_color("no vulnerabilities — target defended every probe", "green"))
+    for p in written:
+        print(f"  report: {p}")
+
+    worst = max((severity_rank(v.severity) for v in report.vulnerabilities), default=0)
+    return 1 if worst >= severity_rank("high") else 0
+
+
+def cmd_redteam_profiles(cfg: Config, args) -> None:
+    from .redteam import get_profile, list_profiles
+
+    for name in list_profiles():
+        prof = get_profile(name)
+        backends = sorted({f"{a.provider}/{a.model}" for a in prof.attackers})
+        print(f"{name:<14} {len(prof.attackers)} agents, turns={prof.turns}  "
+              f"[{', '.join(backends)}]")
+        print(f"  {_color(prof.description, 'dim')}")
+
+
 def cmd_all(cfg: Config, args) -> int:
     meta = cmd_run(cfg, args)
     summary = cmd_analyze(cfg, meta.run_id)
@@ -685,6 +825,18 @@ def build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--personas", type=int, default=8, help="persona panel size")
     pt.add_argument("--adapter", default="demo", choices=["demo", "http", "llm", "callable"])
 
+    prt = sub.add_parser("redteam", parents=[common],
+                         help="authorized adversarial red-team of the target -> vuln report")
+    rtsub = prt.add_subparsers(dest="redteam_cmd")
+    rtsub.add_parser("profiles", parents=[common], help="list built-in red-team profiles")
+    prt.add_argument("--profile", help="built-in profile name (default: cfg.redteam.profile)")
+    prt.add_argument("--turns", type=int, help="override escalation depth per attacker")
+    prt.add_argument("--sources", help="comma-separated OSS probe sources to fold in "
+                                       "(e.g. catalog,garak,pyrit,dataset:advbench)")
+    prt.add_argument("--guard", action="store_true",
+                     help="judge breaches with a Llama-Guard-style safety classifier instead of the LLM reviewer")
+    prt.add_argument("--format", default="md,html", help="md,html,json")
+
     pall = sub.add_parser("all", parents=[common], help="run -> analyze -> audit -> report")
     _add_corpus_dials(pall)
     pall.add_argument("--callable", help="module:function in-process adapter")
@@ -724,6 +876,11 @@ def main(argv: list[str] | None = None) -> int:
         cmd_elicit(cfg, args)
     elif args.cmd == "tune":
         cmd_tune(cfg, args)
+    elif args.cmd == "redteam":
+        if getattr(args, "redteam_cmd", None) == "profiles":
+            cmd_redteam_profiles(cfg, args)
+            return 0
+        return cmd_redteam(cfg, args)
     elif args.cmd == "all":
         return cmd_all(cfg, args)
     return 0

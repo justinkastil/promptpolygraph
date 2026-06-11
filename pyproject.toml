@@ -33,6 +33,16 @@ service = [
     "pydantic-settings>=2.2",
     "psycopg[binary]>=3.1",
 ]
+# OSS-grounded attack sources. All optional: the built-in `catalog` source and
+# the LLM attackers work with none of these installed; each source registers
+# only when its dependency imports. Datasets are fetched on demand, not bundled.
+redteam = [
+    "garak>=0.9",            # NVIDIA garak probe suite (Apache-2.0)
+    "pyrit>=0.5",            # Microsoft PyRIT — Crescendo/TAP multi-turn (MIT)
+    "deepteam>=0.1",         # Confident AI DeepTeam — OWASP taxonomy (Apache-2.0)
+    "datasets>=2.19",        # HuggingFace datasets loader for AdvBench/HarmBench/JBB
+    "huggingface-hub>=0.23",
+]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]

@@ -1,0 +1,141 @@
+# ─── PromptPolygraph local model roster ──────────────────────────────────────
+#
+# This manifest is YOURS to edit. It declares the open-weight models your team
+# uses to power the red-team arena: the *attackers* that generate adversarial
+# probes and the *judge* that scores whether the system-under-test breached.
+#
+# Everything here is for AUTHORIZED red-teaming of a system you own. The models
+# are the mutation engine; the attack corpora come from separate OSS tools/datasets.
+#
+# PROVENANCE: every entry is labeled with its publisher (`org`) and jurisdiction
+# (`provenance`) so you can vet models against your own compliance posture — no
+# model is "good" or "bad" here, the labels just make the choice explicit. The
+# active defaults happen to be from Meta / Google / NVIDIA / Microsoft (US) and
+# Mistral AI (EU); other publishers (e.g. Alibaba's Qwen, DeepSeek) are listed
+# commented-out — enable whatever fits your requirements.
+#
+# Each entry: name, role (attacker|judge), backend (ollama|hf|mlx),
+#   ollama_tag (for ollama) / hf_repo (for hf|mlx), params, min_ram_gb,
+#   org, provenance, license, notes.
+#
+# Pull:   sh scripts/redteam_pull_ollama.sh   |   python scripts/redteam_pull_hf.py [--dry-run]
+# Use:    from promptpolygraph.redteam.roster import load_roster, to_profile
+#         profile = to_profile(load_roster())     # a runnable local_swarm profile
+#
+# Memory rule of thumb (unified RAM on Apple Silicon, or GPU VRAM):
+#   8 GB -> 7-8B   24 GB -> ~30B   40 GB -> ~70B (quantized)
+#   128 GB unified (e.g. NVIDIA DGX Spark, M-Ultra Mac Studio) -> 70B + a swarm.
+
+models:
+  # ── attackers: small, fast, trusted-provenance open instruct models ────────
+  - name: gemma3-4b
+    role: attacker
+    backend: ollama
+    ollama_tag: "gemma3:4b"
+    params: "4B"
+    min_ram_gb: 8
+    org: Google
+    provenance: US
+    license: Gemma
+    notes: "Gemma 3 4B. Fast, broad coverage. Use gemma3:12b for stronger probes."
+
+  - name: llama31-8b
+    role: attacker
+    backend: ollama
+    ollama_tag: "llama3.1:8b"
+    params: "8B"
+    min_ram_gb: 8
+    org: Meta
+    provenance: US
+    license: "Llama 3.1 Community"
+    notes: "English-first default attacker."
+
+  - name: mistral-nemo-12b
+    role: attacker
+    backend: ollama
+    ollama_tag: "mistral-nemo:12b"
+    params: "12B"
+    min_ram_gb: 16
+    org: Mistral AI
+    provenance: EU
+    license: Apache-2.0
+    notes: "EU-provenance; strong ~12B quality for creative phrasings."
+
+  - name: phi4-14b
+    role: attacker
+    backend: ollama
+    ollama_tag: "phi4:14b"
+    params: "14B"
+    min_ram_gb: 16
+    org: Microsoft
+    provenance: US
+    license: MIT
+    notes: "Reasoning-leaning; good for multi-turn escalation."
+
+  # NVIDIA Nemotron — pairs naturally with a DGX Spark (NVIDIA stack, Ollama
+  # preinstalled). Verify the exact tag via `ollama list` / ollama.com. Uncomment
+  # to add as an attacker:
+  # - name: nemotron-3-nano
+  #   role: attacker
+  #   backend: ollama
+  #   ollama_tag: "nemotron-3-nano:latest"
+  #   params: "~9B"
+  #   min_ram_gb: 12
+  #   org: NVIDIA
+  #   provenance: US
+  #   license: "NVIDIA Open Model"
+  #   notes: "Reasoning-trace model; excellent on DGX Spark."
+
+  # ── judge: a larger model scores breaches; spend memory here ───────────────
+  - name: llama33-70b
+    role: judge
+    backend: ollama
+    ollama_tag: "llama3.3:70b"
+    params: "70B"
+    min_ram_gb: 48
+    org: Meta
+    provenance: US
+    license: "Llama 3.3 Community"
+    notes: >-
+      Breach judge (Llama 3.3 70B, quantized). On a 128GB DGX Spark / M-Ultra it
+      runs alongside the swarm.
+
+  # Alternative judge — NVIDIA Nemotron 3 Super (agentic/reasoning; great on
+  # DGX Spark). Set llama33-70b to role: attacker (or remove) and uncomment:
+  # - name: nemotron-3-super
+  #   role: judge
+  #   backend: ollama
+  #   ollama_tag: "nemotron-3-super:latest"
+  #   params: "large"
+  #   min_ram_gb: 64
+  #   org: NVIDIA
+  #   provenance: US
+  #   license: "NVIDIA Open Model"
+  #   notes: "Strong reasoning judge on the NVIDIA stack."
+  # Mid-rig judge: gemma3:27b (Google, US, ~24GB).
+
+  # ── OPT-IN: additional publishers (labeled by provenance — your call) ──────
+  # Capable models; enable whatever fits your threat model / compliance.
+  # - name: qwen25-7b
+  #   role: attacker
+  #   backend: ollama
+  #   ollama_tag: "qwen2.5:7b"
+  #   params: "7B"
+  #   min_ram_gb: 8
+  #   org: Alibaba
+  #   provenance: China
+  #   license: "Qwen"
+  #   notes: "Strong multilingual; OPT-IN — review provenance for your use."
+
+  # ── HuggingFace / MLX examples (backend: hf | mlx) ─────────────────────────
+  # Fetched by scripts/redteam_pull_hf.py; check each repo's license.
+  # - name: llama31-8b-mlx
+  #   role: attacker
+  #   backend: mlx
+  #   hf_repo: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+  #   params: "8B"
+  #   min_ram_gb: 8
+  #   org: Meta
+  #   provenance: US
+  #   license: "Llama 3.1 Community"
+  #   notes: "4-bit MLX build for fast on-device inference on Mac Studio."

@@ -6,6 +6,46 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-11
+
+### Added
+- **Red-team engine + live Arena** — a new `polygraph redteam` command and a
+  realtime multi-agent Arena (attacker agents on the rails, the target in the
+  centre, green/red breach accretion, drill-down to the mitigation). Streams
+  over **SSE** in the local dashboard and **WebSocket** in the service. Runs
+  fully offline in mock mode (deterministic probes + verdicts + simulated
+  thinking stream) so the Arena demos with zero tokens.
+- **Preconfigured attacker teams (profiles)** — `all_frontier` (the
+  out-of-the-box default; every strategy on a frontier model, each agent a
+  distinct persona + temperature), `multi_frontier` (mixed frontier vendors),
+  `mixed` (local open models + frontier), `local_swarm` (100% offline),
+  `pressure`, `quick`, and **`deep`** (adaptive smart multi-turn).
+- **Technique catalog** — attackers seed + mutate from a catalog of known,
+  standards-mapped techniques (OWASP Top-10 for LLM Apps + MITRE ATLAS) rather
+  than improvising from a blank slate.
+- **OSS-grounded attack sources** — pluggable probe sources that flow through
+  the same target → breach-judge loop and into the report + Arena, attributed
+  to their source: a built-in `catalog` source (no deps), plus optional
+  `garak`, `pyrit`, and `deepteam` integrations and on-demand dataset loaders
+  (`dataset:advbench`, `dataset:harmbench`, `dataset:jailbreakbench`). Install
+  with the `[redteam]` extra; each source registers only when its dependency
+  imports. Select with `--sources` or `redteam.sources` in config.
+- **Smart multi-turn strategies** — PAIR (iterative refinement against the
+  target's refusal), Crescendo (gradual escalation), and TAP (tree-of-attacks
+  candidates) replace naive escalation when an attacker's `mode` is set.
+- **Converter layer** — probe transforms (base64, rot13, leetspeak, reverse,
+  unicode-confusable, payload-split, roleplay-wrap, whitespace-pad) and
+  **many-shot** prefixing, selectable per attacker via `converter`.
+- **Llama-Guard breach judge** — `--guard` scores breaches with a
+  Llama-Guard-style safety classifier (MLCommons S1–S14 hazard taxonomy) on a
+  local model, as an alternative to the LLM-reviewer judge.
+- **ASR + OWASP coverage in the report** — attack-success-rate headline, an
+  OWASP LLM Top-10 coverage table (tested vs breached), and per-vulnerability
+  OWASP + MITRE ATLAS tags, across the Markdown, HTML, and JSON renderers.
+- **Provenance-labelled local model roster** + Ollama/HuggingFace pull scripts
+  and hardware guidance (Mac Studio / NVIDIA DGX Spark / cloud / Docker) for
+  running attacker/judge models locally.
+
 ## [0.4.1] - 2026-06-11
 
 ### Added
