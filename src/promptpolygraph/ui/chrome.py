@@ -141,18 +141,18 @@ THEME_CSS: str = r"""
   /* Present on both surfaces; populated on load from the readiness endpoint so
      the user sees at a glance whether the harness will run live or mock-only. */
   header.top .status-pill {
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border);
-    background: var(--panel-2); color: var(--muted); font-size: 12px; font-weight: 600;
-    cursor: default; line-height: 1.3; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--muted); font-size: 12.5px; font-weight: 600;
+    cursor: default; line-height: 1.4; white-space: nowrap;
   }
   header.top .status-pill .sdot {
     width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2, #6a7280); flex: 0 0 auto;
   }
-  header.top .status-pill.live { border-color: rgba(70,192,138,.45); color: var(--pass); background: rgba(70,192,138,.08); }
-  header.top .status-pill.live .sdot { background: var(--pass); box-shadow: 0 0 0 3px rgba(70,192,138,.16); }
-  header.top .status-pill.mock { border-color: rgba(230,180,80,.45); color: var(--warn); background: rgba(230,180,80,.08); }
-  header.top .status-pill.mock .sdot { background: var(--warn); box-shadow: 0 0 0 3px rgba(230,180,80,.16); }
+  header.top .status-pill.live { border-color: rgba(70,192,138,.5); color: var(--pass); background: rgba(70,192,138,.12); }
+  header.top .status-pill.live .sdot { background: var(--pass); }
+  header.top .status-pill.mock { border-color: rgba(230,180,80,.5); color: var(--warn); background: rgba(230,180,80,.12); }
+  header.top .status-pill.mock .sdot { background: var(--warn); }
 
   /* ── shared tooltip system ───────────────────────────────────────────── */
   /* A small "?" (or any element) carrying class .tip + a title=. The CSS bubble
@@ -384,7 +384,7 @@ def header_html(active: str, *, links: bool) -> str:
     # "Mock-only (offline)" otherwise. The title= lists each provider + reason
     # as an accessible fallback; the same text fills the CSS tooltip bubble.
     status_pill = (
-        '<span class="status-pill tip tip-left tip-below" id="status-pill" tabindex="0" role="status" '
+        '<span class="status-pill" id="status-pill" tabindex="0" role="status" '
         'aria-live="polite" data-tip="Checking which model backends are wired…" '
         'title="Checking which model backends are wired…">'
         '<span class="sdot" aria-hidden="true"></span>'
@@ -403,7 +403,6 @@ def header_html(active: str, *, links: bool) -> str:
         '<h1>PromptPolygraph</h1>'
         '<span class="sub">control plane</span>'
         + nav
-        + '<span class="spacer"></span>'
         + '<span class="top-right">'
         + crumb
         + designer_btn
@@ -606,7 +605,7 @@ function initStatusPill(readyUrl) {
     var live = (h.status === "live");
     pill.classList.remove("live", "mock");
     pill.classList.add(live ? "live" : "mock");
-    txt.textContent = live ? "Live" : "Mock";  // short label; full detail in the tooltip
+    txt.textContent = live ? "Live" : "Mock-only";  // concise; full detail in the tooltip
     var provs = h.providers || [];
     var lines = [];
     if (live) lines.push("Live — at least one model backend is wired.");
