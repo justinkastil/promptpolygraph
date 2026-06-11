@@ -8,6 +8,8 @@ the win/loss/tie record up overall and per category.
 
 from __future__ import annotations
 
+from .matrix import comparability, compare_runs
 from .pairwise import pairwise
+from .trend import trend
 
-__all__ = ["pairwise"]
+__all__ = ["pairwise", "comparability", "compare_runs", "trend"]

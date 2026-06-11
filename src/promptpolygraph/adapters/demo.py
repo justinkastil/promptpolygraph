@@ -40,12 +40,17 @@ class DemoAdapter(BaseAdapter):
     async def query(self, case: Case) -> Response:
         text = self._answer(case.prompt or "", self.style)
         latency = 60 + (len(case.prompt) % 40) * 3  # deterministic variation
+        tokens_in = max(1, len(case.prompt) // 4)
+        tokens_out = max(1, len(text) // 4)
+        # Tiny deterministic cost so the demo exercises the cost path/scorers.
+        cost = round((tokens_in + tokens_out) * 1e-6, 9)
         return Response(
             case_id=case.id,
             text=text,
             latency_ms=latency,
-            tokens_in=max(1, len(case.prompt) // 4),
-            tokens_out=max(1, len(text) // 4),
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost,
             model=f"demo-{self.style}-assistant",
             source=self.name,
         )

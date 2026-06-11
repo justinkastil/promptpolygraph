@@ -54,10 +54,29 @@ code { font-family: var(--mono); background: #ececed; padding: .05rem .3rem; bor
 .note { color: var(--muted); font-style: italic; }
 .persona { border: 1px solid var(--border); border-radius: 8px; padding: .25rem 1rem 1rem; margin: .75rem 0; background: var(--panel); }
 .narrative { background: var(--panel); border-radius: 8px; padding: .75rem 1rem; }
+.chart-card { border: 1px solid var(--border); border-radius: 10px; padding: .85rem 1rem .65rem; margin: .9rem 0; background: #fff; }
+.chart-card > .chart-title { font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 0 0 .5rem; }
+.chart-card svg { max-width: 100%; height: auto; display: block; }
+.chart-grid { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+.chart-grid > .chart-card { flex: 1 1 320px; margin: 0; }
+.diff-block { background: #1c1c1e; border-radius: 6px; padding: .6rem .75rem; margin: .4rem 0 .25rem; overflow-x: auto; font-family: var(--mono); font-size: .82rem; line-height: 1.45; }
+.diff-block .d-add { color: #7ee787; display: block; }
+.diff-block .d-del { color: #ff7b72; display: block; }
+.diff-block .d-ctx { color: #c9d1d9; display: block; }
+.diff-block .d-hdr { color: #8b949e; display: block; }
+.fix-card { border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: .6rem .85rem; margin: .6rem 0; background: var(--panel); }
+.fix-card .fix-head { font-weight: 700; }
+.locus { font-family: var(--mono); font-size: .82em; color: var(--accent); }
+.gap-chip { display: inline-block; background: #fae3e3; color: var(--fail); border-radius: 999px; padding: .05rem .55rem; font-size: .75rem; font-weight: 600; margin: 0 .3rem .3rem 0; }
+.lead-fix { background: linear-gradient(180deg, #fff, var(--panel)); border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: 10px; padding: .75rem 1rem; margin: .5rem 0 1rem; }
+.lead-fix .lead-label { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
 </style></head>
 <body><div class="wrap">
 
 {%- macro fmt(v) -%}{% if v is none %}&mdash;{% else %}{{ v }}{% endif %}{%- endmacro -%}
+{%- macro difffmt(diff) -%}
+<div class="diff-block">{% for ln in diff.split('\n') %}{% if ln.startswith('+') and not ln.startswith('+++') %}<span class="d-add">{{ ln }}</span>{% elif ln.startswith('-') and not ln.startswith('---') %}<span class="d-del">{{ ln }}</span>{% elif ln.startswith('@@') or ln.startswith('+++') or ln.startswith('---') %}<span class="d-hdr">{{ ln }}</span>{% else %}<span class="d-ctx">{{ ln }}</span>{% endif %}{% endfor %}</div>
+{%- endmacro -%}
 
 {# ── Cover ─────────────────────────────────────────────────────────── #}
 <section class="cover">
@@ -82,6 +101,15 @@ code { font-family: var(--mono); background: #ececed; padding: .05rem .3rem; bor
 {# ── Category scores ───────────────────────────────────────────────── #}
 <section>
 <h2>Category scores</h2>
+{% if charts and (charts.heatmap or charts.dimension_bars) %}
+<div class="chart-grid">
+  {% if charts.heatmap %}<div class="chart-card"><p class="chart-title">Score heatmap</p>{{ charts.heatmap | safe }}</div>{% endif %}
+  {% if charts.dimension_bars %}<div class="chart-card"><p class="chart-title">Mean score by dimension</p>{{ charts.dimension_bars | safe }}</div>{% endif %}
+</div>
+{% endif %}
+{% if charts and charts.trend %}
+<div class="chart-card"><p class="chart-title">Per-dimension trend vs baseline</p>{{ charts.trend | safe }}</div>
+{% endif %}
 <table><thead><tr>
   <th>Category</th><th>Count</th>
   {% for d in dimensions %}<th>{{ d }}</th>{% endfor %}
@@ -149,6 +177,9 @@ code { font-family: var(--mono); background: #ececed; padding: .05rem .3rem; bor
 {% if not personas and not persona_comparison %}
   <p class="note">No persona reactions available for this run.</p>
 {% else %}
+  {% if charts and charts.persona_radar %}
+  <div class="chart-card"><p class="chart-title">Persona experience (avg trust · usefulness · clarity · would-return)</p>{{ charts.persona_radar | safe }}</div>
+  {% endif %}
   {% for p in personas %}
   <div class="persona">
     <h3>{{ p.persona }}</h3>
@@ -209,6 +240,50 @@ code { font-family: var(--mono); background: #ececed; padding: .05rem .3rem; bor
   {% if forensic.narrative %}
   <h3>Narrative</h3>
   <div class="narrative">{{ forensic.narrative }}</div>
+  {% endif %}
+  {% if forensic.category_audits %}
+  <h3>Root cause &rarr; fix, by category</h3>
+  {% for ca in forensic.category_audits %}
+  <details>
+    <summary><span class="badge fail">FORENSIC</span> &nbsp; {{ ca.category }}{% if ca.gap_dims %} &middot; <span class="muted">gaps: {{ ca.gap_dims | join(', ') }}</span>{% endif %}</summary>
+    <div class="case-body">
+      {% if ca.highest_leverage_one_liner %}
+      <div class="lead-fix"><span class="lead-label">Highest-leverage change</span><div>{{ ca.highest_leverage_one_liner }}</div></div>
+      {% endif %}
+      {% if ca.gap_dims %}
+      <p>{% for g in ca.gap_dims %}<span class="gap-chip">{{ g }}</span>{% endfor %}</p>
+      {% endif %}
+      {% if ca.failure_modes %}
+      <p><strong>Failure modes</strong></p>
+      <ul>
+      {% for fm in ca.failure_modes %}
+        <li>{% if fm.dimension %}<strong>{{ fm.dimension }}</strong>: {% endif %}{{ fm.pattern }}{% if fm.code_locus %} <span class="locus">{{ fm.code_locus }}</span>{% endif %}{% if fm.rubric_criterion_missed %} <span class="muted">&mdash; misses: {{ fm.rubric_criterion_missed }}</span>{% endif %}</li>
+      {% endfor %}
+      </ul>
+      {% endif %}
+      {% if ca.leverage_changes %}
+      <p><strong>Suggested fixes</strong></p>
+      {% for lc in ca.leverage_changes %}
+      <div class="fix-card">
+        <div class="fix-head">{{ lc.change }}{% if lc.target_dimension %} <span class="muted">&rarr; {{ lc.target_dimension }}</span>{% endif %}</div>
+        {% if lc.code_locus or (lc.suggested_fix and lc.suggested_fix.file) %}
+        <div class="locus">{{ lc.code_locus or lc.suggested_fix.file }}{% if lc.suggested_fix and lc.suggested_fix.locus %} · {{ lc.suggested_fix.locus }}{% endif %}</div>
+        {% endif %}
+        {% if lc.est_impact or lc.effort or lc.confidence %}
+        <div class="muted" style="font-size:.85em">{% if lc.est_impact %}impact {{ lc.est_impact }}{% endif %}{% if lc.effort %} · effort {{ lc.effort }}{% endif %}{% if lc.confidence %} · confidence {{ lc.confidence }}{% endif %}</div>
+        {% endif %}
+        {% if lc.suggested_fix and lc.suggested_fix.rationale %}
+        <p style="margin:.4rem 0 0">{{ lc.suggested_fix.rationale }}</p>
+        {% endif %}
+        {% if lc.suggested_fix and lc.suggested_fix.diff %}
+        {{ difffmt(lc.suggested_fix.diff) }}
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
   {% endif %}
 {% endif %}
 </section>

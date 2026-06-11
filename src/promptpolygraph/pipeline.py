@@ -21,7 +21,7 @@ from . import corpus as C
 from . import persona as P
 from .adapters import build_adapter
 from .config import Config
-from .models import RunMeta, fingerprint
+from .models import RunMeta, config_fingerprint, fingerprint, rubric_fingerprint
 from .runner.runner import Runner, RunnerOptions
 
 ProgressCb = Optional[Callable[[str, dict], None]]
@@ -100,6 +100,10 @@ async def run_pipeline(
         run_id=run_id, name=cfg.name, mode=cfg.corpus.mode, adapter=adapter.name,
         model=cfg.model, total_cases=len(cases), corpus_fingerprint=fingerprint(cases),
         config=cfg.model_dump(mode="json"),
+        project=os.environ.get("POLYGRAPH_PROJECT") or cfg.name or "default",
+        config_fingerprint=config_fingerprint(cfg.model_dump(mode="json")),
+        sut_git_sha=os.environ.get("POLYGRAPH_SUT_GIT_SHA"),
+        sut_ref=os.environ.get("POLYGRAPH_SUT_REF"),
     )
     store.save_run(meta)
     store.save_cases(run_id, cases)
@@ -128,13 +132,16 @@ async def run_pipeline(
     # 3. analyze
     emit("analyze", {"judges": cfg.analyze.judges})
     rubric = A.load_rubric(cfg.resolve(cfg.analyze.rubric)) if cfg.analyze.rubric else A.default_rubric()
+    meta.rubric_fingerprint = rubric_fingerprint(rubric)
+    store.save_run(meta)
     scores = await A.analyze_run(
         cases, responses, rubric, client=client, judges=cfg.analyze.judges,
         model=cfg.analyze.judge_model or cfg.model, temperature=cfg.analyze.temperature, mock=mock,
+        config=cfg,
     )
     for s in scores:
         store.save_score(run_id, s)
-    summary = A.summarize(cases, responses, scores, rubric)
+    summary = A.summarize(cases, responses, scores, rubric, config=cfg)
     _write_json(rd / "summary.json", summary)
     store.export_jsonl(run_id, rd / "cases.jsonl")
 

@@ -50,6 +50,25 @@ _CATEGORY_SCHEMA: dict[str, Any] = {
                     "est_impact": {"type": "string"},
                     "effort": {"type": "string"},
                     "confidence": {"type": "string"},
+                    "suggested_fix": {
+                        "type": ["object", "null"],
+                        "description": (
+                            "A concrete proposed change. When source code is provided, ground it in "
+                            "real excerpt lines: file is a path that appeared in the excerpts, locus is "
+                            "a file:line range you saw, and diff is a minimal before→after / unified-diff "
+                            "snippet. When NO source is provided (black-box target), describe a "
+                            "behavioral/prompt/config change instead: set file=null and diff=null and put "
+                            "the recommendation in rationale. Set the whole object to null if you cannot "
+                            "ground a fix — never invent a file path."
+                        ),
+                        "properties": {
+                            "file": {"type": ["string", "null"], "description": "real source path, or null for a no-code recommendation"},
+                            "locus": {"type": ["string", "null"], "description": "file:line range seen in the excerpt, or null"},
+                            "rationale": {"type": "string", "description": "why this change closes the failure mode"},
+                            "diff": {"type": ["string", "null"], "description": "minimal unified-diff or before→after snippet; null when no code"},
+                        },
+                        "required": ["rationale"],
+                    },
                 },
             },
         },
@@ -201,6 +220,16 @@ def _mock_category_audit(cat: str, group: dict[str, Any], rubric: Rubric) -> dic
             "est_impact": f"+{max(1.0, rubric.threshold - means.get(dim, 0)):.1f} on {dim}",
             "effort": "medium",
             "confidence": "medium",
+            # Deterministic, code-free suggestion: no LLM call, no fabricated path.
+            "suggested_fix": {
+                "file": None,
+                "locus": None,
+                "rationale": (
+                    f"raise {dim} on {cat}: tighten the prompt/criteria so {cat} cases meet the "
+                    f"{dim} bar (mean {means.get(dim, 0):.1f} < threshold {rubric.threshold})"
+                ),
+                "diff": None,
+            },
         }
         for dim in (weak or [lowest])
     ]
@@ -298,11 +327,24 @@ async def run_forensic(
     # e.g. the CI workspace; it never contacts a remote repo).
     index = CodeIndex(code_path) if code_path else None
     has_code = bool(index and index.ok and index._files)
-    code_instruction = (
-        " The system-under-test source is included below as a repository map plus relevant "
-        "excerpts; populate code_locus with the concrete file:line you'd inspect or change."
-        if has_code else ""
-    )
+    if has_code:
+        code_instruction = (
+            " The system-under-test source is included below as a repository map plus relevant "
+            "excerpts; populate code_locus with the concrete file:line you'd inspect or change. "
+            "For each of your top leverage_changes, also emit a grounded suggested_fix: set file "
+            "to a path that actually appears in the excerpts, locus to a file:line range you saw "
+            "there, rationale to how the edit closes the failure mode, and diff to a minimal "
+            "unified-diff / before→after snippet. Cite ONLY files and lines present in the "
+            "provided excerpts — if you cannot ground a fix in the shown source, set "
+            "suggested_fix to null rather than inventing a path."
+        )
+    else:
+        code_instruction = (
+            " No system-under-test source is provided (black-box target). For each of your top "
+            "leverage_changes, emit a suggested_fix describing a behavioral / prompt / config "
+            "change: set file=null and diff=null, and put a concrete recommendation in rationale. "
+            "Never fabricate a source file path."
+        )
 
     items: list[dict[str, Any]] = []
     for cat in categories:

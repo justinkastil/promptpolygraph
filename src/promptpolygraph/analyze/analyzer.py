@@ -15,18 +15,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-from statistics import median
+from statistics import mean, median
 from typing import Any
 
 from ..llm import LLMClient, extract_json
 from ..models import (
     AssertionResult,
+    AssertionSpec,
     Case,
     Response,
     Rubric,
     Score,
 )
-from .assertions import evaluate_assertions
+from .assertions import score_assertions
 from .gate import case_pass
 
 
@@ -221,6 +222,35 @@ def _ensemble(
     return out, agreement
 
 
+# ─── Per-case metric collection ─────────────────────────────────────────────
+
+
+def _collect_metrics(
+    assertion_results: list[AssertionResult],
+    ensemble_dims: dict[str, int | None],
+    rubric: Rubric,
+) -> dict[str, float | None]:
+    """Bucket metric-tagged assertion values + dimension values into named
+    metrics (mean per metric for this single case)."""
+    buckets: dict[str, list[float]] = {}
+    for r in assertion_results:
+        if r.metric and r.value is not None:
+            buckets.setdefault(r.metric, []).append(float(r.value))
+    for d in rubric.dimensions:
+        if not d.metric:
+            continue
+        v = ensemble_dims.get(d.name)
+        if v is None:
+            continue
+        # normalize dimension onto [0,1] so metrics compose with assertions.
+        norm = float(v) / rubric.scale_max if rubric.scale_max else float(v)
+        buckets.setdefault(d.metric, []).append(norm)
+    out: dict[str, float | None] = {}
+    for name, vals in buckets.items():
+        out[name] = float(mean(vals)) if vals else None
+    return out
+
+
 # ─── Main entry ─────────────────────────────────────────────────────────────
 
 
@@ -235,21 +265,69 @@ async def analyze_run(
     temperature: float = 0.0,
     mock: bool = False,
     concurrency: int = 8,
+    config: Any | None = None,
 ) -> list[Score]:
-    """Grade every case/response pair, returning one Score each (input order)."""
+    """Grade every case/response pair, returning one Score each (input order).
+
+    `config` (a Config) is read best-effort for `scorers.sandbox`,
+    `scorers.shared`, and `embedders.*`; absent or partial config is safe and
+    reproduces prior behavior (sandbox disabled, mock embedder, no shared specs).
+    """
     resp_by_id: dict[str, Response] = {r.case_id: r for r in responses}
     use_mock = mock or client is None
     judges = max(1, judges)
     sem = asyncio.Semaphore(max(1, concurrency))
     _ = model  # accepted for interface symmetry; client already carries its model
 
+    # Resolve scoring extras from config (all optional / safe-default).
+    sandbox = "disabled"
+    shared_specs: list[AssertionSpec] = []
+    embedder = None
+    gate_mode = "strict"
+    dim_weights: dict[str, float] = {}
+    if config is not None:
+        analyze_cfg = getattr(config, "analyze", None)
+        if analyze_cfg is not None:
+            gate_mode = getattr(analyze_cfg, "gate_mode", "strict") or "strict"
+            dim_weights = dict(getattr(analyze_cfg, "dimension_weights", {}) or {})
+        scorers = getattr(config, "scorers", None)
+        if scorers is not None:
+            sandbox = getattr(scorers, "sandbox", "disabled") or "disabled"
+            for sm in getattr(scorers, "shared", []) or []:
+                try:
+                    shared_specs.append(AssertionSpec(**sm.model_dump()))
+                except Exception:  # noqa: BLE001 - a bad shared spec must not abort
+                    continue
+        emb_cfg = getattr(config, "embedders", None)
+        if emb_cfg is not None:
+            from .embedders import make_embedder
+
+            embedder = make_embedder(
+                provider=getattr(emb_cfg, "provider", "mock"),
+                model=getattr(emb_cfg, "model", None),
+                options=getattr(emb_cfg, "options", None),
+            )
+    # A `similar` assertion anywhere needs an embedder even without config.
+    if embedder is None:
+        needs_embed = any(
+            s.kind == "similar"
+            for c in cases
+            for s in (list(c.assertions) + shared_specs)
+        )
+        if needs_embed:
+            from .embedders import make_embedder
+
+            embedder = make_embedder()
+
     async def grade(case: Case) -> Score:
         async with sem:
             resp = resp_by_id.get(
                 case.id, Response(case_id=case.id, error="no response")
             )
-            assertion_results, assertions_passed = evaluate_assertions(case, resp)
-            has_assertions = len(case.assertions) > 0
+            assertion_results, assertions_passed, assertion_score = await score_assertions(
+                case, resp, embedder=embedder, sandbox=sandbox, extra_specs=shared_specs
+            )
+            has_assertions = (len(case.assertions) + len(shared_specs)) > 0
 
             judge_records: list[dict[str, Any]] = []
             judge_dims: list[dict[str, int | None]] = []
@@ -296,6 +374,8 @@ async def analyze_run(
                 if not rubric.applies(name, case.category, case.expected_shape):
                     ensemble_dims[name] = None
 
+            metrics = _collect_metrics(assertion_results, ensemble_dims, rubric)
+
             score = Score(
                 case_id=case.id,
                 dimensions=ensemble_dims,
@@ -305,8 +385,12 @@ async def analyze_run(
                 notes=notes,
                 judges=judge_records,
                 agreement=agreement,
+                assertion_score=assertion_score,
+                metrics=metrics,
             )
-            score.verdict_pass = case_pass(score, rubric)
+            score.verdict_pass = case_pass(
+                score, rubric, gate_mode=gate_mode, dimension_weights=dim_weights
+            )
             return score
 
     return await asyncio.gather(*(grade(c) for c in cases))
