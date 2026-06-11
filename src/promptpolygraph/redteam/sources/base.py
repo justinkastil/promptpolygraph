@@ -52,6 +52,13 @@ def list_sources() -> list[str]:
 
 
 def get_source(name: str, **kwargs: Any) -> AttackSource:
-    if name not in _SOURCES:
-        raise KeyError(f"unknown attack source: {name!r}. Available: {', '.join(_SOURCES) or '(none)'}")
-    return _SOURCES[name](**kwargs)
+    """Resolve a source by name. Supports a ``base:variant`` form — e.g.
+    ``dataset:advbench`` resolves to the ``dataset`` factory called with
+    ``variant="advbench"`` when no exact ``dataset:advbench`` key is registered."""
+    if name in _SOURCES:
+        return _SOURCES[name](**kwargs)
+    if ":" in name:
+        base, _, variant = name.partition(":")
+        if base in _SOURCES:
+            return _SOURCES[base](variant=variant, **kwargs)
+    raise KeyError(f"unknown attack source: {name!r}. Available: {', '.join(_SOURCES) or '(none)'}")

@@ -44,11 +44,29 @@ _TEMPS: dict[str, float] = {
 
 
 def _frontier(strats: list[str], *, provider: str = "anthropic", model: str = _CLAUDE,
-              intensity: str = "standard") -> list[Attacker]:
+              intensity: str = "standard", mode: str = "escalate") -> list[Attacker]:
     """Frontier attackers, each given a distinct persona + temperature so they act differently."""
     return [
         Attacker(strategy=s, provider=provider, model=model, intensity=intensity,
-                 persona=_PERSONAS.get(s, ""), temperature=_TEMPS.get(s, 0.9))
+                 persona=_PERSONAS.get(s, ""), temperature=_TEMPS.get(s, 0.9), mode=mode)
+        for s in strats
+    ]
+
+
+# Per-strategy smart multi-turn mode: iterative refinement (PAIR) for most,
+# gradual escalation (Crescendo) where persistence over turns is the point.
+_MODES: dict[str, str] = {
+    "jailbreak": "pair", "prompt_injection": "pair", "system_prompt_leak": "pair",
+    "pii_extraction": "pair", "tool_abuse": "pair",
+    "obfuscation": "escalate", "refusal_robustness": "crescendo",
+}
+
+
+def _adaptive(strats: list[str], *, model: str = _CLAUDE, intensity: str = "standard") -> list[Attacker]:
+    """Frontier attackers that adapt across turns — PAIR refinement / Crescendo escalation."""
+    return [
+        Attacker(strategy=s, provider="anthropic", model=model, intensity=intensity,
+                 persona=_PERSONAS.get(s, ""), temperature=_TEMPS.get(s, 0.9), mode=_MODES.get(s, "pair"))
         for s in strats
     ]
 
@@ -92,6 +110,13 @@ BUILTIN_PROFILES: dict[str, RedTeamProfile] = {
         description="Every strategy on a frontier model (Claude), each agent a distinct persona + temperature so they attack differently. Multi-turn.",
         attackers=_frontier(_ALL),
         turns=2, judge_provider="anthropic", judge_model=_CLAUDE,
+    ),
+    "deep": RedTeamProfile(
+        name="deep",
+        description="Adaptive frontier team using smart multi-turn — PAIR iterative refinement on most "
+                    "strategies, Crescendo escalation on refusal robustness. Deepest single-team probe.",
+        attackers=_adaptive(_ALL),
+        turns=4, judge_provider="anthropic", judge_model=_CLAUDE,
     ),
     "multi_frontier": RedTeamProfile(
         name="multi_frontier",

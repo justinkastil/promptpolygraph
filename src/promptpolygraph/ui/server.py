@@ -774,6 +774,7 @@ class _Handler(BaseHTTPRequestHandler):
         mock_raw = (query.get("mock", ["1"])[0] or "1").strip().lower()
         mock = mock_raw not in ("0", "false", "no", "")
         mock = _want_mock(mock)  # force offline when no key is configured
+        sources = [s.strip() for s in (query.get("sources", [""])[0] or "").split(",") if s.strip()]
 
         try:
             profile = get_profile(profile_name)
@@ -809,7 +810,8 @@ class _Handler(BaseHTTPRequestHandler):
 
         def _worker() -> None:
             try:
-                asyncio.run(run_redteam(adapter, profile, emit=_emit, mock=mock, concurrency=4))
+                asyncio.run(run_redteam(adapter, profile, emit=_emit, mock=mock, concurrency=4,
+                                        extra_sources=sources))
             except Exception as exc:
                 try:
                     evq.put(RedTeamEvent(type="error", text=str(exc),
