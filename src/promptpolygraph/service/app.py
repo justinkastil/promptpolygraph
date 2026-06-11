@@ -12,12 +12,13 @@ deployments).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
 from .. import analyze as A
@@ -76,6 +77,165 @@ def dashboard() -> str:
     from .dashboard import render_dashboard
 
     return render_dashboard(store, settings)
+
+
+# ─── red-team arena (live event stream over WebSocket) ──────────────────────
+
+
+def _fallback_arena_page(stream_url: str) -> str:
+    """Minimal inline Arena page used until the dedicated UI lands."""
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Red-Team Arena</title>
+<style>
+  body {{ font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+         margin: 0; background: #0b0e14; color: #d7dce5; }}
+  header {{ padding: 12px 16px; background: #11161f; border-bottom: 1px solid #1c2430; }}
+  h1 {{ font-size: 16px; margin: 0; }}
+  #log {{ padding: 12px 16px; }}
+  .ev {{ margin: 2px 0; white-space: pre-wrap; word-break: break-word; }}
+  .t-agent_spawned {{ color: #7ee787; }}
+  .t-attack {{ color: #f0883e; }}
+  .t-response {{ color: #79c0ff; }}
+  .t-verdict {{ color: #ff7b72; }}
+  .t-vuln {{ color: #ffa657; }}
+  .t-summary, .t-done {{ color: #d2a8ff; }}
+  .t-error {{ color: #ff7b72; font-weight: bold; }}
+  .ty {{ opacity: 0.6; }}
+</style></head>
+<body>
+<header><h1>Red-Team Arena <span class="ty">(live)</span></h1></header>
+<div id="log"></div>
+<script>
+  var proto = location.protocol === "https:" ? "wss:" : "ws:";
+  var url = proto + "//" + location.host + {stream_url!r};
+  var log = document.getElementById("log");
+  function line(ev) {{
+    var div = document.createElement("div");
+    div.className = "ev t-" + ev.type;
+    var label = ev.type;
+    if (ev.attacker_id) label += " " + ev.attacker_id;
+    if (ev.strategy) label += " " + ev.strategy;
+    var body = ev.delta || ev.text || JSON.stringify(ev.verdict || ev.data || {{}});
+    div.textContent = "[" + label + "] " + (body || "");
+    log.appendChild(div);
+    window.scrollTo(0, document.body.scrollHeight);
+  }}
+  var ws = new WebSocket(url);
+  ws.onmessage = function(m) {{ try {{ line(JSON.parse(m.data)); }} catch (e) {{}} }};
+  ws.onerror = function() {{ var d = document.createElement("div");
+    d.className = "ev t-error"; d.textContent = "[connection error]"; log.appendChild(d); }};
+</script>
+</body></html>"""
+
+
+@app.get("/redteam", response_class=HTMLResponse)
+def redteam_arena() -> str:
+    stream_url = "/ws/redteam"
+    try:
+        from ..ui.arena import render_arena_page  # type: ignore
+
+        return render_arena_page(stream_url=stream_url, transport="ws")
+    except Exception:
+        return _fallback_arena_page(stream_url)
+
+
+def _ws_authorized(websocket: WebSocket, key: str | None) -> bool:
+    """Validate the API key against the same key set as `require_api_key`.
+
+    When auth is disabled (no keys configured) all connections are allowed.
+    The key may arrive as a `key=` query param or as the first subprotocol.
+    """
+    if not settings.auth_enabled:
+        return True
+    if not key:
+        protos = websocket.headers.get("sec-websocket-protocol")
+        if protos:
+            key = protos.split(",")[0].strip()
+    return bool(key) and key in settings.api_key_set
+
+
+def _build_redteam_adapter(config_name: str | None, config_path: str | None):
+    from ..adapters import DemoAdapter, build_adapter
+
+    path = config_path
+    if path is None and config_name:
+        path = str(Path(settings.config_dir).expanduser() / f"{config_name}.yaml")
+    if path:
+        return build_adapter(Config.load(path).adapter)
+    return DemoAdapter(style="everyday")
+
+
+@app.websocket("/ws/redteam")
+async def ws_redteam(
+    websocket: WebSocket,
+    profile: str = Query("all_frontier"),
+    config_name: str | None = Query(None),
+    config_path: str | None = Query(None),
+    mock: bool = Query(True),
+    key: str | None = Query(None),
+) -> None:
+    """Run a red-team and stream the live event feed to the browser Arena.
+
+    `emit` is called synchronously from the orchestrator's context, so it hops
+    onto this socket's event loop via `call_soon_threadsafe` and pushes each
+    event onto a queue the socket coroutine drains.
+    """
+    from ..redteam import RedTeamEvent, get_profile, run_redteam
+
+    await websocket.accept(
+        subprotocol=websocket.headers.get("sec-websocket-protocol", "").split(",")[0].strip() or None
+    )
+    if not _ws_authorized(websocket, key):
+        await websocket.send_json({"type": "error", "data": {"detail": "invalid or missing API key"}})
+        await websocket.close(code=1008)
+        return
+
+    loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def _emit(ev) -> None:
+        # emit() is sync and may be invoked from a worker context — hop the loop.
+        loop.call_soon_threadsafe(queue.put_nowait, ev)
+
+    try:
+        prof = get_profile(profile)
+        adapter = _build_redteam_adapter(config_name, config_path)
+    except Exception as exc:
+        await websocket.send_json({"type": "error", "data": {"detail": str(exc)}})
+        await websocket.close(code=1011)
+        return
+
+    async def _drive() -> None:
+        try:
+            await run_redteam(adapter, prof, emit=_emit, mock=mock)
+        except Exception as exc:  # surface engine failures as a terminal error event
+            loop.call_soon_threadsafe(
+                queue.put_nowait, RedTeamEvent(type="error", data={"detail": str(exc)})
+            )
+
+    runner = asyncio.create_task(_drive())
+    try:
+        while True:
+            ev = await queue.get()
+            await websocket.send_json(ev.model_dump())
+            if ev.type in ("done", "error"):
+                break
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        runner.cancel()
+        try:
+            await runner
+        except (asyncio.CancelledError, Exception):
+            pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 # ─── runs ─────────────────────────────────────────────────────────────────
