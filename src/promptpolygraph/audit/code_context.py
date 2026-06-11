@@ -31,6 +31,35 @@ _MAX_FILE_SIZE = 500_000  # skip very large files when scanning
 _SAMPLE_BYTES = 4096      # bytes read per file for relevance scoring
 
 
+def _load_ignore_globs(root: Path) -> list[str]:
+    """Collect simple glob patterns from .gitignore + .polygraphignore at the
+    root (best-effort: comments/blanks/negations dropped, fnmatch semantics)."""
+    globs: list[str] = []
+    for name in (".gitignore", ".polygraphignore"):
+        f = root / name
+        if not f.is_file():
+            continue
+        try:
+            for line in f.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or line.startswith("!"):
+                    continue
+                globs.append(line.rstrip("/"))
+        except OSError:
+            continue
+    return globs
+
+
+def _matches_ignore(rel: str, parts: tuple[str, ...], globs: list[str]) -> bool:
+    """True if a repo-relative path matches any ignore glob (path or any segment)."""
+    from fnmatch import fnmatch
+
+    for g in globs:
+        if fnmatch(rel, g) or fnmatch(rel, g + "/*") or any(fnmatch(part, g) for part in parts):
+            return True
+    return False
+
+
 def expand_terms(terms: list[str]) -> list[str]:
     """Lowercase, split snake/camel/path tokens, drop short/noise tokens."""
     out: set[str] = set()
@@ -48,22 +77,29 @@ def expand_terms(terms: list[str]) -> list[str]:
 class CodeIndex:
     """Walks a source tree once; serves a repo map + relevance-ranked excerpts."""
 
-    def __init__(self, root: str, *, max_files: int = 4000):
+    def __init__(self, root: str, *, max_files: int = 4000, respect_gitignore: bool = False):
         self.root = Path(root).expanduser()
         self.ok = self.root.exists()
         self._files: list[tuple[str, Path]] = []  # (relpath, abspath)
         self._sample: dict[str, str] = {}
         if not self.ok:
             return
+        # Opt-in: skip files matching .gitignore / .polygraphignore patterns
+        # (best-effort fnmatch, not full git semantics). Off by default so the
+        # audit's behavior is unchanged; the red-team code path enables it.
+        ignore_globs = _load_ignore_globs(self.root) if respect_gitignore else []
         count = 0
         for p in sorted(self.root.rglob("*")):
             if count >= max_files:
                 break
             if p.is_dir():
                 continue
-            if any(part in _IGNORE_DIRS for part in p.relative_to(self.root).parts):
+            rel_parts = p.relative_to(self.root).parts
+            if any(part in _IGNORE_DIRS for part in rel_parts):
                 continue
             if p.suffix.lower() not in _SOURCE_EXTS:
+                continue
+            if ignore_globs and _matches_ignore(str(p.relative_to(self.root)), rel_parts, ignore_globs):
                 continue
             try:
                 if p.stat().st_size > _MAX_FILE_SIZE:

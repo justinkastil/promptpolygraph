@@ -227,6 +227,21 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_persona_files()
             return
 
+        if parts == ["api", "redteam", "runs"]:
+            self._api_redteam_runs()
+            return
+
+        if len(parts) >= 4 and parts[:3] == ["api", "redteam", "runs"]:
+            rid = parts[3]
+            tail = parts[4] if len(parts) > 4 else None
+            if tail is None:
+                self._api_redteam_run(rid)
+            elif tail == "events":
+                self._api_redteam_events(rid)
+            else:
+                self._not_found("unknown redteam sub-resource")
+            return
+
         if len(parts) == 4 and parts[:2] == ["api", "run"] and parts[3] == "status":
             self._api_run_status(parts[2])
             return
@@ -263,6 +278,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if parts == ["api", "personas", "generate"]:
             self._api_persona_generate()
+            return
+        if parts == ["api", "redteam", "trace"]:
+            self._api_redteam_trace()
             return
 
         self._not_found("unknown path")
@@ -902,8 +920,10 @@ class _Handler(BaseHTTPRequestHandler):
 
         evq: queue.Queue[Any] = queue.Queue(maxsize=2048)
         _SENTINEL = object()
+        collected: list[Any] = []  # full event log, persisted for replay
 
         def _emit(ev: RedTeamEvent) -> None:
+            collected.append(ev)
             try:
                 evq.put(ev, timeout=5.0)
             except Exception:
@@ -911,8 +931,12 @@ class _Handler(BaseHTTPRequestHandler):
 
         def _worker() -> None:
             try:
-                asyncio.run(run_redteam(adapter, profile, emit=_emit, mock=mock, concurrency=4,
-                                        extra_sources=sources))
+                report = asyncio.run(run_redteam(adapter, profile, emit=_emit, mock=mock, concurrency=4,
+                                                  extra_sources=sources))
+                try:
+                    self._persist_redteam_run(report, collected)
+                except Exception:
+                    pass  # persistence is best-effort; the live stream already happened
             except Exception as exc:
                 try:
                     evq.put(RedTeamEvent(type="error", text=str(exc),
@@ -954,6 +978,181 @@ class _Handler(BaseHTTPRequestHandler):
             pass  # client went away — let the daemon worker finish on its own
         except Exception:
             pass
+
+    # ---- red-team run persistence + replay + on-demand code trace -------
+    def _redteam_dir(self) -> Path:
+        d = self.out_dir / "redteam"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _persist_redteam_run(self, report: Any, events: list[Any]) -> None:
+        """Save a completed Arena run so it can be replayed + drilled into."""
+        from promptpolygraph.redteam.report import render_html, render_json, render_md
+
+        rd = self._redteam_dir() / report.run_id
+        rd.mkdir(parents=True, exist_ok=True)
+        (rd / "report.json").write_text(
+            json.dumps(render_json(report), indent=2, ensure_ascii=False), encoding="utf-8")
+        (rd / "events.jsonl").write_text(
+            "\n".join(e.model_dump_json() for e in events), encoding="utf-8")
+        try:
+            (rd / "report.md").write_text(render_md(report), encoding="utf-8")
+            (rd / "report.html").write_text(render_html(report), encoding="utf-8")
+        except Exception:
+            pass  # report rendering is a convenience; the json + events are the record
+
+    def _api_redteam_runs(self) -> None:
+        base = self.out_dir / "redteam"
+        out: list[dict[str, Any]] = []
+        if base.is_dir():
+            for d in sorted(base.iterdir(), reverse=True):
+                f = d / "report.json"
+                if not f.is_file():
+                    continue
+                try:
+                    rep = json.loads(f.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                st = rep.get("stats", {}) or {}
+                out.append({
+                    "run_id": rep.get("run_id", d.name),
+                    "profile": rep.get("profile"),
+                    "target": rep.get("target"),
+                    "created_at": rep.get("created_at"),
+                    "asr": st.get("asr"),
+                    "breaches": st.get("breaches"),
+                    "attacks": st.get("attacks"),
+                    "vulnerabilities": len(rep.get("vulnerabilities", [])),
+                })
+        self._json(out)
+
+    def _api_redteam_run(self, run_id: str) -> None:
+        f = self.out_dir / "redteam" / run_id / "report.json"
+        if not f.is_file():
+            self._not_found("red-team run not found")
+            return
+        try:
+            rep = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            self._not_found("could not read red-team run")
+            return
+        from promptpolygraph.redteam.models import AttackAttempt
+        from promptpolygraph.redteam.rootcause import attacker_timeline
+
+        by_attacker: dict[str, list[dict]] = {}
+        for ad in rep.get("attempts", []):
+            by_attacker.setdefault(ad.get("attacker_id", "?"), []).append(ad)
+        attackers: list[dict[str, Any]] = []
+        for aid, ads in by_attacker.items():
+            try:
+                objs = [AttackAttempt.model_validate(a) for a in ads]
+            except Exception:
+                continue
+            tl = attacker_timeline(objs)
+            attackers.append({
+                "attacker_id": aid,
+                "strategy": objs[0].strategy if objs else None,
+                "breached": any(o.verdict and o.verdict.breached for o in objs),
+                **tl,
+            })
+        self._json({"report": rep, "attackers": attackers})
+
+    def _api_redteam_events(self, run_id: str) -> None:
+        f = self.out_dir / "redteam" / run_id / "events.jsonl"
+        events: list[Any] = []
+        if f.is_file():
+            for line in f.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except Exception:
+                    pass
+        self._json(events)
+
+    def _api_redteam_trace(self) -> None:
+        """On-demand code-grounded root-cause for one finding.
+
+        IP posture: the code-dive defaults to a LOCAL model (source never leaves
+        the machine). A non-local provider is refused outright when air-gap is on
+        (POLYGRAPH_AIR_GAP=1) and otherwise requires explicit `consent` in the body.
+        """
+        body = self._read_body()
+        run_id = str(body.get("run_id") or "").strip()
+        if not run_id:
+            self._json({"error": "run_id required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        f = self.out_dir / "redteam" / run_id / "report.json"
+        if not f.is_file():
+            self._not_found("red-team run not found")
+            return
+        try:
+            rep = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            self._not_found("could not read red-team run")
+            return
+
+        attempts = rep.get("attempts", [])
+        attempt_id = body.get("attempt_id")
+        attacker_id = body.get("attacker_id")
+        chosen = None
+        if attempt_id:
+            chosen = next((a for a in attempts if a.get("id") == attempt_id), None)
+        elif attacker_id:
+            cand = [a for a in attempts if a.get("attacker_id") == attacker_id]
+            chosen = next((a for a in cand if (a.get("verdict") or {}).get("breached")), None) \
+                or (cand[-1] if cand else None)
+        else:
+            chosen = next((a for a in attempts if (a.get("verdict") or {}).get("breached")), None)
+        if not chosen:
+            self._json({"error": "no matching attempt to trace"}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        provider = (body.get("provider") or "ollama").strip().lower()
+        model = body.get("model") or None
+        base_url = body.get("base_url") or None
+        consent = bool(body.get("consent"))
+        mock = bool(body.get("mock"))
+        code_path = (str(body.get("code_path") or "").strip()) or None
+
+        local_providers = {"ollama", "vllm", "lmstudio"}
+        air_gap = os.environ.get("POLYGRAPH_AIR_GAP", "").strip().lower() in ("1", "true", "yes")
+        if provider not in local_providers and not mock:
+            if air_gap:
+                self._json({"error": "air-gap is on — code dives are restricted to a local model",
+                            "provider": provider}, status=HTTPStatus.FORBIDDEN)
+                return
+            if not consent:
+                self._json({"error": f"sending source excerpts to '{provider}' requires explicit consent",
+                            "needs_consent": True, "provider": provider}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+        from promptpolygraph.redteam.codetrace import trace_in_code
+        from promptpolygraph.redteam.models import AttackAttempt
+
+        try:
+            attempt = AttackAttempt.model_validate(chosen)
+        except Exception as exc:
+            self._json({"error": "bad attempt record", "detail": str(exc)}, status=500)
+            return
+
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(model, provider=provider, base_url=base_url)
+            except Exception:
+                client, mock = None, True
+
+        try:
+            result = asyncio.run(trace_in_code(attempt, code_path=code_path, client=client, mock=mock))
+        except Exception as exc:
+            self._json({"error": "trace failed", "detail": str(exc)}, status=500)
+            return
+        result["provider"] = "mock" if mock else provider
+        self._json(result)
 
     # ---- quiet logging --------------------------------------------------
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
