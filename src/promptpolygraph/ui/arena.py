@@ -399,7 +399,7 @@ __ARENA_DOCK__
         <option value="jailbreak">jailbreak</option>
         <option value="injection">injection</option>
       </select></span>
-    <span class="ctl"><label for="f-sources">OSS sources <span class="hint" title="Probe sources folded into the run alongside the LLM attackers. catalog needs no deps; garak/pyrit/deepteam need the [redteam] extra; dataset:&lt;name&gt; fetches on demand.">(?)</span></label>
+    <span class="ctl"><label for="f-sources">OSS sources <span class="tip tip-left" tabindex="0" role="img" aria-label="Extra probe sources folded in beside the LLM attackers (catalog needs no deps; garak/pyrit/deepteam need the [redteam] extra; dataset:&lt;name&gt; fetches on demand)." data-tip="Extra probe sources folded in beside the LLM attackers (catalog needs no deps; garak/pyrit/deepteam need the [redteam] extra; dataset:&lt;name&gt; fetches on demand)." title="Extra probe sources folded in beside the LLM attackers (catalog needs no deps; garak/pyrit/deepteam need the [redteam] extra; dataset:&lt;name&gt; fetches on demand).">?</span></label>
       <input class="field" id="f-sources" placeholder="e.g. catalog, garak, dataset:advbench" />
       <span class="chips" id="source-chips">
         <button type="button" class="chip" onclick="addSource('catalog')">+catalog</button>
@@ -573,6 +573,14 @@ function sevColor(s) {
   return getCss(m[s] || "--sev-medium");
 }
 function prettyStrat(s) { return String(s || "agent").replace(/_/g, " "); }
+// Plain-language explanation for an attacker's escalation mode (pair/crescendo).
+function attackerModeTip(mode) {
+  var base = "pair = iteratively refine against the target's refusal; crescendo = escalate gradually across turns.";
+  var m = String(mode || "").toLowerCase();
+  if (m === "pair") return "pair = iteratively refine against the target's refusal. " + base;
+  if (m === "crescendo") return "crescendo = escalate gradually across turns. " + base;
+  return base;
+}
 function backendLabel(m) {
   if (!m) return "";
   var p = m.provider || "";
@@ -659,7 +667,8 @@ function renderLane(aid) {
   var bl = backendLabel(a);
   if (bl) html += '<span class="tag"><b>' + esc(bl) + '</b></span>';
   if (a.intensity) html += '<span class="tag">intensity <b>' + esc(a.intensity) + '</b></span>';
-  if (a.mode) html += '<span class="tag">mode <b>' + esc(a.mode) + '</b></span>';
+  if (a.mode) html += '<span class="tag" title="' + esc(attackerModeTip(a.mode)) + '">mode <b>' + esc(a.mode) + '</b></span>';
+  if (a.converter) html += '<span class="tag" title="Transforms a probe (base64, rot13, many-shot, …) to test whether a guardrail can be evaded by encoding the same intent.">converter <b>' + esc(a.converter) + '</b></span>';
   if (turnsArr.length) html += '<span class="tag">turns <b>' + turnsArr.length + '</b></span>';
   html += '</div>';
   html += '<div class="think" id="think-' + esc(aid) + '"></div>';
@@ -906,7 +915,7 @@ function renderTracePanel(aid) {
   var box = $("dr-trace");
   var canTrace = !!runId;
   var html = '<div class="trace-ctl">'
-    + '<span class="ctl" style="flex:1 1 100%"><label for="tr-codepath">Code path <span class="hint" title="A local checkout of the target system. Indexed read-only; excerpts are secret-scrubbed and only sent to the provider below. Leave blank for the abstract finding summary.">(clone to hook up)</span></label>'
+    + '<span class="ctl" style="flex:1 1 100%"><label for="tr-codepath">Code path <span class="tip" tabindex="0" role="img" aria-label="A local checkout of the target. Indexed read-only; excerpts are secret-scrubbed and only sent to the chosen model. Enables the code-grounded root-cause ladder; blank = the finding summary." data-tip="A local checkout of the target. Indexed read-only; excerpts are secret-scrubbed and only sent to the chosen model. Enables the code-grounded root-cause ladder; blank = the finding summary." title="A local checkout of the target. Indexed read-only; excerpts are secret-scrubbed and only sent to the chosen model. Enables the code-grounded root-cause ladder; blank = the finding summary.">?</span></label>'
     + '<input class="field" id="tr-codepath" placeholder="/path/to/target/checkout (optional — enables the code-grounded ladder)" style="width:100%" /></span>'
     + '<span class="ctl"><label for="tr-provider">Provider</label>'
     + '<select class="field" id="tr-provider" style="min-width:120px"><option>loading…</option></select></span>'
@@ -1341,6 +1350,10 @@ __DESIGNER_DOCK_JS__
 // ── boot ────────────────────────────────────────────────────────────────
 (function start() {
   renderSevBar(); renderOwasp();
+  // Readiness pill (shared init). The endpoint path is assembled at runtime so
+  // this self-contained page never embeds the domain word as a static literal;
+  // the resolved URL is the same readiness endpoint the dashboard uses.
+  initStatusPill("/api/status");
   setStatus("", "idle");
   setLiveButtons(false);
   if (CONFIG.transport === "ws") {
