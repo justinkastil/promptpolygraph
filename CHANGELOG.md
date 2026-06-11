@@ -6,6 +6,23 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-11
+
+### Added
+- **Pluggable judge/audit/generation backend** — the grader, audit agents, and
+  corpus generation can now run against any OpenAI-compatible endpoint
+  (**Ollama**, vLLM, LM Studio, OpenAI), not just Anthropic. Configure via
+  `llm: {provider: ollama, base_url: ...}` + `model: <name>`. Local providers
+  need no API key, so the **whole eval can run 100% locally on open models**.
+  Uses httpx (a core dep) — no extra packages required for the local path.
+- The `llm` *target* adapter accepts `provider: ollama` (defaults to the local
+  Ollama endpoint) for testing a local model as the system under test.
+
+### Changed
+- Mock-vs-live detection is now provider-aware: a local provider (Ollama) runs
+  live with no key; key-providers (Anthropic/OpenAI) fall back to mock only when
+  the key is absent. Default behavior (Anthropic) is unchanged.
+
 ## [0.4.0] - 2026-06-11
 
 ### Added

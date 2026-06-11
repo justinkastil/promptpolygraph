@@ -67,6 +67,61 @@ class AnthropicClient:
         return ""
 
 
+class OpenAICompatibleClient:
+    """Chat client for any OpenAI-compatible endpoint — OpenAI, Ollama, vLLM,
+    LM Studio, etc. Uses httpx (a core dep), so the judge/audit/generation
+    backend runs against a local model with no extra packages and no API key
+    (Ollama needs none). On any transport/parse error it returns "" so a flaky
+    local server degrades gracefully instead of crashing a run."""
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        base_url: str,
+        api_key: str | None = None,
+        timeout: float = 120.0,
+    ):
+        import httpx
+
+        self.model = model
+        self._url = base_url.rstrip("/") + "/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        self._client = httpx.AsyncClient(timeout=timeout, headers=headers)
+
+    async def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> str:
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": user})
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        try:
+            resp = await self._client.post(self._url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
+            return ""
+        try:
+            return data["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError):
+            return ""
+
+
 class ScriptedClient:
     """Returns queued responses in FIFO order; used by unit tests."""
 
@@ -88,9 +143,58 @@ class ScriptedClient:
         return self._queue.pop(0) if self._queue else ""
 
 
-def make_client(model: str | None = None) -> LLMClient:
-    """Construct the default (Anthropic) client."""
-    return AnthropicClient(model=model)
+DEFAULT_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+DEFAULT_OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+# Provider aliases that speak the OpenAI-compatible chat protocol.
+_OPENAI_COMPAT = {"openai", "openai-compatible", "compatible", "ollama", "vllm", "lmstudio", "local"}
+# Providers that run locally and therefore need no API key.
+_LOCAL_PROVIDERS = {"ollama", "vllm", "lmstudio", "local"}
+
+
+def provider_needs_key(provider: str | None, api_key_env: str | None = None) -> str | None:
+    """Return the env var that must be set for live calls, or None if no key is
+    needed (local providers like Ollama). Used to decide mock vs. live."""
+    p = (provider or "anthropic").lower()
+    if p == "anthropic":
+        return api_key_env or "ANTHROPIC_API_KEY"
+    if p in _LOCAL_PROVIDERS:
+        return None
+    if p in _OPENAI_COMPAT:
+        return api_key_env or "OPENAI_API_KEY"
+    return None
+
+
+def make_client(
+    model: str | None = None,
+    *,
+    provider: str = "anthropic",
+    base_url: str | None = None,
+    api_key_env: str | None = None,
+) -> LLMClient:
+    """Construct the grader/audit/generation client for the configured backend.
+
+    provider: anthropic (default) | openai | ollama | openai-compatible | vllm | lmstudio.
+    For OpenAI-compatible providers, `base_url` defaults to the Ollama local
+    endpoint for `ollama`, else the OpenAI endpoint; the key (if any) is read
+    from `api_key_env` or OPENAI_API_KEY. Default behavior (anthropic) is unchanged.
+    """
+    p = (provider or "anthropic").lower()
+    if p == "anthropic":
+        key = os.environ.get(api_key_env) if api_key_env else None
+        return AnthropicClient(model=model, api_key=key)
+    if p in _OPENAI_COMPAT:
+        if base_url:
+            bu = base_url
+        elif p in _LOCAL_PROVIDERS:
+            bu = DEFAULT_OLLAMA_BASE_URL
+        else:
+            bu = DEFAULT_OPENAI_BASE_URL
+        key_env = api_key_env or "OPENAI_API_KEY"
+        return OpenAICompatibleClient(
+            model or "gpt-4o-mini", base_url=bu, api_key=os.environ.get(key_env)
+        )
+    raise ValueError(f"unknown llm provider: {provider!r}")
 
 
 def extract_json(text: str) -> Any:

@@ -27,16 +27,24 @@ from .runner.runner import Runner, RunnerOptions
 ProgressCb = Optional[Callable[[str, dict], None]]
 
 
+def _mock(cfg: Config) -> bool:
+    if cfg.mock:
+        return True
+    from .llm import provider_needs_key
+
+    env = provider_needs_key(cfg.llm.provider, cfg.llm.api_key_env)
+    return bool(env) and not os.environ.get(env)
+
+
 def _client(cfg: Config):
     from .llm import make_client
 
-    if cfg.mock or not os.environ.get("ANTHROPIC_API_KEY"):
+    if _mock(cfg):
         return None
-    return make_client(cfg.model or cfg.analyze.judge_model)
-
-
-def _mock(cfg: Config) -> bool:
-    return cfg.mock or not os.environ.get("ANTHROPIC_API_KEY")
+    return make_client(
+        cfg.model or cfg.analyze.judge_model,
+        provider=cfg.llm.provider, base_url=cfg.llm.base_url, api_key_env=cfg.llm.api_key_env,
+    )
 
 
 def _build_sample(cases, responses, scores, per_category: int) -> list[dict]:
