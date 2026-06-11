@@ -29,6 +29,45 @@ def test_render_arena_page_ws_transport():
     assert '"transport": "ws"' in html or "'transport': 'ws'" in html or '"ws"' in html
 
 
+def test_render_arena_page_has_replay_and_trace_controls():
+    html = render_arena_page(stream_url="/api/redteam/stream?profile=quick")
+    # replay + trace + run-list endpoints the page consumes
+    assert "/api/redteam/trace" in html
+    assert "/api/redteam/runs" in html
+    assert "loadReplay" in html and "playReplay" in html
+    # live + replay toggle present
+    assert "setView('live')" in html and "setView('replay')" in html
+
+
+def test_render_arena_page_drops_gimmicks():
+    html = render_arena_page(stream_url="/api/redteam/stream?profile=quick").lower()
+    # the flagged lightning-bolt + cheesy sub-banner are gone
+    assert "lightning" not in html
+    assert "&#9889;" not in html  # lightning-bolt glyph
+    assert "authorized adversarial testing" not in html
+
+
+def test_render_arena_page_honesty_rule_is_mode_gated():
+    html = render_arena_page(stream_url="/api/redteam/stream?profile=quick")
+    # the colored ladder only renders for the code-grounded result; the abstract
+    # path renders the honest summary, never a fabricated pipeline.
+    assert "renderLadder" in html
+    assert "renderHonest" in html
+    assert 'mode === "code"' in html or "j.mode === \"code\"" in html
+    # consent / air-gap UX is wired
+    assert "needs_consent" in html
+    assert "Air-gap" in html or "air-gap" in html
+
+
+def test_render_arena_page_no_banned_terms():
+    html = render_arena_page(stream_url="/api/redteam/stream?profile=quick").lower()
+    for term in (
+        "blockhaven", "haven", "patent", "promptfoo",
+        "health", "clinical", "medical", "phi", "vault",
+    ):
+        assert term not in html, f"banned term present: {term}"
+
+
 def test_render_arena_page_escapes_script_close_in_url():
     # a hostile stream_url must not be able to break out of the <script> block
     html = render_arena_page(stream_url="/x</script><script>alert(1)//", transport="sse")

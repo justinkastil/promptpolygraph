@@ -1005,7 +1005,7 @@ class _Handler(BaseHTTPRequestHandler):
         base = self.out_dir / "redteam"
         out: list[dict[str, Any]] = []
         if base.is_dir():
-            for d in sorted(base.iterdir(), reverse=True):
+            for d in base.iterdir():
                 f = d / "report.json"
                 if not f.is_file():
                     continue
@@ -1024,6 +1024,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "attacks": st.get("attacks"),
                     "vulnerabilities": len(rep.get("vulnerabilities", [])),
                 })
+        out.sort(key=lambda r: r.get("created_at") or "", reverse=True)  # newest first
         self._json(out)
 
     def _api_redteam_run(self, run_id: str) -> None:
@@ -1104,9 +1105,10 @@ class _Handler(BaseHTTPRequestHandler):
             chosen = next((a for a in cand if (a.get("verdict") or {}).get("breached")), None) \
                 or (cand[-1] if cand else None)
         else:
-            chosen = next((a for a in attempts if (a.get("verdict") or {}).get("breached")), None)
+            chosen = next((a for a in attempts if (a.get("verdict") or {}).get("breached")), None) \
+                or (attempts[-1] if attempts else None)
         if not chosen:
-            self._json({"error": "no matching attempt to trace"}, status=HTTPStatus.NOT_FOUND)
+            self._json({"error": "no attempts to trace in this run"}, status=HTTPStatus.NOT_FOUND)
             return
 
         provider = (body.get("provider") or "ollama").strip().lower()
