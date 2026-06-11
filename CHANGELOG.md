@@ -6,6 +6,32 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-11
+
+### Added
+- Arena drill-down: click an attacker for the per-turn timeline (probe/response/
+  verdict per turn) and the root cause.
+- Code-grounded root-cause ladder (opt-in via `redteam.code_path`): a model pass
+  over a local checkout cites `file:line` rungs of the target source, colored by
+  stage state (broken/weak/held), with a suggested-fix diff; source windows are
+  re-read from disk. With no `code_path` it returns a finding summary (control,
+  OWASP/ATLAS, mitigation) instead of a ladder.
+- Code-dive egress controls: defaults to a local model; a non-local provider is
+  refused when `POLYGRAPH_AIR_GAP=1` and otherwise requires `consent` in the
+  request. Excerpts are secret-scrubbed before send; indexing honors
+  `.gitignore` / `.polygraphignore` in addition to the vendor-dir skip.
+- Replay: Arena runs are persisted to `out_dir/redteam/<id>/`; Live/Replay
+  toggle. Endpoints: `GET /api/redteam/runs`, `/api/redteam/runs/{id}`,
+  `/api/redteam/runs/{id}/events`; `POST /api/redteam/trace`.
+- Arena lanes show technique/source, provider, and mode; scoreboard shows ASR +
+  an OWASP coverage grid; a findings table. OSS source quick-add chips and a
+  Trace-in-code `code_path` field.
+- Studio (renamed from Personas, with Prompts | Personas sub-tabs): prompt-corpus
+  generator — `POST /api/corpus/generate` (mode/domain/difficulty/count/
+  per_category/categories/seed; pluggable provider+model; mock), preview, export
+  via `GET /api/corpus/export` (json/jsonl/csv, path-guarded), and "use in new
+  run" (corpus path override on `/api/run`).
+
 ## [0.5.1] - 2026-06-11
 
 ### Added
