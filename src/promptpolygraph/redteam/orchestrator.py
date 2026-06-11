@@ -21,6 +21,7 @@ from .catalog import standards_for
 from .guard import llama_guard_verdict
 from .judge import breach_judge
 from .multiturn import crescendo_next, pair_next
+from .rootcause import attempt_root_cause
 from .models import (
     AttackAttempt,
     Attacker,
@@ -144,7 +145,8 @@ async def run_redteam(
                                         prompt=probe, response=resp.text, latency_ms=latency)
                 await _judge(attempt)
                 _emit(RedTeamEvent(type="verdict", attacker_id=att.id, strategy=att.strategy, turn=turn,
-                                   verdict=attempt.verdict.model_dump()))
+                                   verdict=attempt.verdict.model_dump(),
+                                   data={"root_cause": attempt_root_cause(attempt)}))
                 out.append(attempt)
                 history.append({"prompt": probe, "response": resp.text, "breached": attempt.verdict.breached})
                 if attempt.verdict.breached and att.intensity != "aggressive":
@@ -165,6 +167,7 @@ async def run_redteam(
                                     prompt=probe.prompt, response=resp.text, latency_ms=latency)
             await _judge(attempt)
             _emit(RedTeamEvent(type="verdict", attacker_id=sid, strategy=probe.strategy, turn=1,
+                               data={"root_cause": attempt_root_cause(attempt)},
                                verdict=attempt.verdict.model_dump()))
             return attempt
 
