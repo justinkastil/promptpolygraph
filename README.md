@@ -132,6 +132,36 @@ skipped gracefully otherwise.
 polygraph all --config c.yaml --format md,html        # run -> analyze -> audit -> report
 ```
 
+### Browse results in a local dashboard
+A zero-dependency web UI (stdlib only — no server to deploy) over the runs the CLI has produced:
+
+```bash
+polygraph dashboard --out-dir polygraph_out          # opens http://127.0.0.1:8765
+```
+Browse runs, drill into category/dimension scores, per-case responses + assertions, the persona panel
+and forensic audit, and open the rendered reports. (For a multi-user, Postgres-backed team server with a
+job queue + API, see [Service mode](#service-mode-multi-user-scalable).)
+
+### Export the generated prompts as a reusable dataset
+PromptPolygraph *generates* synthetic corpora — export them as a portable dataset to reuse anywhere:
+
+```bash
+polygraph export --run <run_id> --out prompts.json                 # full cases from a stored run
+polygraph export --corpus mycorpus/ --out prompts.jsonl --format jsonl
+polygraph export --corpus mycorpus/ --out prompts.csv --format csv --prompts-only
+```
+Formats: `json` / `jsonl` / `csv`; `--prompts-only` emits just `{prompt, category}` for a clean prompt corpus.
+
+### Customize reports (templates & branding)
+Reports render from Jinja2 templates you can override and brand:
+
+```yaml
+report:
+  template: default            # built-in: default | minimal
+  template_dir: my_templates/  # optional: your own report.html.j2 / report.md.j2 (overrides built-in)
+  branding: { title: "Acme Eval", accent: "#0aa", logo: "https://…/logo.png" }
+```
+
 ### Tailor it to your domain
 Set a `domain` (a one-line description of the system under test) and the generated **prompts** — and,
 with `audit.tailor_personas`, the **persona panel** — are specific to it instead of generic:
