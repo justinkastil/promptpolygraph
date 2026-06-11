@@ -43,6 +43,9 @@ def build_report(
     pairwise: dict | None = None,
     formats: list[str] | None = None,
     out_dir: str,
+    template: str = "default",
+    template_dir: str | None = None,
+    branding: dict | None = None,
 ) -> dict[str, str]:
     """Render the requested report formats and write them into `out_dir`.
 
@@ -61,6 +64,7 @@ def build_report(
         baseline_diff=baseline_diff,
         pairwise=pairwise,
     )
+    templated = dict(template=template, template_dir=template_dir, branding=branding)
 
     out: dict[str, str] = {}
     docx_bytes: Optional[bytes] = None
@@ -75,13 +79,13 @@ def build_report(
         path = os.path.abspath(os.path.join(out_dir, _FILENAMES.get(fmt, f"report.{fmt}")))
 
         if fmt == "md":
-            text = render_markdown(run_meta, cases, responses, scores, summary, **common)
+            text = render_markdown(run_meta, cases, responses, scores, summary, **common, **templated)
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
             out["md"] = path
 
         elif fmt == "html":
-            text = render_html(run_meta, cases, responses, scores, summary, **common)
+            text = render_html(run_meta, cases, responses, scores, summary, **common, **templated)
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
             out["html"] = path
