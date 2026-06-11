@@ -227,6 +227,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_persona_files()
             return
 
+        if parts == ["api", "corpus", "export"]:
+            self._api_corpus_dir_export(query)
+            return
+
         if parts == ["api", "redteam", "runs"]:
             self._api_redteam_runs()
             return
@@ -278,6 +282,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if parts == ["api", "personas", "generate"]:
             self._api_persona_generate()
+            return
+        if parts == ["api", "corpus", "generate"]:
+            self._api_corpus_generate()
             return
         if parts == ["api", "redteam", "trace"]:
             self._api_redteam_trace()
@@ -618,6 +625,10 @@ class _Handler(BaseHTTPRequestHandler):
             cfg.corpus.categories = [str(c) for c in cats]
         if ov.get("difficulty"):
             cfg.corpus.difficulty = str(ov["difficulty"])
+        if ov.get("path"):
+            cfg.corpus.path = str(ov["path"])
+            if not ov.get("mode"):
+                cfg.corpus.mode = "fixed"  # a saved corpus dir is loaded, not regenerated
         if "mock" in ov:
             cfg.mock = bool(ov["mock"])
         # Always run offline when no API key is configured.
@@ -978,6 +989,128 @@ class _Handler(BaseHTTPRequestHandler):
             pass  # client went away — let the daemon worker finish on its own
         except Exception:
             pass
+
+    # ---- studio: prompt-corpus generation + export ---------------------
+    def _corpus_dir(self) -> Path:
+        d = self.out_dir / "corpus"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _api_corpus_generate(self) -> None:
+        """Generate a prompt corpus in the Studio (varied / adversarial / hybrid).
+
+        Defaults to a frontier backend but honors any provider/model (incl. local
+        Ollama) — the same pluggable client as the rest of the tool. Saves a
+        loadable corpus dir under out_dir/corpus/<slug>/ and returns a preview."""
+        from promptpolygraph.config import CorpusConfig
+        from promptpolygraph.corpus import build_corpus
+
+        body = self._read_body()
+
+        def _int(v: Any) -> int | None:
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
+        mode = (body.get("mode") or "varied").strip()
+        domain = (str(body.get("domain") or "").strip()) or None
+        provider = (body.get("provider") or "anthropic").strip().lower()
+        model = body.get("model") or None
+        base_url = body.get("base_url") or None
+        difficulty = (body.get("difficulty") or "standard").strip()
+        cats = body.get("categories")
+        if isinstance(cats, str):
+            cats = [c.strip() for c in cats.split(",") if c.strip()]
+        cats = [str(c) for c in cats] if isinstance(cats, list) else []
+
+        mock = _want_mock(bool(body.get("mock")))
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(model, provider=provider, base_url=base_url)
+            except Exception:
+                client, mock = None, True
+
+        cfg = CorpusConfig(mode=mode, count=_int(body.get("count")),
+                           per_category=_int(body.get("per_category")),
+                           categories=cats, difficulty=difficulty, seed=_int(body.get("seed")))
+        try:
+            cases = build_corpus(cfg, resolve=lambda p: p, client=client, mock=mock, domain=domain)
+        except Exception as exc:
+            self._json({"error": "generation failed", "detail": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        slug = _slugify(domain or mode, fallback="corpus")
+        out = self._corpus_dir() / slug
+        out.mkdir(parents=True, exist_ok=True)
+        by_cat: dict[str, list[dict]] = {}
+        for c in cases:
+            by_cat.setdefault(c.category, []).append(c.model_dump(mode="json"))
+        for cat, rows in by_cat.items():
+            (out / f"{cat}.json").write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        self._json({
+            "path": str(out),
+            "count": len(cases),
+            "categories": {k: len(v) for k, v in by_cat.items()},
+            "mode": mode,
+            "provider": "mock" if mock else provider,
+            "preview": [{"prompt": c.prompt, "category": c.category} for c in cases[:40]],
+        })
+
+    def _api_corpus_dir_export(self, query: dict[str, list[str]]) -> None:
+        """Download a generated corpus dir as json | jsonl | csv. Bounded to
+        out_dir/corpus so it can't read arbitrary paths."""
+        import csv
+        import io
+
+        from promptpolygraph.corpus import load_corpus
+
+        want = (query.get("path", [""])[0] or "").strip()
+        if not want:
+            self._not_found("path required")
+            return
+        rp = Path(want).expanduser().resolve()
+        root = (self.out_dir / "corpus").resolve()
+        if rp != root and root not in rp.parents:
+            self._not_found("path outside the generated-corpus area")
+            return
+        try:
+            cases = load_corpus(str(rp))
+        except Exception:
+            self._not_found("could not load corpus")
+            return
+        fmt = (query.get("format", ["json"])[0] or "json").lower()
+        prompts_only = (query.get("prompts_only", ["0"])[0] or "0").lower() in ("1", "true", "yes")
+        if prompts_only:
+            rows: list[Any] = [{"prompt": c.prompt, "category": c.category} for c in cases]
+        else:
+            rows = [c.model_dump(mode="json", exclude={"id"}) for c in cases]
+        if fmt == "json":
+            data = json.dumps(rows, indent=2, ensure_ascii=False).encode("utf-8")
+            ctype = "application/json"
+        elif fmt == "jsonl":
+            data = ("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n").encode("utf-8")
+            ctype = "application/x-ndjson"
+        elif fmt == "csv":
+            buf = io.StringIO()
+            cols = ["prompt", "category", "subcategory", "expected_shape", "expected_behavior"]
+            w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+            w.writeheader()
+            for c in cases:
+                w.writerow({"prompt": c.prompt, "category": c.category,
+                            "subcategory": getattr(c, "subcategory", None) or "",
+                            "expected_shape": getattr(c, "expected_shape", None) or "",
+                            "expected_behavior": getattr(c, "expected_behavior", None) or ""})
+            data = buf.getvalue().encode("utf-8")
+            ctype = "text/csv"
+        else:
+            self._not_found("unknown corpus format")
+            return
+        self._send_download(data, f"{rp.name}-corpus.{fmt}", ctype)
 
     # ---- red-team run persistence + replay + on-demand code trace -------
     def _redteam_dir(self) -> Path:
