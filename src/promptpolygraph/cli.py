@@ -454,6 +454,47 @@ def cmd_personas(cfg: Config, args) -> None:
         print(f"generated {len(panel)} personas -> {out}")
 
 
+def cmd_init(cfg: Config, args) -> int:
+    """Detect usable providers/models and scaffold a config. The Studio + Arena
+    dropdowns read the same detection, so this is the proper setup step."""
+    from .discovery import discover_providers
+
+    provs = discover_providers()
+    print(_color("PromptPolygraph setup — providers detected:", "bold"))
+    available = []
+    for p in provs:
+        mark = _color("✓", "green") if p["available"] else _color("·", "dim")
+        print(f"  {mark} {p['label']:<22} {p['reason']}")
+        if p["available"]:
+            print(_color(f"      models: {', '.join(p.get('models') or []) or '—'}", "dim"))
+            available.append(p)
+
+    default = available[0] if available else None
+    out = Path(args.out or "promptpolygraph.yaml").expanduser()
+    if out.exists() and not args.force:
+        print(_color(f"\n{out} exists (use --force to overwrite). Detection above is current.", "yellow"))
+        return 0
+
+    backend: dict[str, Any] = {"provider": default["id"] if default else "ollama"}
+    if default and default.get("base_url"):
+        backend["base_url"] = default["base_url"]
+    data: dict[str, Any] = {
+        "name": "polygraph-run",
+        "llm": backend,
+        "model": default["default_model"] if default else None,
+        "redteam": {"profile": "all_frontier"},
+    }
+    import yaml
+
+    out.write_text(yaml.safe_dump(data, sort_keys=False))
+    print(_color(f"\nwrote {out}", "green"))
+    if not available:
+        print("no providers usable yet — set ANTHROPIC_API_KEY / OPENAI_API_KEY, "
+              "or run `ollama serve` and `ollama pull llama3.1`.")
+    print("next: polygraph dashboard   (the Studio + Arena read these providers for their dropdowns)")
+    return 0
+
+
 def cmd_dashboard(cfg: Config, args) -> None:
     from .ui import serve_dashboard
 
@@ -813,6 +854,10 @@ def build_parser() -> argparse.ArgumentParser:
     pd.add_argument("--port", type=int, default=8765)
     pd.add_argument("--no-open", dest="no_open", action="store_true", help="don't open a browser")
 
+    pin = sub.add_parser("init", parents=[common], help="detect providers/models and scaffold a config")
+    pin.add_argument("--out", help="config file to write (default: promptpolygraph.yaml)")
+    pin.add_argument("--force", action="store_true", help="overwrite an existing config")
+
     px = sub.add_parser("export", parents=[common], help="export a run's / corpus's prompts as a reusable dataset")
     px.add_argument("--run", help="export the prompts of a stored run id")
     px.add_argument("--corpus", help="export the prompts of a corpus dir/file")
@@ -869,7 +914,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = _load_cfg(args)
-    if args.cmd == "run":
+    if args.cmd == "init":
+        return cmd_init(cfg, args)
+    elif args.cmd == "run":
         cmd_run(cfg, args)
     elif args.cmd == "generate":
         cmd_generate(cfg, args)

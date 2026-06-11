@@ -227,6 +227,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_persona_files()
             return
 
+        if parts == ["api", "providers"]:
+            self._api_providers()
+            return
+
         if parts == ["api", "corpus", "export"]:
             self._api_corpus_dir_export(query)
             return
@@ -993,6 +997,15 @@ class _Handler(BaseHTTPRequestHandler):
             pass  # client went away — let the daemon worker finish on its own
         except Exception:
             pass
+
+    # ---- providers (drives the provider/model dropdowns) ---------------
+    def _api_providers(self) -> None:
+        from promptpolygraph.discovery import discover_providers
+
+        try:
+            self._json(discover_providers())
+        except Exception as exc:
+            self._json({"error": "discovery failed", "detail": str(exc)}, status=500)
 
     # ---- studio: prompt-corpus generation + export ---------------------
     def _corpus_dir(self) -> Path:
