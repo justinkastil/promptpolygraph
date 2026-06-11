@@ -56,18 +56,27 @@ _No persona reactions available for this run._
 ### {{ p.persona }}
 {% if p.summary %}
 {{ p.summary }}
+{% endif %}{% if p.avg_trust or p.avg_usefulness or p.avg_clarity or p.would_return_rate %}
+**Scores:** trust {{ p.avg_trust if p.avg_trust is not none else '—' }} · usefulness {{ p.avg_usefulness if p.avg_usefulness is not none else '—' }} · clarity {{ p.avg_clarity if p.avg_clarity is not none else '—' }}{% if p.would_return_rate is not none %} · would-return {{ p.would_return_rate }}%{% endif %}
+{% endif %}{% if p.verdict_counts %}
+**Verdicts:** {% for v, n in p.verdict_counts.items() %}{{ v }} ({{ n }}){% if not loop.last %}, {% endif %}{% endfor %}
 {% endif %}{% if p.biggest_frustrations %}
 **Biggest frustrations:**
 {% for f in p.biggest_frustrations %}- {{ f }}
 {% endfor %}{% endif %}{% if p.what_would_win_me %}
-**What would win me:** {{ p.what_would_win_me }}
-{% endif %}{% endfor %}{% if persona_comparison %}
-### Rubric vs persona divergence
-{% if persona_comparison.divergences %}
-**Divergences:** {{ persona_comparison.divergences }}
-{% endif %}{% if persona_comparison.rubric_fidelity_verdict %}
+**What would win me:**{% if p.what_would_win_me is string %} {{ p.what_would_win_me }}
+{% else %}
+{% for w in p.what_would_win_me %}- {{ w }}
+{% endfor %}{% endif %}{% endif %}{% endfor %}{% if persona_comparison %}
+### Methodology check
+{% if persona_comparison.rubric_fidelity_verdict %}
 **Rubric fidelity verdict:** {{ persona_comparison.rubric_fidelity_verdict }}
-{% endif %}{% if persona_comparison.reconciled_priorities %}
+{% endif %}{% if persona_comparison.divergence_count is not none %}
+**Rubric-vs-persona divergences:** {{ persona_comparison.divergence_count }}
+{% endif %}{% if persona_comparison.blind_spots %}
+**Human-value blind spots:**
+{% for b in persona_comparison.blind_spots %}- {{ b }}
+{% endfor %}{% endif %}{% if persona_comparison.reconciled_priorities %}
 **Reconciled priorities:** {{ persona_comparison.reconciled_priorities }}
 {% endif %}{% if persona_comparison.final_path %}
 **Final path:** {{ persona_comparison.final_path }}
