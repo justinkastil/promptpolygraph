@@ -15,6 +15,7 @@ from docx import Document
 from docx.shared import Pt, RGBColor
 
 from ..models import Case, Response, Rubric, RunMeta, Score
+from .context import _build_persona_comparison, _build_personas
 from .markdown import _fmt_delta, _fmt_num, _verdict_rank
 
 _MONO = "Courier New"
@@ -161,37 +162,46 @@ def _per_category_sections(
 
 
 def _persona_panel(doc: Document, audit: Optional[dict]) -> None:
-    doc.add_heading("Persona panel", level=1)
-    persona = (audit or {}).get("persona") or {}
-    reactions = persona.get("reactions") or []
-    comparison = persona.get("comparison") or {}
-    if not reactions and not comparison:
-        doc.add_paragraph("No persona reactions available for this run.")
+    personas = _build_personas(audit)
+    comparison = _build_persona_comparison(audit)
+    if not personas and not comparison:
         return
-    for r in reactions:
-        if not isinstance(r, dict):
-            continue
-        who = r.get("who") or r.get("persona") or r.get("id") or "Persona"
-        doc.add_heading(str(who), level=2)
-        summ = r.get("summary") or r.get("reaction") or ""
+    doc.add_heading("Persona panel", level=1)
+    for p in personas:
+        doc.add_heading(str(p.get("persona") or "Persona"), level=2)
+        summ = p.get("summary") or ""
         if summ:
             doc.add_paragraph(str(summ))
-        frustrations = r.get("frustrations") or r.get("biggest_frustrations") or []
+        bits = []
+        if p.get("avg_trust") is not None:
+            bits.append(f"trust {p['avg_trust']}")
+        if p.get("avg_usefulness") is not None:
+            bits.append(f"usefulness {p['avg_usefulness']}")
+        if p.get("avg_clarity") is not None:
+            bits.append(f"clarity {p['avg_clarity']}")
+        if p.get("would_return_rate") is not None:
+            bits.append(f"would-return {p['would_return_rate']}%")
+        if bits:
+            _kv(doc, "Scores", " · ".join(bits))
+        if p.get("verdict_counts"):
+            _kv(doc, "Verdicts", ", ".join(f"{v} ({n})" for v, n in p["verdict_counts"].items()))
+        frustrations = p.get("biggest_frustrations") or []
         if frustrations:
             doc.add_paragraph().add_run("Biggest frustrations:").bold = True
             for f in frustrations:
                 doc.add_paragraph(str(f), style="List Bullet")
     if comparison:
-        doc.add_heading("Rubric vs persona divergence", level=2)
-        div = comparison.get("divergence") or comparison.get("summary")
-        if div:
-            doc.add_paragraph(str(div))
-        items = comparison.get("items") or comparison.get("divergences") or []
-        for it in items:
-            if isinstance(it, dict):
-                doc.add_paragraph(f"{it.get('category', '')}: {it.get('note') or it.get('detail') or ''}".strip(": "), style="List Bullet")
-            else:
-                doc.add_paragraph(str(it), style="List Bullet")
+        doc.add_heading("Methodology check", level=2)
+        if comparison.get("rubric_fidelity_verdict"):
+            _kv(doc, "Rubric fidelity verdict", comparison["rubric_fidelity_verdict"])
+        if comparison.get("divergence_count") is not None:
+            _kv(doc, "Rubric-vs-persona divergences", comparison["divergence_count"])
+        if comparison.get("blind_spots"):
+            doc.add_paragraph().add_run("Human-value blind spots:").bold = True
+            for b in comparison["blind_spots"]:
+                doc.add_paragraph(str(b), style="List Bullet")
+        if comparison.get("final_path"):
+            _kv(doc, "Final path", comparison["final_path"])
 
 
 def _forensic_synthesis(doc: Document, audit: Optional[dict]) -> None:

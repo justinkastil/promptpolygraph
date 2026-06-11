@@ -23,12 +23,19 @@ Evaluating an AI system well means more than a single accuracy number. PromptPol
   *varied* / *adversarial* probes, with dials for quantity, categories, difficulty, and seed.
 - **Adapters** — one small class (`async def query(case) -> Response`) per system under test. Ships an
   HTTP/REST adapter, an LLM-chat adapter, and an in-process callable adapter.
-- **Layered scoring** — deterministic assertions (contains / regex / json-schema / latency) run first;
-  then an LLM rubric scorer with an optional multi-judge ensemble and inter-judge agreement.
+- **Layered scoring** — deterministic assertions (contains / regex / json-schema / latency / **semantic
+  similarity** / **custom Python**), with **weights, per-test thresholds, and named + derived (F1-style)
+  metrics**, then an LLM rubric scorer with a multi-judge ensemble + inter-judge agreement.
 - **Persona panel** — a pool of distinct individuals react to the real responses (trust, usefulness,
   clarity, would-return), reconciled against the rubric so you optimize real value, not just the number.
-- **Forensic audit** — per-category agents trace low scores to failure modes and the highest-leverage fixes.
-- **Reports** — a polished review document in markdown, docx, pdf, and html.
+- **Forensic audit** — per-category agents trace low scores to failure modes and emit a concrete
+  **suggested fix** (the `file:line` to change + a diff) for systems whose source you provide.
+- **Comparison & trends** — comparability-gated N-run comparison, per-dimension trends, and regression
+  detection vs a pinned or rolling baseline.
+- **Visuals & reports** — a local dashboard (score heatmaps, compare matrix, trend lines, persona radar,
+  root-cause→fix view) and presentation-grade markdown / docx / pdf / html reports with inline charts.
+
+See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 
 ## Install
 
@@ -118,14 +125,18 @@ polygraph personas generate --domain "developer tools" --count 8 --out panel.yam
 Select a panel via `personas_path:` (a YAML file), `audit.persona_pool: N` (sample the 13-persona library),
 or `audit.personas: [ids]`.
 
-### 5. Report & compare
+### 5. Report, compare, trend & regressions
 ```bash
 polygraph report  --config c.yaml --run <run_id> --format md,docx,pdf,html --baseline <prior_run_id>
-polygraph compare --config c.yaml --run-a <run_id> --run-b <other_run_id>     # A/B win/loss/tie
+polygraph compare --config c.yaml --run-a <id> --run-b <id>        # A/B win/loss/tie
+polygraph compare --config c.yaml --runs <id1>,<id2>,<id3>         # N-run comparison report
+polygraph trend   --config c.yaml --project <name> --window 30     # per-dimension trend over runs
+polygraph regressions --config c.yaml --run <id> --against rolling:20   # or --against <baseline_id>
 ```
-`--baseline` adds Δ-vs-prior columns + regression flags. `compare` runs the same corpus through two systems
-(or model versions) and tallies per-case win/loss/tie. PDF uses LibreOffice headless when available and is
-skipped gracefully otherwise.
+`--baseline` adds Δ-vs-prior columns + regression flags. Comparison is **comparability-gated** (runs are only
+score-compared when their corpus + rubric fingerprints match). `trend` plots per-dimension means + slope over
+the recent comparable runs; `regressions` flags dimensions that dropped vs a pinned or rolling baseline.
+PDF uses LibreOffice headless when available and is skipped gracefully otherwise.
 
 ### One-shot
 ```bash

@@ -189,6 +189,36 @@ def _build_case(case: Case, resp: Optional[Response], score: Optional[Score], di
     }
 
 
+def _coerce_float(v: Any) -> Optional[float]:
+    """Best-effort numeric coercion; None when not numeric."""
+    if v is None or isinstance(v, bool):
+        return float(v) if isinstance(v, bool) else None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_return(v: Any) -> Optional[bool]:
+    """Interpret a would_return value (bool, number, or yes/no string) as truthy."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return float(v) > 0
+    s = str(v).strip().lower()
+    if s in ("yes", "true", "y", "1", "would return", "return"):
+        return True
+    if s in ("no", "false", "n", "0", "would not return"):
+        return False
+    return None
+
+
+def _avg(vals: list[float]) -> Optional[str]:
+    return _num(sum(vals) / len(vals)) if vals else None
+
+
 def _build_personas(audit: Optional[dict]) -> list[dict]:
     persona = (audit or {}).get("persona") or {}
     reactions = persona.get("reactions") or []
@@ -197,6 +227,11 @@ def _build_personas(audit: Optional[dict]) -> list[dict]:
         if not isinstance(r, dict):
             continue
         per_case = []
+        trust_vals: list[float] = []
+        useful_vals: list[float] = []
+        clarity_vals: list[float] = []
+        return_flags: list[bool] = []
+        verdict_counts: dict[str, int] = {}
         for cr in r.get("reactions") or []:
             if not isinstance(cr, dict):
                 continue
@@ -212,12 +247,35 @@ def _build_personas(audit: Optional[dict]) -> list[dict]:
                     "verdict": cr.get("verdict"),
                 }
             )
+            for key, bucket in (("trust", trust_vals), ("usefulness", useful_vals), ("clarity", clarity_vals)):
+                fv = _coerce_float(cr.get(key))
+                if fv is not None:
+                    bucket.append(fv)
+            rb = _coerce_return(cr.get("would_return"))
+            if rb is not None:
+                return_flags.append(rb)
+            v = cr.get("verdict")
+            if v not in (None, ""):
+                verdict_counts[str(v)] = verdict_counts.get(str(v), 0) + 1
+
+        return_rate = (
+            _num(100.0 * sum(1 for b in return_flags if b) / len(return_flags), 0)
+            if return_flags
+            else None
+        )
         out.append(
             {
                 "persona": r.get("persona") or r.get("who") or r.get("id") or "Persona",
                 "summary": r.get("persona_summary") or r.get("summary") or "",
                 "biggest_frustrations": list(r.get("biggest_frustrations") or r.get("frustrations") or []),
-                "what_would_win_me": r.get("what_would_win_me") or "",
+                "what_would_win_me": list(r.get("what_would_win_me") or [])
+                if isinstance(r.get("what_would_win_me"), list)
+                else (r.get("what_would_win_me") or ""),
+                "avg_trust": _avg(trust_vals),
+                "avg_usefulness": _avg(useful_vals),
+                "avg_clarity": _avg(clarity_vals),
+                "would_return_rate": return_rate,
+                "verdict_counts": verdict_counts,
                 "reactions": per_case,
             }
         )
@@ -229,11 +287,18 @@ def _build_persona_comparison(audit: Optional[dict]) -> Optional[dict]:
     comparison = persona.get("comparison") or {}
     if not comparison:
         return None
+    divergences = comparison.get("divergences") or comparison.get("divergence")
+    divergence_count = len(divergences) if isinstance(divergences, (list, tuple)) else None
+    blind_spots = comparison.get("human_value_blindspots") or comparison.get("blind_spots") or []
+    if not isinstance(blind_spots, (list, tuple)):
+        blind_spots = [blind_spots] if blind_spots else []
     return {
-        "divergences": comparison.get("divergences") or comparison.get("divergence"),
+        "divergences": divergences,
+        "divergence_count": divergence_count,
         "rubric_fidelity_verdict": comparison.get("rubric_fidelity_verdict"),
         "chasing_tail_risks": comparison.get("chasing_tail_risks"),
         "human_value_blindspots": comparison.get("human_value_blindspots"),
+        "blind_spots": list(blind_spots),
         "reconciled_priorities": comparison.get("reconciled_priorities"),
         "final_path": comparison.get("final_path"),
     }

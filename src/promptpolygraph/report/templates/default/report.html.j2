@@ -53,6 +53,12 @@ code { font-family: var(--mono); background: #ececed; padding: .05rem .3rem; bor
 .footer dt { font-weight: 600; color: var(--muted); }
 .note { color: var(--muted); font-style: italic; }
 .persona { border: 1px solid var(--border); border-radius: 8px; padding: .25rem 1rem 1rem; margin: .75rem 0; background: var(--panel); }
+.stat-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 .75rem; }
+.stat-chip { display: inline-flex; flex-direction: column; align-items: flex-start; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: .3rem .6rem; min-width: 4.5rem; }
+.stat-chip .stat-label { font-size: .68rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.stat-chip .stat-value { font-size: 1.05rem; font-weight: 700; color: var(--accent); }
+.verdict-tally { font-size: .85rem; color: var(--muted); margin: .25rem 0 .5rem; }
+.method-check { border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: .6rem 1rem; margin: .6rem 0; background: var(--panel); }
 .narrative { background: var(--panel); border-radius: 8px; padding: .75rem 1rem; }
 .chart-card { border: 1px solid var(--border); border-radius: 10px; padding: .85rem 1rem .65rem; margin: .9rem 0; background: #fff; }
 .chart-card > .chart-title { font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 0 0 .5rem; }
@@ -184,11 +190,25 @@ code { font-family: var(--mono); background: #ececed; padding: .05rem .3rem; bor
   <div class="persona">
     <h3>{{ p.persona }}</h3>
     {% if p.summary %}<p>{{ p.summary }}</p>{% endif %}
+    {% if p.avg_trust or p.avg_usefulness or p.avg_clarity or p.would_return_rate %}
+    <div class="stat-chips">
+      {% if p.avg_trust %}<span class="stat-chip"><span class="stat-label">Trust</span><span class="stat-value">{{ p.avg_trust }}</span></span>{% endif %}
+      {% if p.avg_usefulness %}<span class="stat-chip"><span class="stat-label">Usefulness</span><span class="stat-value">{{ p.avg_usefulness }}</span></span>{% endif %}
+      {% if p.avg_clarity %}<span class="stat-chip"><span class="stat-label">Clarity</span><span class="stat-value">{{ p.avg_clarity }}</span></span>{% endif %}
+      {% if p.would_return_rate %}<span class="stat-chip"><span class="stat-label">Would return</span><span class="stat-value">{{ p.would_return_rate }}%</span></span>{% endif %}
+    </div>
+    {% endif %}
+    {% if p.verdict_counts %}
+    <p class="verdict-tally">Verdicts: {% for v, n in p.verdict_counts.items() %}{{ v }} ({{ n }}){% if not loop.last %} · {% endif %}{% endfor %}</p>
+    {% endif %}
     {% if p.biggest_frustrations %}
     <p><strong>Biggest frustrations:</strong></p>
     <ul>{% for f in p.biggest_frustrations %}<li>{{ f }}</li>{% endfor %}</ul>
     {% endif %}
-    {% if p.what_would_win_me %}<p><strong>What would win me:</strong> {{ p.what_would_win_me }}</p>{% endif %}
+    {% if p.what_would_win_me %}
+    <p><strong>What would win me:</strong></p>
+    {% if p.what_would_win_me is string %}<p>{{ p.what_would_win_me }}</p>{% else %}<ul>{% for w in p.what_would_win_me %}<li>{{ w }}</li>{% endfor %}</ul>{% endif %}
+    {% endif %}
     {% if p.reactions %}
     <table><thead><tr><th>Case</th><th>Category</th><th>Trust</th><th>Useful</th><th>Clarity</th><th>Return?</th><th>Verdict</th></tr></thead><tbody>
     {% for r in p.reactions %}
@@ -199,15 +219,18 @@ code { font-family: var(--mono); background: #ececed; padding: .05rem .3rem; bor
   </div>
   {% endfor %}
   {% if persona_comparison %}
-  <h3>Rubric vs persona divergence</h3>
-  <dl>
-    {% if persona_comparison.divergences %}<dt>Divergences</dt><dd>{{ persona_comparison.divergences }}</dd>{% endif %}
-    {% if persona_comparison.rubric_fidelity_verdict %}<dt>Rubric fidelity verdict</dt><dd>{{ persona_comparison.rubric_fidelity_verdict }}</dd>{% endif %}
-    {% if persona_comparison.chasing_tail_risks %}<dt>Chasing-tail risks</dt><dd>{{ persona_comparison.chasing_tail_risks }}</dd>{% endif %}
-    {% if persona_comparison.human_value_blindspots %}<dt>Human-value blindspots</dt><dd>{{ persona_comparison.human_value_blindspots }}</dd>{% endif %}
-    {% if persona_comparison.reconciled_priorities %}<dt>Reconciled priorities</dt><dd>{{ persona_comparison.reconciled_priorities }}</dd>{% endif %}
-    {% if persona_comparison.final_path %}<dt>Final path</dt><dd>{{ persona_comparison.final_path }}</dd>{% endif %}
-  </dl>
+  <h3>Methodology check</h3>
+  <div class="method-check">
+    {% if persona_comparison.rubric_fidelity_verdict %}<p><strong>Rubric fidelity verdict:</strong> {{ persona_comparison.rubric_fidelity_verdict }}</p>{% endif %}
+    {% if persona_comparison.divergence_count is not none %}<p><strong>Rubric-vs-persona divergences:</strong> {{ persona_comparison.divergence_count }}</p>{% endif %}
+    {% if persona_comparison.blind_spots %}
+    <p><strong>Human-value blind spots:</strong></p>
+    <ul>{% for b in persona_comparison.blind_spots %}<li>{{ b }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if persona_comparison.chasing_tail_risks %}<p><strong>Chasing-tail risks:</strong> {{ persona_comparison.chasing_tail_risks }}</p>{% endif %}
+    {% if persona_comparison.reconciled_priorities %}<p><strong>Reconciled priorities:</strong> {{ persona_comparison.reconciled_priorities }}</p>{% endif %}
+    {% if persona_comparison.final_path %}<p><strong>Final path:</strong> {{ persona_comparison.final_path }}</p>{% endif %}
+  </div>
   {% endif %}
 {% endif %}
 </section>

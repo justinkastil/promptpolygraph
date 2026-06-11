@@ -10,7 +10,10 @@ Public entry point: :func:`serve_dashboard`.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import re
 import threading
 import webbrowser
 from http import HTTPStatus
@@ -20,6 +23,34 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .page import PAGE
+
+# ── Control-plane state ─────────────────────────────────────────────────────
+# Module-level progress map for in-process runs launched from the dashboard.
+# Keyed by run_id -> {"stage", "completed?", "total?", "error?", ...}. A
+# background daemon thread mutates this; handlers only read it. Plain dict
+# writes are atomic enough under CPython's GIL for this single-key-per-run use.
+PROGRESS: dict[str, dict[str, Any]] = {}
+
+
+def _slugify(text: str, *, fallback: str = "panel") -> str:
+    """A filesystem-safe snake_case slug for persona file names."""
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    slug = "_".join(words[:6]) if words else ""
+    return slug or fallback
+
+
+def _repo_root() -> Path:
+    """The installed package's repo root (holds ``examples/``), best-effort."""
+    import promptpolygraph
+
+    return Path(promptpolygraph.__file__).resolve().parents[2]
+
+
+def _want_mock(requested: bool | None) -> bool:
+    """Mock when explicitly requested OR when no API key is configured."""
+    if requested:
+        return True
+    return not os.environ.get("ANTHROPIC_API_KEY")
 
 # Report formats -> (filename, content-type).
 _REPORT_FORMATS: dict[str, tuple[str, str]] = {
@@ -121,6 +152,32 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+    def do_POST(self) -> None:  # noqa: N802
+        try:
+            self._route_post()
+        except BrokenPipeError:
+            pass
+        except Exception as exc:  # never let one bad request kill the server
+            try:
+                self._json({"error": "internal error", "detail": str(exc)}, status=500)
+            except Exception:
+                pass
+
+    def _read_body(self) -> dict[str, Any]:
+        """Parse the JSON request body; tolerate empty/garbage as ``{}``."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
     def _route(self) -> None:
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
@@ -144,6 +201,22 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_compare(query)
             return
 
+        if parts == ["api", "configs"]:
+            self._api_configs()
+            return
+
+        if parts == ["api", "personas"]:
+            self._api_personas()
+            return
+
+        if parts == ["api", "personas", "files"]:
+            self._api_persona_files()
+            return
+
+        if len(parts) == 4 and parts[:2] == ["api", "run"] and parts[3] == "status":
+            self._api_run_status(parts[2])
+            return
+
         if len(parts) >= 3 and parts[0] == "api" and parts[1] == "runs":
             run_id = parts[2]
             tail = parts[3] if len(parts) > 3 else None
@@ -157,6 +230,23 @@ class _Handler(BaseHTTPRequestHandler):
                 self._api_report(run_id, query)
             else:
                 self._not_found("unknown run sub-resource")
+            return
+
+        self._not_found("unknown path")
+
+    def _route_post(self) -> None:
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        parts = [p for p in path.split("/") if p]
+
+        if parts == ["api", "run"]:
+            self._api_run_launch()
+            return
+        if parts == ["api", "personas", "new"]:
+            self._api_persona_new()
+            return
+        if parts == ["api", "personas", "generate"]:
+            self._api_persona_generate()
             return
 
         self._not_found("unknown path")
@@ -295,6 +385,321 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(data)
+
+    # ---- control plane: configs ----------------------------------------
+    def _api_configs(self) -> None:
+        """List selectable configs: bundled ``examples/*/config.yaml`` plus any
+        ``*.yaml`` in a ``configs/`` dir under cwd or out_dir."""
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        def add(name: str, p: Path) -> None:
+            rp = str(p.resolve())
+            if rp in seen or not p.is_file():
+                return
+            seen.add(rp)
+            out.append({"name": name, "path": rp})
+
+        try:
+            examples = _repo_root() / "examples"
+            if examples.is_dir():
+                for d in sorted(examples.iterdir()):
+                    cfg = d / "config.yaml"
+                    if cfg.is_file():
+                        add(d.name, cfg)
+        except Exception:
+            pass
+
+        for base in (Path.cwd(), self.out_dir):
+            try:
+                cdir = base / "configs"
+                if cdir.is_dir():
+                    for y in sorted(cdir.glob("*.yaml")):
+                        add(y.stem, y)
+                    for y in sorted(cdir.glob("*.yml")):
+                        add(y.stem, y)
+            except Exception:
+                pass
+
+        self._json(out)
+
+    # ---- control plane: launch + status --------------------------------
+    def _resolve_config_path(self, body: dict[str, Any]) -> str | None:
+        """Map a config_path or config_name from the request to a file path."""
+        cp = (body.get("config_path") or "").strip()
+        if cp:
+            p = Path(cp).expanduser()
+            if p.is_file():
+                return str(p.resolve())
+            return None
+        name = (body.get("config_name") or "").strip()
+        if not name:
+            return None
+        # Match against the configs the /api/configs endpoint would list.
+        try:
+            examples = _repo_root() / "examples"
+            cand = examples / name / "config.yaml"
+            if cand.is_file():
+                return str(cand.resolve())
+        except Exception:
+            pass
+        for base in (Path.cwd(), self.out_dir):
+            for ext in ("yaml", "yml"):
+                cand = base / "configs" / f"{name}.{ext}"
+                if cand.is_file():
+                    return str(cand.resolve())
+        return None
+
+    def _api_run_launch(self) -> None:
+        from promptpolygraph.config import Config
+        from promptpolygraph.models import new_id
+        from promptpolygraph.pipeline import run_pipeline
+        from promptpolygraph.runner import SQLiteStore
+
+        body = self._read_body()
+        cfg_path = self._resolve_config_path(body)
+        try:
+            cfg = Config.load(cfg_path) if cfg_path else Config()
+        except Exception as exc:
+            self._json({"error": "could not load config", "detail": str(exc)},
+                       status=HTTPStatus.BAD_REQUEST)
+            return
+
+        ov = body.get("overrides") or {}
+        if not isinstance(ov, dict):
+            ov = {}
+        try:
+            self._apply_overrides(cfg, ov)
+        except Exception as exc:
+            self._json({"error": "bad overrides", "detail": str(exc)},
+                       status=HTTPStatus.BAD_REQUEST)
+            return
+
+        personas_path = (body.get("personas_path") or "").strip()
+        if personas_path:
+            cfg.personas_path = personas_path
+
+        # The dashboard's store IS the run's store — write into out_dir.
+        cfg.out_dir = str(self.out_dir)
+        run_id = new_id()
+        PROGRESS[run_id] = {"stage": "queued"}
+        store_path = str(self.store_path)
+        out_dir = str(self.out_dir)
+
+        def _progress(stage: str, info: dict) -> None:
+            PROGRESS[run_id] = {"stage": stage, **(info or {})}
+
+        def _worker() -> None:
+            try:
+                store = SQLiteStore(store_path)
+                asyncio.run(
+                    run_pipeline(cfg, store, run_id=run_id, out_dir=out_dir, progress=_progress)
+                )
+                cur = PROGRESS.get(run_id) or {}
+                if cur.get("stage") != "done":
+                    PROGRESS[run_id] = {**cur, "stage": "done"}
+            except Exception as exc:  # record, never crash the server
+                PROGRESS[run_id] = {"stage": "error", "error": str(exc)}
+
+        threading.Thread(target=_worker, daemon=True).start()
+        self._json({"run_id": run_id, "status": "running"})
+
+    @staticmethod
+    def _apply_overrides(cfg: Any, ov: dict[str, Any]) -> None:
+        """Apply UI dials onto a Config, ignoring blanks. Mutates ``cfg``."""
+        def _int(v: Any) -> int | None:
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
+        if ov.get("mode"):
+            cfg.corpus.mode = str(ov["mode"])
+        if ov.get("count") not in (None, ""):
+            n = _int(ov.get("count"))
+            if n is not None:
+                cfg.corpus.count = n
+        if ov.get("per_category") not in (None, ""):
+            n = _int(ov.get("per_category"))
+            if n is not None:
+                cfg.corpus.per_category = n
+        cats = ov.get("categories")
+        if isinstance(cats, str):
+            cats = [c.strip() for c in cats.split(",") if c.strip()]
+        if isinstance(cats, list) and cats:
+            cfg.corpus.categories = [str(c) for c in cats]
+        if ov.get("difficulty"):
+            cfg.corpus.difficulty = str(ov["difficulty"])
+        if "mock" in ov:
+            cfg.mock = bool(ov["mock"])
+        # Always run offline when no API key is configured.
+        if _want_mock(cfg.mock):
+            cfg.mock = True
+        fmts = ov.get("formats")
+        if isinstance(fmts, str):
+            fmts = [f.strip() for f in fmts.split(",") if f.strip()]
+        if isinstance(fmts, list) and fmts:
+            cfg.report.formats = [str(f) for f in fmts]
+
+    def _api_run_status(self, run_id: str) -> None:
+        prog = dict(PROGRESS.get(run_id) or {})
+        completed: int | None = prog.get("completed")
+        total: int | None = prog.get("total")
+        completed_at = None
+        # Merge with the store row when present.
+        try:
+            store = self._open_store()
+            run = store.get_run(run_id)
+            if run is not None:
+                if total is None:
+                    total = run.total_cases
+                if completed is None and run.completed_cases:
+                    completed = run.completed_cases
+                completed_at = run.completed_at
+        except Exception:
+            run = None
+
+        stage = prog.get("stage") or ("queued" if run_id in PROGRESS else "unknown")
+        error = prog.get("error")
+        done = stage == "done" or (error is None and completed_at is not None and stage != "error")
+        if error:
+            done = True
+        out = {
+            "run_id": run_id,
+            "stage": stage,
+            "completed": completed,
+            "total": total,
+            "done": bool(done),
+            "completed_at": completed_at,
+        }
+        if error:
+            out["error"] = error
+        self._json(out)
+
+    # ---- control plane: persona studio ---------------------------------
+    def _personas_dir(self) -> Path:
+        d = self.out_dir / "personas"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _api_personas(self) -> None:
+        from promptpolygraph import persona as P
+
+        try:
+            lib = P.load_library()
+        except Exception as exc:
+            self._json({"error": "could not load library", "detail": str(exc)},
+                       status=HTTPStatus.NOT_FOUND)
+            return
+        self._json([p.model_dump() for p in lib])
+
+    def _api_persona_files(self) -> None:
+        """List saved persona yaml files under ``<out_dir>/personas/`` plus the
+        bundled ``examples/*/personas.yaml``."""
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        def add(name: str, p: Path) -> None:
+            rp = str(p.resolve())
+            if rp in seen or not p.is_file():
+                return
+            seen.add(rp)
+            out.append({"name": name, "path": rp})
+
+        try:
+            pd = self.out_dir / "personas"
+            if pd.is_dir():
+                for y in sorted(pd.glob("*.yaml")):
+                    add(y.stem, y)
+                for y in sorted(pd.glob("*.yml")):
+                    add(y.stem, y)
+        except Exception:
+            pass
+        try:
+            examples = _repo_root() / "examples"
+            if examples.is_dir():
+                for d in sorted(examples.iterdir()):
+                    pf = d / "personas.yaml"
+                    if pf.is_file():
+                        add(f"{d.name} (example)", pf)
+        except Exception:
+            pass
+        self._json(out)
+
+    def _save_personas_yaml(self, path: Path, personas: list[Any]) -> None:
+        import yaml
+
+        data = {"personas": [p.model_dump() for p in personas]}
+        path.write_text(
+            yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+
+    def _api_persona_new(self) -> None:
+        from promptpolygraph import persona as P
+
+        body = self._read_body()
+        desc = str(body.get("description") or "").strip()
+        if not desc:
+            self._json({"error": "description required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        mock = _want_mock(bool(body.get("mock")))
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(None)
+            except Exception:
+                client = None
+                mock = True
+        try:
+            persona = asyncio.run(P.create_persona(client, desc, mock=mock))
+        except Exception as exc:
+            self._json({"error": "create failed", "detail": str(exc)}, status=500)
+            return
+
+        slug = _slugify(getattr(persona, "id", "") or desc, fallback="persona")
+        path = self._personas_dir() / f"{slug}.yaml"
+        try:
+            self._save_personas_yaml(path, [persona])
+        except Exception:
+            pass
+        self._json({"persona": persona.model_dump(), "path": str(path)})
+
+    def _api_persona_generate(self) -> None:
+        from promptpolygraph import persona as P
+
+        body = self._read_body()
+        try:
+            count = int(body.get("count") or 6)
+        except (TypeError, ValueError):
+            count = 6
+        count = max(1, min(count, 24))
+        domain = str(body.get("domain") or "general assistant").strip() or "general assistant"
+        mock = _want_mock(bool(body.get("mock")))
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(None)
+            except Exception:
+                client = None
+                mock = True
+        try:
+            panel = asyncio.run(P.generate_panel(client, count, domain, mock=mock))
+        except Exception as exc:
+            self._json({"error": "generate failed", "detail": str(exc)}, status=500)
+            return
+
+        slug = _slugify(domain, fallback="panel")
+        path = self._personas_dir() / f"{slug}.yaml"
+        try:
+            self._save_personas_yaml(path, panel)
+        except Exception:
+            pass
+        self._json({"panel": [p.model_dump() for p in panel], "path": str(path)})
 
     # ---- quiet logging --------------------------------------------------
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
