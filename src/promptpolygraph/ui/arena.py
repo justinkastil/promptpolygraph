@@ -125,11 +125,13 @@ __THEME_CSS__
     padding: 11px 22px; border-bottom: 1px solid var(--line);
     background: var(--bg2);
   }
-  .seg-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
   .seg-toggle button {
     appearance: none; border: 0; background: var(--panel); color: var(--muted);
     font: 600 12.5px/1 var(--sans); padding: 8px 15px; cursor: pointer; letter-spacing: .3px;
+    transition: background .14s, color .14s;
   }
+  .seg-toggle button:hover { color: var(--text); }
   .seg-toggle button + button { border-left: 1px solid var(--line); }
   .seg-toggle button.on { background: var(--panel-3); color: var(--text); }
   .seg-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -138,25 +140,30 @@ __THEME_CSS__
   .ctl label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
   .field, select.field {
     background: var(--panel); color: var(--text); border: 1px solid var(--line);
-    border-radius: 8px; padding: 7px 10px; font: 13px/1 var(--sans); min-width: 120px;
+    border-radius: var(--radius-sm); padding: 7px 10px; font: 13px/1 var(--sans); min-width: 120px;
+    transition: border-color .14s, box-shadow .14s;
   }
-  .field:focus, select.field:focus { outline: none; border-color: var(--accent); }
+  .field:focus, select.field:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
   .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
   .check input { accent-color: var(--accent); }
   .chips { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 2px; }
   .chip {
     background: var(--panel-2, var(--panel)); color: var(--muted); border: 1px solid var(--line);
-    border-radius: 999px; padding: 2px 9px; font: 11.5px/1.4 var(--sans); cursor: pointer;
+    border-radius: 999px; padding: 3px 10px; font: 11.5px/1.4 var(--sans); cursor: pointer;
+    transition: color .14s, border-color .14s, background .14s;
   }
-  .chip:hover { color: var(--text); border-color: var(--accent); }
+  .chip:hover { color: var(--text); border-color: var(--accent); background: var(--panel-3); }
+  .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .hint { font-size: 10.5px; color: var(--muted); cursor: help; text-transform: none; letter-spacing: 0; }
   .btn {
-    appearance: none; border: 1px solid var(--line); border-radius: 8px;
-    background: var(--panel-2); color: var(--text); font: 600 13px/1 var(--sans);
-    padding: 8px 14px; cursor: pointer;
+    appearance: none; display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: var(--panel-2); color: var(--text); font: 600 13px/1.2 var(--sans);
+    padding: 8px 14px; cursor: pointer; transition: background .14s, border-color .14s, filter .14s;
   }
   .btn:hover { background: var(--panel-3); }
-  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn:active { filter: brightness(.96); }
+  .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #0b0d11; font-weight: 700; }
   .btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
   .btn.danger { border-color: var(--red-deep); color: #ffd7df; }
@@ -281,6 +288,8 @@ __THEME_CSS__
   table.findings { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   table.findings th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
   table.findings td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.findings tbody tr { transition: background .14s; }
+  table.findings tbody tr:hover { background: var(--row-hover); }
   table.findings tr:last-child td { border-bottom: 0; }
   table.findings .sevpill { font: 800 10px/1 var(--mono); text-transform: uppercase; padding: 3px 7px; border-radius: 999px; color: #0a0c12; }
   table.findings code { font-family: var(--mono); color: var(--muted); font-size: 11px; }

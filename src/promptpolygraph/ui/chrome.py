@@ -34,12 +34,26 @@ THEME_CSS: str = r"""
     --text: #e6e9ef;
     --muted: #98a0ad;
     --accent: #6aa3ff;
+    --muted-2: #6a7280;
     --pass: #46c08a;
     --fail: #e5736b;
     --warn: #e6b450;
     --row-hover: #20242f;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    /* shared spacing scale (4px rhythm) + radii — one ruler for the whole app */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 22px;
+    --radius: 10px;
+    --radius-sm: 7px;
+    --radius-lg: 12px;
+    --focus-ring: 0 0 0 3px rgba(106,163,255,.28);
+    /* uppercase micro-label (section headers, field labels) */
+    --label-size: 11px;
+    --label-spacing: .5px;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
@@ -53,59 +67,67 @@ THEME_CSS: str = r"""
   /* ── shared top header / nav ─────────────────────────────────────────── */
   header.top {
     display: flex; align-items: baseline; gap: 14px;
-    padding: 14px 22px; border-bottom: 1px solid var(--border);
+    padding: 13px 22px; border-bottom: 1px solid var(--border);
     background: var(--panel); position: sticky; top: 0; z-index: 30;
   }
-  header.top h1 { font-size: 16px; margin: 0; letter-spacing: .3px; }
+  header.top h1 { font-size: 16px; font-weight: 700; margin: 0; letter-spacing: .3px; }
   header.top .sub { color: var(--muted); font-size: 12px; }
   header.top .spacer { flex: 1; }
-  header.top .crumb { color: var(--muted); font-size: 13px; cursor: pointer; }
+  header.top .crumb { color: var(--muted); font-size: 13px; cursor: pointer; transition: color .14s; }
   header.top .crumb:hover { color: var(--text); }
-  header.top .navtabs { display: flex; gap: 2px; }
+  header.top .navtabs { display: flex; gap: 2px; margin-left: 4px; }
   header.top .navtab {
-    padding: 5px 12px; cursor: pointer; color: var(--muted); border-radius: 7px;
-    font-weight: 600; font-size: 13px; text-decoration: none;
+    padding: 6px 13px; cursor: pointer; color: var(--muted); border-radius: var(--radius-sm);
+    font-weight: 600; font-size: 13px; text-decoration: none; transition: background .14s, color .14s;
   }
   header.top .navtab:hover { background: var(--panel-2); color: var(--text); text-decoration: none; }
   header.top .navtab.active { color: var(--text); background: var(--panel-2); }
+  header.top .navtab:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
   /* ── shared surfaces ─────────────────────────────────────────────────── */
-  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 4px 0; margin-bottom: 22px; overflow: hidden; }
-  .panel h2 { font-size: 14px; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-  .panel .body { padding: 4px 0; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 0; margin-bottom: var(--sp-5); overflow: hidden; }
+  .panel h2 { font-size: 13px; font-weight: 700; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border); letter-spacing: .2px; }
+  .panel .body { padding: var(--sp-2) 0; }
 
   /* ── shared controls ─────────────────────────────────────────────────── */
   .btn {
-    display: inline-block; padding: 7px 13px; border: 1px solid var(--border);
-    border-radius: 8px; background: var(--panel); color: var(--text);
-    cursor: pointer; font-size: 13px; font-family: var(--sans);
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 13px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--panel); color: var(--text);
+    cursor: pointer; font-size: 13px; font-weight: 600; font-family: var(--sans);
+    line-height: 1.2; transition: background .14s, border-color .14s, filter .14s;
   }
-  .btn:hover { background: var(--panel-2); text-decoration: none; }
+  .btn:hover { background: var(--panel-2); border-color: var(--muted-2, #3a4150); text-decoration: none; }
+  .btn:active { filter: brightness(.96); }
+  .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .btn.primary { background: var(--accent); color: #0b0d11; border-color: var(--accent); font-weight: 700; }
-  .btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
+  .btn.primary:hover { filter: brightness(1.08); background: var(--accent); border-color: var(--accent); }
   .btn[disabled], .btn.disabled-btn { opacity: .5; cursor: default; pointer-events: none; }
 
-  .field { display: flex; flex-direction: column; gap: 4px; }
-  .field label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+  .field { display: flex; flex-direction: column; gap: var(--sp-1); }
+  .field label { color: var(--muted); font-size: var(--label-size); text-transform: uppercase; letter-spacing: var(--label-spacing); font-weight: 600; }
   .field input[type=text], .field input[type=number], .field select, .field textarea {
     background: var(--bg); color: var(--text); border: 1px solid var(--border);
-    border-radius: 7px; padding: 7px 9px; font-size: 13px; font-family: var(--sans); }
-  .field textarea { resize: vertical; min-height: 38px; }
-  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); }
+    border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; font-family: var(--sans);
+    transition: border-color .14s, box-shadow .14s; }
+  .field input::placeholder, .field textarea::placeholder { color: var(--muted-2, #6a7280); }
+  .field textarea { resize: vertical; min-height: 38px; line-height: 1.5; }
+  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
   select.field {
     background: var(--bg); color: var(--text); border: 1px solid var(--border);
-    border-radius: 7px; padding: 7px 9px; font-size: 13px; font-family: var(--sans); }
-  select.field:focus { outline: none; border-color: var(--accent); }
+    border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; font-family: var(--sans);
+    transition: border-color .14s, box-shadow .14s; }
+  select.field:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
 
   .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); cursor: pointer; }
   .check input { accent-color: var(--accent); }
 
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
-          font-weight: 600; border: 1px solid var(--border); color: var(--muted); }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px;
+          font-weight: 600; border: 1px solid var(--border); color: var(--muted); line-height: 1.45; }
 
   /* ── shared status text ──────────────────────────────────────────────── */
-  .empty { color: var(--muted); padding: 26px 16px; text-align: center; }
-  .err { color: var(--fail); padding: 16px; }
+  .empty { color: var(--muted); padding: 28px 16px; text-align: center; font-size: 13px; }
+  .err { color: var(--fail); padding: 12px 16px; border: 1px solid rgba(229,115,107,.3); border-radius: var(--radius-sm); background: rgba(229,115,107,.07); }
   .muted { color: var(--muted); }
   .mono { font-family: var(--mono); font-size: 12px; }
 
@@ -140,7 +162,7 @@ THEME_CSS: str = r"""
     border-bottom: 1px solid var(--border); background: var(--panel-2);
   }
   .designer-dock .dk-head .dk-glyph { color: var(--accent); font-size: 15px; }
-  .designer-dock .dk-head strong { font-size: 14px; }
+  .designer-dock .dk-head strong { font-size: 14px; font-weight: 700; }
   .designer-dock .dk-head .dk-ctx {
     font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
     color: var(--accent); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px;
@@ -151,11 +173,11 @@ THEME_CSS: str = r"""
     border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; font-size: 13px;
   }
   .designer-dock .dk-head .dk-x:hover { color: var(--text); background: var(--panel); }
-  .designer-dock .dk-body { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 13px; }
+  .designer-dock .dk-body { padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); }
   .designer-dock .dk-body > .field label { color: var(--muted); }
-  .designer-dock .dk-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .designer-dock .dk-row { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
   .designer-dock .dk-row > .field { flex: 1; min-width: 130px; }
-  .designer-dock .dk-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .designer-dock .dk-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
   .designer-dock textarea { min-height: 84px; }
 
   /* structured design preview (labelled fields, NOT chat bubbles) */
@@ -168,17 +190,17 @@ THEME_CSS: str = r"""
     margin-left: auto; font-size: 10px; font-weight: 600; color: var(--muted);
     border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
   }
-  .dk-section { padding: 9px 12px; border-top: 1px solid var(--border); }
+  .dk-section { padding: 10px 13px; border-top: 1px solid var(--border); }
   .dk-section:first-child { border-top: 0; }
   .dk-section .dk-k {
-    font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 4px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 5px;
   }
-  .dk-section .dk-v { font-size: 12.5px; word-break: break-word; }
+  .dk-section .dk-v { font-size: 12.5px; line-height: 1.5; word-break: break-word; }
   .dk-section .dk-v.mono { font-family: var(--mono); }
   .dk-chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .dk-chip {
     font-size: 11px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
-    background: var(--panel-2); color: var(--text);
+    background: var(--panel-2); color: var(--text); line-height: 1.5;
   }
   .dk-lane {
     border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; margin-top: 6px;
