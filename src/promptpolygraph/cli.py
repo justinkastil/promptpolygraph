@@ -55,13 +55,20 @@ from .runner.runner import Runner, RunnerOptions, run_corpus
 def _is_mock(cfg: Config) -> bool:
     if cfg.mock:
         return True
-    return not os.environ.get("ANTHROPIC_API_KEY")
+    from .llm import provider_needs_key
+
+    env = provider_needs_key(cfg.llm.provider, cfg.llm.api_key_env)
+    # Local providers (ollama, …) need no key -> run live; key-providers mock if key absent.
+    return bool(env) and not os.environ.get(env)
 
 
 def _client(cfg: Config):
     if _is_mock(cfg):
         return None
-    return make_client(cfg.model or cfg.analyze.judge_model)
+    return make_client(
+        cfg.model or cfg.analyze.judge_model,
+        provider=cfg.llm.provider, base_url=cfg.llm.base_url, api_key_env=cfg.llm.api_key_env,
+    )
 
 
 def _store(cfg: Config) -> SQLiteStore:

@@ -76,6 +76,18 @@ class EmbeddersConfig(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class LLMBackendConfig(BaseModel):
+    """Backend for the grader/judge, audit agents, and corpus generation.
+    `anthropic` (default, needs ANTHROPIC_API_KEY) | `openai` | `ollama` |
+    `openai-compatible` | `vllm` | `lmstudio`. Local providers (ollama, …) need
+    no key, so the whole eval can run on a local model. The system *under test*
+    is configured separately via `adapter:`."""
+
+    provider: str = "anthropic"
+    base_url: str | None = None  # defaults: ollama -> http://localhost:11434/v1, else OpenAI
+    api_key_env: str | None = None
+
+
 class AnalyzeConfig(BaseModel):
     rubric: str | None = None  # path to rubric.yaml
     judges: int = 1  # ensemble size
@@ -115,7 +127,8 @@ class Config(BaseModel):
     metrics: list[MetricSpec] = Field(default_factory=list)  # named/derived metrics
     personas_path: str | None = None  # a personas.yaml for this run
     out_dir: str = "polygraph_out"
-    model: str | None = None  # default model for judges/audit/generation
+    model: str | None = None  # default model NAME for judges/audit/generation
+    llm: LLMBackendConfig = Field(default_factory=LLMBackendConfig)  # judge/audit/gen backend
     mock: bool = False  # offline deterministic mode (no API calls)
     # One-line description of the system under test / expertise area. Tailors
     # generated prompts (and, with audit.tailor_personas, the persona panel) to
