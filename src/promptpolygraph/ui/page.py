@@ -154,12 +154,65 @@ PAGE: str = r"""<!DOCTYPE html>
   .reglist { list-style: none; padding: 0; margin: 6px 0; }
   .reglist li { padding: 5px 0; border-bottom: 1px dashed var(--border); }
   .reglist .drop { color: var(--fail); font-weight: 700; font-family: var(--mono); }
+
+  /* ── control plane ── */
+  header.top .navtabs { display: flex; gap: 2px; }
+  header.top .navtab { padding: 5px 12px; cursor: pointer; color: var(--muted); border-radius: 7px; font-weight: 600; font-size: 13px; }
+  header.top .navtab:hover { background: var(--panel-2); color: var(--text); }
+  header.top .navtab.active { color: var(--text); background: var(--panel-2); }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; padding: 14px 16px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+  .field input[type=text], .field input[type=number], .field select, .field textarea {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 9px; font-size: 13px; font-family: var(--sans); }
+  .field textarea { resize: vertical; min-height: 38px; }
+  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); }
+  .checks { display: flex; flex-wrap: wrap; gap: 10px; padding: 2px 0; }
+  .checks label { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 13px; text-transform: none; letter-spacing: 0; }
+  .btn.primary { background: var(--accent); color: #0b0d11; border-color: var(--accent); font-weight: 700; }
+  .btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
+  .btn.primary.disabled-btn { opacity: .5; }
+  .launchbar { display: flex; align-items: center; gap: 12px; padding: 4px 16px 14px; }
+  .runprog { margin: 0 16px 16px; }
+  .runprog .bigprog { height: 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .runprog .bigprog > i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  .stagerow { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 6px; }
+  .stagepip { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+  .stagepip.active { color: var(--text); border-color: var(--accent); background: rgba(106,163,255,.12); }
+  .stagepip.done { color: var(--pass); border-color: rgba(70,192,138,.4); }
+  .stagepip.errpip { color: var(--fail); border-color: rgba(229,115,107,.4); }
+  .filterbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; }
+  .filterbar input[type=text], .filterbar select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 6px 9px; font-size: 13px; }
+  table.explorer th { cursor: pointer; user-select: none; white-space: nowrap; }
+  table.explorer th .arr { color: var(--accent); }
+  table.explorer tbody tr { cursor: pointer; }
+  table.explorer tbody tr:hover { background: var(--row-hover); }
+  table.explorer td.p { max-width: 360px; }
+  .diff-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .diff-pair .resp { max-height: 220px; }
+  .diff-case { border: 1px solid var(--border); border-radius: 9px; padding: 10px 13px; margin: 10px 0; background: var(--panel); }
+  .diff-case .dh { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .diff-case .dlt { font-family: var(--mono); font-weight: 700; }
+  .mv-up { color: var(--pass); } .mv-down { color: var(--fail); } .mv-flat { color: var(--muted); }
+  .persona-result { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 13px; margin: 10px 16px; background: var(--panel-2); }
+  .persona-result h3 { margin: 0 0 4px; font-size: 13.5px; }
+  .filelist { list-style: none; padding: 0; margin: 6px 16px 12px; }
+  .filelist li { padding: 6px 0; border-bottom: 1px dashed var(--border); display: flex; align-items: center; gap: 10px; }
+  .tag-mono { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 </style>
 </head>
 <body>
 <header class="top">
   <h1>PromptPolygraph</h1>
-  <span class="sub">evaluation dashboard</span>
+  <span class="sub">control plane</span>
+  <span class="navtabs" id="navtabs">
+    <span class="navtab" id="nav-runs" onclick="showRuns()">Runs</span>
+    <span class="navtab" id="nav-newrun" onclick="showNewRun()">New run</span>
+    <span class="navtab" id="nav-personas" onclick="showPersonas()">Personas</span>
+  </span>
   <span class="spacer"></span>
   <span class="crumb" id="crumb" onclick="showRuns()">All runs</span>
 </header>
@@ -198,6 +251,21 @@ async function getJSON(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
   return await r.json();
+}
+async function postJSON(url, body) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  // parse JSON even on non-2xx so callers can surface {error}
+  let data = null;
+  try { data = await r.json(); } catch (e) { data = null; }
+  if (!r.ok) {
+    const msg = (data && (data.detail || data.error)) || ("HTTP " + r.status);
+    throw new Error(msg);
+  }
+  return data;
 }
 
 // ---- inline-SVG chart helpers ------------------------------------------
@@ -409,18 +477,27 @@ function diffBlock(diff) {
 const app = document.getElementById("app");
 const crumb = document.getElementById("crumb");
 let pollTimer = null;
-let view = "runs";          // "runs" | "detail" | "compare"
+let view = "runs";          // "runs" | "detail" | "compare" | "newrun" | "personas"
 let currentRunId = null;
 let currentTab = "results"; // "results" | "audit"
 let selectMode = false;     // compare-selection mode in the runs list
 const selected = new Set(); // selected run ids for compare
 let runsCache = [];         // last /api/runs payload (chronological metadata)
+let launchProgressTimer = null; // poll timer for an in-flight launched run
+let selectedPersonaPath = "";   // persona file fed into the New Run panel
 
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+function setNav(active) {
+  document.querySelectorAll("#navtabs .navtab").forEach(el => el.classList.remove("active"));
+  const el = document.getElementById("nav-" + active);
+  if (el) el.classList.add("active");
+}
 
 // ---- runs list ----------------------------------------------------------
 async function showRuns() {
   view = "runs"; currentRunId = null; crumb.textContent = "All runs";
+  setNav("runs");
   stopPoll();
   await renderRuns();
   pollTimer = setInterval(() => { if (view === "runs") renderRuns(); }, 4000);
@@ -488,6 +565,7 @@ function toggleSel(id) {
 async function openCompare() {
   if (selected.size < 2) return;
   view = "compare";
+  setNav("runs");
   stopPoll();
   crumb.textContent = "All runs  ›  Compare " + selected.size + " runs";
   app.innerHTML = '<div class="empty">Loading comparison…</div>';
@@ -609,12 +687,94 @@ function renderCompare(cols) {
 
   const headLine = '<div style="margin-bottom:10px"><span style="font-size:18px;font-weight:700">Comparing ' + cols.length + ' runs</span> '
     + '<span class="muted">baseline: ' + esc(_trunc(base.name, 24)) + '</span></div>';
-  app.innerHTML = headLine + matrix + trends + regsPanel;
+
+  // (d) A/B case diff — only when exactly two runs are compared.
+  let diffPanel = "";
+  if (cols.length === 2) {
+    diffPanel = '<div class="panel" id="casediff-panel"><h2>Case diff</h2>'
+      + '<div class="body"><div class="filterbar">'
+      + '<button class="btn" onclick="loadCaseDiff(\'' + esc(cols[0].id) + '\',\'' + esc(cols[1].id) + '\')">Load case-by-case diff</button>'
+      + '<span class="hint">Side-by-side responses for every shared prompt, biggest score change first.</span>'
+      + '</div><div id="casediff-body"></div></div></div>';
+  }
+
+  app.innerHTML = headLine + matrix + trends + regsPanel + diffPanel;
+}
+
+// ---- A/B case diff ------------------------------------------------------
+function _scoreMean(s) {
+  if (!s || !s.dimensions) return null;
+  const vals = Object.values(s.dimensions).filter(v => v != null).map(Number).filter(v => !isNaN(v));
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+}
+
+async function loadCaseDiff(idA, idB) {
+  const body = document.getElementById("casediff-body");
+  if (!body) return;
+  body.innerHTML = '<div class="empty">Loading cases for both runs…</div>';
+  let casesA, casesB;
+  try {
+    casesA = await getJSON("/api/runs/" + encodeURIComponent(idA) + "/cases");
+    casesB = await getJSON("/api/runs/" + encodeURIComponent(idB) + "/cases");
+  } catch (e) {
+    body.innerHTML = '<div class="err">Could not load cases: ' + esc(e.message) + '</div>'; return;
+  }
+  // index run B by case_id, then by prompt text as a fallback
+  const byId = {}, byPrompt = {};
+  for (const r of casesB) {
+    const c = r.case || {};
+    if (c.id) byId[c.id] = r;
+    if (c.prompt) byPrompt[c.prompt] = r;
+  }
+  const pairs = [];
+  for (const ra of casesA) {
+    const ca = ra.case || {};
+    let rb = (ca.id && byId[ca.id]) || (ca.prompt && byPrompt[ca.prompt]) || null;
+    if (!rb) continue;
+    const ma = _scoreMean(ra.score), mb = _scoreMean(rb.score);
+    const delta = (ma != null && mb != null) ? (mb - ma) : null;
+    pairs.push({ a: ra, b: rb, ma: ma, mb: mb, delta: delta,
+                 prompt: ca.prompt || (rb.case && rb.case.prompt) || "",
+                 category: ca.category || (rb.case && rb.case.category) || "default" });
+  }
+  if (!pairs.length) {
+    body.innerHTML = '<div class="empty">No shared prompts between these two runs.</div>'; return;
+  }
+  // sort by |delta| desc; nulls last
+  pairs.sort((x, y) => {
+    const ax = x.delta == null ? -1 : Math.abs(x.delta);
+    const ay = y.delta == null ? -1 : Math.abs(y.delta);
+    return ay - ax;
+  });
+
+  let html = '<div class="muted" style="padding:4px 16px">' + pairs.length + ' shared prompt' + (pairs.length === 1 ? "" : "s") + ' · run A vs run B</div>';
+  for (const p of pairs) {
+    let marker;
+    if (p.delta == null) marker = '<span class="mv-flat">—</span>';
+    else if (p.delta > 0.05) marker = '<span class="mv-up">▲ improved</span>';
+    else if (p.delta < -0.05) marker = '<span class="mv-down">▼ regressed</span>';
+    else marker = '<span class="mv-flat">▬ flat</span>';
+    const dStr = p.delta == null ? "&mdash;" : ((p.delta >= 0 ? "+" : "") + p.delta.toFixed(2));
+    const dCls = p.delta == null ? "mv-flat" : (p.delta > 0.05 ? "mv-up" : (p.delta < -0.05 ? "mv-down" : "mv-flat"));
+    const ta = (p.a.response ? (p.a.response.text || "") : "");
+    const tb = (p.b.response ? (p.b.response.text || "") : "");
+    html += '<div class="diff-case" style="margin-left:16px;margin-right:16px"><div class="dh">'
+      + '<span class="dlt ' + dCls + '">Δ ' + dStr + '</span> ' + marker
+      + ' <span class="muted mono">' + esc(p.category) + '</span>'
+      + ' <span class="muted">A: ' + num(p.ma, 1) + ' → B: ' + num(p.mb, 1) + '</span></div>';
+    html += '<div class="label">Prompt</div><div class="prompt">' + dash(p.prompt) + '</div>';
+    html += '<div class="diff-pair" style="margin-top:8px">'
+      + '<div><div class="label">Run A response</div><div class="resp">' + (ta ? esc(ta) : '<span class="muted">&mdash;</span>') + '</div></div>'
+      + '<div><div class="label">Run B response</div><div class="resp">' + (tb ? esc(tb) : '<span class="muted">&mdash;</span>') + '</div></div>'
+      + '</div></div>';
+  }
+  body.innerHTML = html;
 }
 
 // ---- run detail ---------------------------------------------------------
 async function showRun(id) {
   view = "detail"; currentRunId = id; currentTab = "results";
+  setNav("runs");
   stopPoll();
   crumb.textContent = "All runs  ›  " + id.slice(0, 8);
   app.innerHTML = '<div class="empty">Loading run…</div>';
@@ -764,7 +924,136 @@ function renderResults(summary, cases) {
       + '<span class="count">' + rows.length + ' case' + (rows.length === 1 ? "" : "s") + '</span>'
       + '</summary>' + inner + '</details>';
   }
-  body.innerHTML = heat + cst + '<div class="panel"><h2>Cases by category</h2>' + sections + '</div>';
+
+  // case explorer — searchable / sortable / filterable flat table
+  const explorer = '<div class="panel"><h2>Case explorer</h2><div class="body" id="explorer-body"></div></div>';
+
+  body.innerHTML = heat + cst + explorer + '<div class="panel"><h2>Cases by category</h2>' + sections + '</div>';
+  renderExplorer(cases, dims, thr);
+}
+
+// ---- case explorer ------------------------------------------------------
+function _verdictLabel(s) {
+  if (!s) return "ungraded";
+  if (s.verdict_pass === true) return "pass";
+  if (s.verdict_pass === false) return "fail";
+  if (s.assertions_passed === false) return "assert-fail";
+  return "ungraded";
+}
+
+function renderExplorer(cases, dims, thr) {
+  const host = document.getElementById("explorer-body");
+  if (!host) return;
+  window.__explorer = { cases: cases, dims: dims, thr: thr, sortKey: "category", sortDir: 1, q: "", verdict: "", category: "" };
+  const cats = Array.from(new Set(cases.map(r => (r.case && r.case.category) || "default"))).sort();
+  const catOpts = ['<option value="">All categories</option>']
+    .concat(cats.map(c => '<option value="' + esc(c) + '">' + esc(c) + '</option>')).join("");
+  const verdOpts = '<option value="">All verdicts</option>'
+    + '<option value="pass">Pass</option><option value="fail">Fail</option>'
+    + '<option value="assert-fail">Assertions failed</option><option value="ungraded">Ungraded</option>';
+  host.innerHTML =
+    '<div class="filterbar">'
+    + '<input type="text" id="exp-q" placeholder="Search prompt / response / category…" oninput="explorerUpdate()" style="flex:1;min-width:200px">'
+    + '<select id="exp-verdict" onchange="explorerUpdate()">' + verdOpts + '</select>'
+    + '<select id="exp-cat" onchange="explorerUpdate()">' + catOpts + '</select>'
+    + '<span class="hint" id="exp-count"></span>'
+    + '</div><div id="exp-table"></div>';
+  drawExplorerTable();
+}
+
+function explorerUpdate() {
+  const st = window.__explorer; if (!st) return;
+  st.q = (document.getElementById("exp-q").value || "").toLowerCase();
+  st.verdict = document.getElementById("exp-verdict").value || "";
+  st.category = document.getElementById("exp-cat").value || "";
+  drawExplorerTable();
+}
+
+function explorerSort(key) {
+  const st = window.__explorer; if (!st) return;
+  if (st.sortKey === key) st.sortDir = -st.sortDir; else { st.sortKey = key; st.sortDir = 1; }
+  drawExplorerTable();
+}
+
+function drawExplorerTable() {
+  const st = window.__explorer; if (!st) return;
+  const tbl = document.getElementById("exp-table");
+  const dims = st.dims, thr = st.thr;
+  // filter
+  let rows = st.cases.filter(r => {
+    const c = r.case || {}, s = r.score;
+    if (st.category && (c.category || "default") !== st.category) return false;
+    if (st.verdict && _verdictLabel(s) !== st.verdict) return false;
+    if (st.q) {
+      const hay = ((c.prompt || "") + " " + (c.category || "") + " "
+        + (r.response ? (r.response.text || "") : "")).toLowerCase();
+      if (hay.indexOf(st.q) < 0) return false;
+    }
+    return true;
+  });
+  // sort
+  const sk = st.sortKey, dir = st.sortDir;
+  const keyVal = (r) => {
+    const c = r.case || {}, s = r.score;
+    if (sk === "prompt") return (c.prompt || "").toLowerCase();
+    if (sk === "category") return (c.category || "default").toLowerCase();
+    if (sk === "verdict") return _verdictLabel(s);
+    if (sk === "assertions") return s ? (s.assertions_passed === false ? 0 : (s.assertions_passed === true ? 2 : 1)) : 1;
+    if (sk === "score") { const m = _scoreMean(s); return m == null ? -1 : m; }
+    if (dims.indexOf(sk) >= 0) { const v = s && s.dimensions ? s.dimensions[sk] : null; return v == null ? -1 : Number(v); }
+    return "";
+  };
+  rows.sort((a, b) => {
+    const va = keyVal(a), vb = keyVal(b);
+    if (va < vb) return -1 * dir; if (va > vb) return 1 * dir; return 0;
+  });
+  const arrow = (k) => st.sortKey === k ? ' <span class="arr">' + (st.sortDir > 0 ? "▲" : "▼") + '</span>' : '';
+  let head = '<tr>'
+    + '<th onclick="explorerSort(\'prompt\')">Prompt' + arrow("prompt") + '</th>'
+    + '<th onclick="explorerSort(\'category\')">Category' + arrow("category") + '</th>'
+    + '<th onclick="explorerSort(\'score\')">Mean' + arrow("score") + '</th>';
+  for (const d of dims) head += '<th onclick="explorerSort(\'' + esc(d) + '\')">' + esc(d) + arrow(d) + '</th>';
+  head += '<th onclick="explorerSort(\'assertions\')">Assert' + arrow("assertions") + '</th>'
+    + '<th onclick="explorerSort(\'verdict\')">Verdict' + arrow("verdict") + '</th></tr>';
+  let trs = "";
+  for (const r of rows) {
+    const c = r.case || {}, s = r.score;
+    const cid = c.id || "";
+    let tr = '<tr onclick="explorerOpen(\'' + esc(cid) + '\')">'
+      + '<td class="p">' + esc(_trunc(c.prompt || "", 80)) + '</td>'
+      + '<td>' + esc(c.category || "default") + '</td>'
+      + '<td class="mono">' + num(_scoreMean(s), 1) + '</td>';
+    for (const d of dims) {
+      const v = s && s.dimensions ? s.dimensions[d] : null;
+      if (v == null) tr += '<td class="muted">&mdash;</td>';
+      else { const low = thr != null && v < thr; tr += '<td class="mono" style="color:' + (low ? "var(--fail)" : "var(--pass)") + '">' + v + '</td>'; }
+    }
+    let asrt = '<span class="muted">&mdash;</span>';
+    if (s && s.assertions_passed === true) asrt = '<span class="mk pass" style="font-weight:700">✓</span>';
+    else if (s && s.assertions_passed === false) asrt = '<span class="mk fail" style="font-weight:700">✗</span>';
+    tr += '<td>' + asrt + '</td>';
+    tr += '<td>' + passPill(s ? s.verdict_pass : null) + '</td></tr>';
+    trs += tr;
+  }
+  const cnt = document.getElementById("exp-count");
+  if (cnt) cnt.textContent = rows.length + " case" + (rows.length === 1 ? "" : "s");
+  if (!rows.length) { tbl.innerHTML = '<div class="empty">No cases match these filters.</div>'; return; }
+  tbl.innerHTML = '<table class="explorer"><thead>' + head + '</thead><tbody>' + trs + '</tbody></table>';
+}
+
+function explorerOpen(cid) {
+  // expand the matching category section and scroll its case into view
+  const d = window.__detail; if (!d) return;
+  const row = (d.cases || []).find(r => r.case && r.case.id === cid);
+  if (!row) return;
+  const cat = (row.case && row.case.category) || "default";
+  document.querySelectorAll("details.cat").forEach(det => {
+    const nm = det.querySelector(".name");
+    if (nm && nm.textContent === cat) {
+      det.open = true;
+      det.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
 }
 
 function renderCase(row, dims, thr) {
@@ -972,6 +1261,265 @@ async function renderAuditTab(runId) {
 
   if (!html) html = '<div class="empty">No audit available for this run.</div>';
   body.innerHTML = html;
+}
+
+// ---- New Run panel ------------------------------------------------------
+const CATEGORY_HINTS = ["factual_qa","how_to","reasoning","recommendations","refusal","safety","edge_input"];
+const FORMAT_OPTS = ["md","html","pdf","docx"];
+
+async function showNewRun() {
+  view = "newrun"; currentRunId = null; crumb.textContent = "New run";
+  setNav("newrun");
+  stopPoll();
+  app.innerHTML = '<div class="empty">Loading…</div>';
+  let configs = [], pfiles = [];
+  try { configs = await getJSON("/api/configs"); } catch (e) { configs = []; }
+  try { pfiles = await getJSON("/api/personas/files"); } catch (e) { pfiles = []; }
+  renderNewRun(configs, pfiles);
+}
+
+function renderNewRun(configs, pfiles) {
+  const cfgOpts = configs.length
+    ? configs.map(c => '<option value="' + esc(c.path) + '">' + esc(c.name) + '</option>').join("")
+    : '<option value="">(no configs found — a default config will be used)</option>';
+  const personaOpts = ['<option value="">(use the config\'s own personas)</option>']
+    .concat(pfiles.map(f => {
+      const sel = (f.path === selectedPersonaPath) ? " selected" : "";
+      return '<option value="' + esc(f.path) + '"' + sel + '>' + esc(f.name) + '</option>';
+    })).join("");
+  const catChecks = CATEGORY_HINTS.map(c =>
+    '<label><input type="checkbox" class="cat-chk" value="' + esc(c) + '"> ' + esc(c) + '</label>').join("");
+  const fmtChecks = FORMAT_OPTS.map(f =>
+    '<label><input type="checkbox" class="fmt-chk" value="' + esc(f) + '"' + (f === "md" || f === "html" ? " checked" : "") + '> ' + esc(f) + '</label>').join("");
+
+  const form =
+    '<div class="panel"><h2>New run</h2>'
+    + '<div class="form-grid">'
+    + '<div class="field"><label>Config</label><select id="nr-config">' + cfgOpts + '</select></div>'
+    + '<div class="field"><label>Mode</label><select id="nr-mode">'
+      + ['','fixed','varied','adversarial','hybrid'].map(m => '<option value="' + m + '">' + (m || "(config default)") + '</option>').join("")
+      + '</select></div>'
+    + '<div class="field"><label>Count (varied/adversarial)</label><input type="number" id="nr-count" min="1" placeholder="config default"></div>'
+    + '<div class="field"><label>Per category</label><input type="number" id="nr-percat" min="1" placeholder="config default"></div>'
+    + '<div class="field"><label>Difficulty</label><select id="nr-diff">'
+      + ['','mild','standard','aggressive'].map(m => '<option value="' + m + '">' + (m || "(config default)") + '</option>').join("")
+      + '</select></div>'
+    + '<div class="field"><label>Persona panel</label><select id="nr-personas">' + personaOpts + '</select></div>'
+    + '</div>'
+    + '<div class="form-grid" style="padding-top:0">'
+    + '<div class="field"><label>Categories (optional)</label><div class="checks">' + catChecks + '</div></div>'
+    + '<div class="field"><label>Report formats</label><div class="checks">' + fmtChecks + '</div></div>'
+    + '<div class="field"><label>Options</label><div class="checks"><label><input type="checkbox" id="nr-mock" checked> Mock (offline)</label></div></div>'
+    + '</div>'
+    + '<div class="launchbar"><button class="btn primary" id="nr-launch" onclick="launchRun()">Launch run</button>'
+    + '<span class="hint">Runs in-process against this dashboard\'s store; progress appears below.</span></div>'
+    + '<div id="nr-progress"></div>'
+    + '</div>';
+
+  const studioLink = '<div class="muted" style="padding:0 2px 8px">Need a persona panel? Build one in the '
+    + '<a href="#" onclick="showPersonas();return false;">Persona studio</a>.</div>';
+  app.innerHTML = form + studioLink;
+}
+
+async function launchRun() {
+  const btn = document.getElementById("nr-launch");
+  if (btn) { btn.classList.add("disabled-btn"); btn.textContent = "Launching…"; }
+  const cats = Array.from(document.querySelectorAll(".cat-chk:checked")).map(el => el.value);
+  const fmts = Array.from(document.querySelectorAll(".fmt-chk:checked")).map(el => el.value);
+  const overrides = {
+    mode: (document.getElementById("nr-mode").value || ""),
+    count: (document.getElementById("nr-count").value || ""),
+    per_category: (document.getElementById("nr-percat").value || ""),
+    categories: cats,
+    difficulty: (document.getElementById("nr-diff").value || ""),
+    mock: document.getElementById("nr-mock").checked,
+    formats: fmts.length ? fmts : ["md","html"],
+  };
+  const body = { overrides: overrides };
+  const cfgPath = document.getElementById("nr-config").value;
+  if (cfgPath) body.config_path = cfgPath;
+  const pp = document.getElementById("nr-personas").value;
+  if (pp) body.personas_path = pp;
+
+  let resp;
+  try {
+    resp = await postJSON("/api/run", body);
+  } catch (e) {
+    const pe = document.getElementById("nr-progress");
+    if (pe) pe.innerHTML = '<div class="err">Could not start run: ' + esc(e.message) + '</div>';
+    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Launch run"; }
+    return;
+  }
+  if (!resp || !resp.run_id) {
+    const pe = document.getElementById("nr-progress");
+    if (pe) pe.innerHTML = '<div class="err">Could not start run: ' + esc((resp && resp.error) || "unknown error") + '</div>';
+    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Launch run"; }
+    return;
+  }
+  pollLaunch(resp.run_id);
+}
+
+const STAGES = ["corpus","run","analyze","audit","report","done"];
+
+function pollLaunch(runId) {
+  if (launchProgressTimer) { clearInterval(launchProgressTimer); launchProgressTimer = null; }
+  const tick = async () => {
+    let st;
+    try { st = await getJSON("/api/run/" + encodeURIComponent(runId) + "/status"); }
+    catch (e) { return; }
+    drawLaunchProgress(runId, st);
+    if (st.done) {
+      if (launchProgressTimer) { clearInterval(launchProgressTimer); launchProgressTimer = null; }
+      const btn = document.getElementById("nr-launch");
+      if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Launch run"; }
+      if (!st.error) {
+        // refresh runs list in the background and offer to open the new run
+        const pe = document.getElementById("nr-progress");
+        if (pe) pe.innerHTML += '<div class="launchbar" style="padding-left:0">'
+          + '<button class="btn primary" onclick="showRun(\'' + esc(runId) + '\')">Open run</button>'
+          + '<button class="btn" onclick="showRuns()">Back to all runs</button></div>';
+      }
+    }
+  };
+  tick();
+  launchProgressTimer = setInterval(tick, 1200);
+}
+
+function drawLaunchProgress(runId, st) {
+  const pe = document.getElementById("nr-progress");
+  if (!pe) return;
+  const stage = st.stage || "queued";
+  const erred = stage === "error" || !!st.error;
+  let reached = STAGES.indexOf(stage);
+  if (stage === "queued") reached = -1;
+  const frac = st.total ? Math.round(100 * (st.completed || 0) / st.total) : (stage === "done" ? 100 : 0);
+  let pips = "";
+  for (let i = 0; i < STAGES.length; i++) {
+    let cls = "stagepip";
+    if (st.done && !erred && i <= STAGES.indexOf("done")) cls += " done";
+    else if (i < reached) cls += " done";
+    else if (i === reached) cls += " active";
+    pips += '<span class="' + cls + '">' + esc(STAGES[i]) + '</span>';
+  }
+  let html = '<div class="runprog">'
+    + '<div class="muted" style="font-size:12px;margin-bottom:6px">Run <span class="mono">' + shortId(runId) + '</span> · '
+    + (erred ? '<span class="mv-down">error</span>' : esc(stage))
+    + (st.total ? ' · ' + (st.completed || 0) + '/' + st.total + ' cases' : '') + '</div>'
+    + '<div class="bigprog"><i style="width:' + (erred ? 100 : frac) + '%' + (erred ? ';background:var(--fail)' : '') + '"></i></div>'
+    + '<div class="stagerow">' + pips + '</div>';
+  if (erred) html += '<div class="err" style="padding:6px 0">' + esc(st.error || "run failed") + '</div>';
+  else if (st.done) html += '<div class="mv-up" style="padding:4px 0;font-weight:700">Run complete.</div>';
+  html += '</div>';
+  pe.innerHTML = html;
+}
+
+// ---- Persona studio -----------------------------------------------------
+async function showPersonas() {
+  view = "personas"; currentRunId = null; crumb.textContent = "Personas";
+  setNav("personas");
+  stopPoll();
+  app.innerHTML = '<div class="empty">Loading personas…</div>';
+  let lib = [], files = [];
+  try { lib = await getJSON("/api/personas"); } catch (e) { lib = []; }
+  try { files = await getJSON("/api/personas/files"); } catch (e) { files = []; }
+  renderPersonaStudio(lib, files);
+}
+
+function personaCardHtml(p, cls) {
+  return '<div class="' + (cls || "persona-card") + '"><h3>' + esc(p.who ? (p.id || "persona") : (p.id || "persona")) + '</h3>'
+    + (p.who ? '<div>' + esc(p.who) + '</div>' : '')
+    + (p.focus ? '<div class="label">Focus</div><div class="muted">' + esc(p.focus) + '</div>' : '')
+    + '</div>';
+}
+
+function renderPersonaStudio(lib, files) {
+  // create
+  const create = '<div class="panel"><h2>Create a persona</h2>'
+    + '<div class="form-grid"><div class="field" style="grid-column:1 / -1"><label>One-line description</label>'
+    + '<textarea id="ps-desc" placeholder="e.g. a busy nurse manager who skims and distrusts marketing"></textarea></div></div>'
+    + '<div class="launchbar"><button class="btn primary" id="ps-create-btn" onclick="createPersona()">Create</button>'
+    + '<label class="hint"><input type="checkbox" id="ps-create-mock" checked> mock</label></div>'
+    + '<div id="ps-create-result"></div></div>';
+
+  // generate panel
+  const gen = '<div class="panel"><h2>Generate a domain panel</h2>'
+    + '<div class="form-grid">'
+    + '<div class="field"><label>Count</label><input type="number" id="ps-count" value="6" min="1" max="24"></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Domain</label><input type="text" id="ps-domain" placeholder="e.g. a budgeting assistant for freelancers"></div>'
+    + '</div>'
+    + '<div class="launchbar"><button class="btn primary" id="ps-gen-btn" onclick="generatePanel()">Generate panel</button>'
+    + '<label class="hint"><input type="checkbox" id="ps-gen-mock" checked> mock</label></div>'
+    + '<div id="ps-gen-result"></div></div>';
+
+  // saved files
+  let filesHtml;
+  if (files.length) {
+    filesHtml = '<ul class="filelist">' + files.map(f =>
+      '<li><b>' + esc(f.name) + '</b> <span class="tag-mono">' + esc(f.path) + '</span>'
+      + '<span class="spacer" style="flex:1"></span>'
+      + '<button class="btn" onclick="usePersonaFile(\'' + esc(f.path) + '\')">Use in new run</button></li>'
+    ).join("") + '</ul>';
+  } else {
+    filesHtml = '<div class="empty">No saved persona files yet. Create or generate one above.</div>';
+  }
+  const savedPanel = '<div class="panel"><h2>Saved persona files</h2><div class="body">' + filesHtml + '</div></div>';
+
+  // library
+  let libHtml = lib.length
+    ? '<div class="body">' + lib.map(p => personaCardHtml(p)).join("") + '</div>'
+    : '<div class="empty">No personas in the bundled library.</div>';
+  const libPanel = '<div class="panel"><h2>Persona library</h2>' + libHtml + '</div>';
+
+  app.innerHTML = create + gen + savedPanel + libPanel;
+}
+
+async function createPersona() {
+  const btn = document.getElementById("ps-create-btn");
+  const desc = (document.getElementById("ps-desc").value || "").trim();
+  const out = document.getElementById("ps-create-result");
+  if (!desc) { out.innerHTML = '<div class="err">Enter a description first.</div>'; return; }
+  if (btn) { btn.classList.add("disabled-btn"); btn.textContent = "Creating…"; }
+  let resp;
+  try {
+    resp = await postJSON("/api/personas/new", { description: desc, mock: document.getElementById("ps-create-mock").checked });
+  } catch (e) {
+    out.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Create"; }
+    return;
+  }
+  if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Create"; }
+  if (!resp || !resp.persona) { out.innerHTML = '<div class="err">' + esc((resp && resp.error) || "create failed") + '</div>'; return; }
+  out.innerHTML = personaCardHtml(resp.persona, "persona-result")
+    + '<div class="muted" style="padding:0 16px 8px">Saved to <span class="tag-mono">' + esc(resp.path || "") + '</span></div>';
+}
+
+async function generatePanel() {
+  const btn = document.getElementById("ps-gen-btn");
+  const domain = (document.getElementById("ps-domain").value || "").trim();
+  const count = Number(document.getElementById("ps-count").value || 6);
+  const out = document.getElementById("ps-gen-result");
+  if (!domain) { out.innerHTML = '<div class="err">Enter a domain first.</div>'; return; }
+  if (btn) { btn.classList.add("disabled-btn"); btn.textContent = "Generating…"; }
+  let resp;
+  try {
+    resp = await postJSON("/api/personas/generate", { count: count, domain: domain, mock: document.getElementById("ps-gen-mock").checked });
+  } catch (e) {
+    out.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Generate panel"; }
+    return;
+  }
+  if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Generate panel"; }
+  if (!resp || !resp.panel) { out.innerHTML = '<div class="err">' + esc((resp && resp.error) || "generate failed") + '</div>'; return; }
+  let html = '<div class="muted" style="padding:0 16px">Saved ' + resp.panel.length + ' personas to <span class="tag-mono">' + esc(resp.path || "") + '</span>';
+  if (resp.path) html += ' <button class="btn" onclick="usePersonaFile(\'' + esc(resp.path) + '\')">Use in new run</button>';
+  html += '</div>';
+  html += resp.panel.map(p => personaCardHtml(p, "persona-result")).join("");
+  out.innerHTML = html;
+}
+
+function usePersonaFile(path) {
+  selectedPersonaPath = path;
+  showNewRun();
 }
 
 // ---- boot ---------------------------------------------------------------
