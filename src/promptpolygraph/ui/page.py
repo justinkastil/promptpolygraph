@@ -8,46 +8,23 @@ is escaped client-side via esc() before it touches the DOM.
 
 from __future__ import annotations
 
-PAGE: str = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PromptPolygraph Dashboard</title>
-<style>
-  :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --panel-2: #1d212b;
-    --border: #2a2f3a;
-    --text: #e6e9ef;
-    --muted: #98a0ad;
-    --accent: #6aa3ff;
-    --pass: #46c08a;
-    --fail: #e5736b;
-    --warn: #e6b450;
-    --row-hover: #20242f;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    background: var(--bg); color: var(--text); font-family: var(--sans);
-    font-size: 14px; line-height: 1.5;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  header.top {
-    display: flex; align-items: baseline; gap: 14px;
-    padding: 14px 22px; border-bottom: 1px solid var(--border);
-    background: var(--panel); position: sticky; top: 0; z-index: 10;
-  }
-  header.top h1 { font-size: 16px; margin: 0; letter-spacing: .3px; }
-  header.top .sub { color: var(--muted); font-size: 12px; }
-  header.top .spacer { flex: 1; }
-  header.top .crumb { color: var(--muted); font-size: 13px; cursor: pointer; }
-  header.top .crumb:hover { color: var(--text); }
+from promptpolygraph.ui.chrome import (
+    DESIGNER_DOCK_JS,
+    THEME_CSS,
+    designer_dock_html,
+    header_html,
+)
+
+# The dashboard is assembled from the shared chrome (theme tokens + header bar)
+# plus its own page-specific CSS and the SPA script. Splitting it this way keeps
+# the dashboard and the Red-Team Arena pinned to one visual identity.
+_HEAD = (
+    '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
+    '<meta charset="utf-8">\n'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+    "<title>PromptPolygraph Dashboard</title>\n"
+    "<style>" + THEME_CSS + r"""
+  /* ── dashboard-specific layout / components (built on the shared tokens) ── */
   .wrap { max-width: 1180px; margin: 0 auto; padding: 22px; }
 
   table { width: 100%; border-collapse: collapse; }
@@ -57,8 +34,6 @@ PAGE: str = r"""<!DOCTYPE html>
   tbody.runs tr:hover { background: var(--row-hover); }
   td.mono, .mono { font-family: var(--mono); font-size: 12px; }
 
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
-          font-weight: 600; border: 1px solid var(--border); color: var(--muted); }
   .pill.pass { color: var(--pass); border-color: rgba(70,192,138,.4); background: rgba(70,192,138,.08); }
   .pill.fail { color: var(--fail); border-color: rgba(229,115,107,.4); background: rgba(229,115,107,.08); }
   .pill.neutral { color: var(--muted); }
@@ -110,20 +85,15 @@ PAGE: str = r"""<!DOCTYPE html>
   .reason { color: var(--warn); font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
 
   .btnrow { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 18px; }
-  .btn { display: inline-block; padding: 7px 13px; border: 1px solid var(--border); border-radius: 8px;
-         background: var(--panel); color: var(--text); cursor: pointer; font-size: 13px; }
-  .btn:hover { background: var(--panel-2); text-decoration: none; }
 
-  .empty { color: var(--muted); padding: 26px 16px; text-align: center; }
-  .err { color: var(--fail); padding: 16px; }
-  .muted { color: var(--muted); }
   .frust { margin: 4px 0 0; padding-left: 18px; }
   .frust li { font-size: 13px; padding: 1px 0; }
   .narr { white-space: pre-wrap; padding: 0 16px 14px; line-height: 1.6; }
   ol.changes { margin: 2px 16px 14px; padding-left: 20px; }
   ol.changes li { padding: 3px 0; }
-  .persona-card { padding: 12px 16px; border-top: 1px solid var(--border); }
-  .persona-card h3 { margin: 0 0 4px; font-size: 13.5px; }
+  .persona-card { padding: 13px 16px; border-top: 1px solid var(--border); }
+  .persona-card:first-child { border-top: 0; }
+  .persona-card h3 { margin: 0 0 5px; font-size: 13.5px; font-weight: 700; }
 
   .chart-card { padding: 14px 16px; }
   .chart-card .ctitle { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
@@ -155,25 +125,14 @@ PAGE: str = r"""<!DOCTYPE html>
   .reglist li { padding: 5px 0; border-bottom: 1px dashed var(--border); }
   .reglist .drop { color: var(--fail); font-weight: 700; font-family: var(--mono); }
 
-  /* ── control plane ── */
-  header.top .navtabs { display: flex; gap: 2px; }
-  header.top .navtab { padding: 5px 12px; cursor: pointer; color: var(--muted); border-radius: 7px; font-weight: 600; font-size: 13px; text-decoration: none; }
-  header.top .navtab:hover { background: var(--panel-2); color: var(--text); }
-  header.top .navtab.active { color: var(--text); background: var(--panel-2); }
-  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; padding: 14px 16px; }
-  .field { display: flex; flex-direction: column; gap: 4px; }
-  .field label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
-  .field input[type=text], .field input[type=number], .field select, .field textarea {
-    background: var(--bg); color: var(--text); border: 1px solid var(--border);
-    border-radius: 7px; padding: 7px 9px; font-size: 13px; font-family: var(--sans); }
-  .field textarea { resize: vertical; min-height: 38px; }
-  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); }
-  .checks { display: flex; flex-wrap: wrap; gap: 10px; padding: 2px 0; }
-  .checks label { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 13px; text-transform: none; letter-spacing: 0; }
-  .btn.primary { background: var(--accent); color: #0b0d11; border-color: var(--accent); font-weight: 700; }
-  .btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
+  /* ── control plane (base header.top/.navtab/.field/.btn come from THEME_CSS) ── */
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--sp-4); padding: var(--sp-4) var(--sp-4) var(--sp-2); }
+  .form-grid + .form-grid { padding-top: 0; }
+  .checks { display: flex; flex-wrap: wrap; gap: 10px 16px; padding: 4px 0 2px; }
+  .checks label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 13px; text-transform: none; letter-spacing: 0; cursor: pointer; }
+  .checks label input { accent-color: var(--accent); }
   .btn.primary.disabled-btn { opacity: .5; }
-  .launchbar { display: flex; align-items: center; gap: 12px; padding: 4px 16px 14px; }
+  .launchbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) var(--sp-4); }
   .runprog { margin: 0 16px 16px; }
   .runprog .bigprog { height: 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .runprog .bigprog > i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
@@ -197,40 +156,115 @@ PAGE: str = r"""<!DOCTYPE html>
   .diff-case .dh { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
   .diff-case .dlt { font-family: var(--mono); font-weight: 700; }
   .mv-up { color: var(--pass); } .mv-down { color: var(--fail); } .mv-flat { color: var(--muted); }
-  .persona-result { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 13px; margin: 10px 16px; background: var(--panel-2); }
-  .persona-result h3 { margin: 0 0 4px; font-size: 13.5px; }
-  .filelist { list-style: none; padding: 0; margin: 6px 16px 12px; }
-  .filelist li { padding: 6px 0; border-bottom: 1px dashed var(--border); display: flex; align-items: center; gap: 10px; }
-  .tag-mono { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
-  .subtabs { display: flex; gap: 4px; margin: 12px 0 14px; border-bottom: 1px solid var(--border); }
-  .subtab { padding: 7px 16px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; }
+  .persona-result { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); padding: 11px 14px; margin: 10px 16px; background: var(--panel-2); }
+  .persona-result h3 { margin: 0 0 5px; font-size: 13.5px; font-weight: 700; }
+  .filelist { list-style: none; padding: 0; margin: 4px 16px 12px; }
+  .filelist li { padding: 9px 0; border-bottom: 1px dashed var(--border); display: flex; align-items: center; gap: 10px; }
+  .filelist li:last-child { border-bottom: 0; }
+  .tag-mono { font-family: var(--mono); font-size: 11.5px; color: var(--muted); word-break: break-all; }
+  .subtabs { display: flex; gap: 4px; margin: 4px 0 18px; border-bottom: 1px solid var(--border); }
+  .subtab { padding: 8px 16px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; font-size: 13px; transition: color .14s, border-color .14s; }
+  .subtab:hover { color: var(--text); }
   .subtab.active { color: var(--text); border-bottom-color: var(--accent); }
-  .corpus-preview { max-height: 360px; overflow: auto; margin: 0 16px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+  .corpus-preview { max-height: 360px; overflow: auto; margin: 0 16px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
   .corpus-preview .pgroup { border-bottom: 1px dashed var(--border); }
   .corpus-preview .pgroup:last-child { border-bottom: none; }
-  .corpus-preview .pcat { font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); padding: 8px 12px 4px; }
-  .corpus-preview .pitem { padding: 4px 12px 4px 22px; white-space: pre-wrap; word-break: break-word; font-size: 13px; border-top: 1px dashed var(--border); }
-  .corpus-summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 16px 2px; }
-  .corpus-summary .cchip { font-size: 11.5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
-  .selpath { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 16px 10px; }
+  .corpus-preview .pcat { font-size: var(--label-size); font-weight: 700; letter-spacing: var(--label-spacing); text-transform: uppercase; color: var(--muted); padding: 9px 13px 5px; }
+  .corpus-preview .pitem { padding: 5px 13px 5px 22px; white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.5; border-top: 1px dashed var(--border); }
+  .corpus-summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px 4px; }
+  .corpus-summary .cchip { font-size: 11.5px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
+  .corpus-summary .cchip b { color: var(--text); font-weight: 700; }
+  .cg-stream { margin: 8px 16px 14px; }
+  .cg-stream .cg-prog-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 7px; }
+  .cg-stream .cg-prog-note { font-size: 12.5px; color: var(--text); font-weight: 600; }
+  .cg-stream .cg-prog-count { font-size: 12px; color: var(--muted); font-family: var(--mono); margin-left: auto; }
+  .cg-bar { height: 6px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden; }
+  .cg-bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .18s ease; }
+  .cg-live { max-height: 300px; overflow: auto; margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+  .cg-live .cg-row { padding: 7px 13px; border-top: 1px dashed var(--border); white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.5; }
+  .cg-live .cg-row:first-child { border-top: none; }
+  .cg-live .cg-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); margin-right: 8px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); }
+  .cg-live .empty { padding: 16px 13px; text-align: left; }
+  .selpath { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 16px 12px; }
   .selpath .tag-mono { color: var(--accent); }
+
+  /* ── New-run path toggle (pick existing vs build) ─────────────────────── */
+  .nr-paths { display: flex; gap: 4px; margin: 0 16px 10px; border-bottom: 1px solid var(--border); }
+  .nr-path { padding: 8px 16px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; }
+  .nr-path.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  /* ── config builder: custom-category chip editor ─────────────────────── */
+  .catchips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; }
+  .catchip {
+    display: inline-flex; align-items: center; gap: 4px; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 11px; font-size: 12.5px;
+    transition: border-color .14s;
+  }
+  .catchip:focus-within { border-color: var(--accent); }
+  .catchip input.catname {
+    background: transparent; border: 0; color: var(--text); font: 12.5px var(--sans);
+    min-width: 70px; width: auto; padding: 0; outline: none;
+  }
+  .catchip .catx {
+    cursor: pointer; color: var(--muted); border: 0; background: transparent; font-size: 14px;
+    line-height: 1; padding: 0 2px; transition: color .14s;
+  }
+  .catchip .catx:hover { color: var(--fail); }
+  .catadd { display: inline-flex; gap: 8px; align-items: center; }
+  .catadd input { background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; min-width: 160px;
+    transition: border-color .14s, box-shadow .14s; }
+  .catadd input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+  .builder-sec { border-top: 1px solid var(--border); padding: 16px 16px 10px; }
+  .builder-sec > .bs-title { display: flex; align-items: baseline; gap: 8px; font-size: var(--label-size); font-weight: 700; letter-spacing: var(--label-spacing); text-transform: uppercase; color: var(--text); margin-bottom: 12px; }
+  .builder-sec > .bs-title::before { content: ""; width: 3px; align-self: stretch; min-height: 12px; border-radius: 2px; background: var(--accent); opacity: .7; }
+  .builder-sec > .bs-title .bs-note { font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); font-size: 11.5px; }
+  /* per-type target-adapter field groups + the advanced raw-JSON disclosure */
+  .adapter-fields { overflow: visible; }
+  .adapter-adv { margin: 4px 0 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); overflow: visible; }
+  .adapter-adv > summary { cursor: pointer; padding: 8px 11px; font-size: 11.5px; font-weight: 600; color: var(--muted); list-style: none; user-select: none; }
+  .adapter-adv > summary::-webkit-details-marker { display: none; }
+  .adapter-adv > summary::before { content: "\25B8"; display: inline-block; margin-right: 7px; transition: transform .14s; color: var(--muted-2, #6a7280); }
+  .adapter-adv[open] > summary::before { transform: rotate(90deg); }
+  .adapter-adv[open] > summary { border-bottom: 1px solid var(--border); }
+  .adapter-adv > .field, .adapter-adv > .form-grid { padding-left: 11px; padding-right: 11px; }
+
+  /* let form containers show tooltips instead of clipping them. A `.tip-host`
+     panel (form panels only — never scrolling-table panels) drops its overflow
+     clip; the field/grid/section chain is overflow:visible so an upward bubble
+     escapes cleanly. */
+  .panel.tip-host { overflow: visible; }
+  .builder-sec, .form-grid, .field, .checks, .catadd { overflow: visible; }
+
+  /* helper microcopy under a field; ".opt" is an inline "optional" qualifier on a label */
+  .field-hint { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.45; margin-top: 2px; letter-spacing: 0; text-transform: none; font-weight: 400; }
+  .field-hint b { color: var(--text); font-weight: 700; }
+  .field label .opt { color: var(--muted-2, #6a7280); font-weight: 600; text-transform: none; letter-spacing: 0; font-size: 10.5px; }
+  #nr-config-hint b { color: var(--accent); font-weight: 700; }
+
+  /* the two New-Run paths read as a segmented choice rather than two loose tabs */
+  .nr-paths { display: inline-flex; gap: 2px; margin: 12px 16px 10px; padding: 3px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .nr-path { padding: 6px 16px; cursor: pointer; color: var(--muted); border-radius: 5px; border-bottom: 0; font-weight: 600; font-size: 13px; transition: background .14s, color .14s; }
+  .nr-path:hover { color: var(--text); }
+  .nr-path.active { color: var(--text); background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--border); }
+
+  /* launch bar: clear primary-vs-secondary hierarchy + a divider above it */
+  .launchbar { border-top: 1px solid var(--border); margin-top: 4px; }
 </style>
 </head>
 <body>
-<header class="top">
-  <h1>PromptPolygraph</h1>
-  <span class="sub">control plane</span>
-  <span class="navtabs" id="navtabs">
-    <span class="navtab" id="nav-runs" onclick="showRuns()">Runs</span>
-    <span class="navtab" id="nav-newrun" onclick="showNewRun()">New run</span>
-    <span class="navtab" id="nav-studio" onclick="showStudio()">Studio</span>
-    <a class="navtab" id="nav-redteam" href="/redteam">Red Team</a>
-  </span>
-  <span class="spacer"></span>
-  <span class="crumb" id="crumb" onclick="showRuns()">All runs</span>
-</header>
-<div class="wrap" id="app"><div class="empty">Loading…</div></div>
+"""
+)
 
+# The dashboard body: shared header (in-page switchers, links=False) + the SPA.
+# The shared AI Designer dock (context "Run config") is appended after the app
+# container; it is a fixed-position element so its position in the DOM is moot.
+_BODY = (
+    r"""
+<div class="wrap" id="app"><div class="empty">Loading…</div></div>
+"""
+    + designer_dock_html(context_label="Run config")
+    + r"""
 <script>
 "use strict";
 
@@ -242,6 +276,57 @@ function esc(s) {
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 function dash(v) { return (v === null || v === undefined || v === "") ? "&mdash;" : esc(v); }
+// Accessible tooltip affordance: a styled "?" carrying the tip both as a CSS
+// bubble (data-tip) and as a native title= fallback (screen readers / no-CSS).
+// Hover + keyboard-focus both reveal it (see .tip in THEME_CSS). `left` nudges
+// the bubble to the right edge for controls near the panel border.
+function tip(text, left) {
+  const t = esc(text);
+  return '<span class="tip' + (left ? ' tip-left' : '') + '" tabindex="0" role="img"'
+    + ' aria-label="' + t + '" data-tip="' + t + '" title="' + t + '">?</span>';
+}
+// Canonical plain-language tip copy, shared across the config builder, New Run,
+// and the Studio generator so identical controls read identically everywhere.
+const TIP_SEED = "Fixes the random seed so 'varied'/'adversarial' generation produces the identical prompt set every run — for reproducible baselines and apples-to-apples comparisons. Leave blank for fresh prompts each run.";
+const TIP_MODE = "fixed = load a saved set (reproducible) · varied = generate fresh prompts · adversarial = red-team/edge prompts · hybrid = fixed core + generated supplement.";
+const TIP_PERCAT = "Per category = prompts for each category; Count = a total spread across categories. Leave both blank for 8 per category.";
+const TIP_DIFFICULTY = "Adversarial pressure level for generated probes.";
+const TIP_JUDGES = "How many independent LLM graders score each response (median used, disagreement flagged). More = more robust, more cost.";
+const TIP_GATE = "strict = every applicable dimension must clear its threshold; weighted = a weighted average must clear it.";
+const TIP_RT_PROFILE = "A preconfigured attacker team (who attacks, how many turns, which model).";
+const TIP_PERSONA_POOL = "Sample N personas from the library to react to the responses.";
+// Shared "Test connection" result renderer. state: "busy" | "ok" | "bad".
+function renderConnResult(elId, state, html) {
+  const box = document.getElementById(elId);
+  if (!box) return;
+  box.className = "conn-result " + state;
+  box.innerHTML = (state === "busy" ? "" : '<span class="cdot"></span>') + html;
+}
+// POST an adapter spec to /api/adapter/test and render the result into elId.
+// {ok:true} → green "Good to go — <name> responded in <ms>ms" (+ sample);
+// {ok:false} → red "Not connected — <error>" (shows 'adapter not wired: …'
+// plainly so a custom/callable adapter with no fn is obvious).
+function runAdapterTest(elId, adapterSpec) {
+  if (!adapterSpec || !adapterSpec.type) {
+    renderConnResult(elId, "bad", "Not connected — no adapter type selected.");
+    return;
+  }
+  renderConnResult(elId, "busy", "Testing connection…");
+  postJSON("/api/adapter/test", { adapter: adapterSpec }).then(res => {
+    res = res || {};
+    if (res.ok) {
+      let html = "Good to go — <b>" + esc(res.name || "adapter") + "</b> responded";
+      if (res.latency_ms != null) html += " in " + esc(res.latency_ms) + "ms";
+      html += ".";
+      if (res.sample) html += '<span class="csample">' + esc(res.sample) + '</span>';
+      renderConnResult(elId, "ok", html);
+    } else {
+      renderConnResult(elId, "bad", "Not connected — " + esc(res.error || "adapter did not respond"));
+    }
+  }).catch(e => {
+    renderConnResult(elId, "bad", "Not connected — " + esc((e && e.message) || String(e)));
+  });
+}
 function num(v, d) {
   if (v === null || v === undefined) return "&mdash;";
   d = (d === undefined) ? 1 : d;
@@ -279,6 +364,92 @@ async function postJSON(url, body) {
     throw new Error(msg);
   }
   return data;
+}
+
+// ---- provider / model dropdowns ----------------------------------------
+// Sourced from GET /api/providers (cached once per page load). Each entry:
+// {id,label,available,reason,needs_key,models,default_model,allow_custom,base_url?}.
+const CUSTOM_OPT = "__custom__";
+let _providersCache = null;
+async function loadProviders() {
+  if (_providersCache) return _providersCache;
+  try { _providersCache = await getJSON("/api/providers"); }
+  catch (e) { _providersCache = []; }
+  if (!Array.isArray(_providersCache)) _providersCache = [];
+  return _providersCache;
+}
+// Build provider + model <select>s. opts: {providerSel, modelSel, customInput,
+// notice, preferLocal}. preferLocal picks ollama first when available.
+async function initProviderSelects(opts) {
+  const provEl = document.getElementById(opts.providerSel);
+  const modelEl = document.getElementById(opts.modelSel);
+  if (!provEl || !modelEl) return;
+  const providers = await loadProviders();
+  const noticeEl = opts.notice ? document.getElementById(opts.notice) : null;
+
+  const anyAvailable = providers.some(p => p.available);
+  if (!providers.length || !anyAvailable) {
+    // Empty state: nothing configured. Surface the inline notice; leave the
+    // selects populated (disabled) so the form still reads sensibly.
+    if (noticeEl) {
+      noticeEl.innerHTML = '<div class="empty" style="padding:8px 16px;text-align:left">'
+        + 'No providers configured — run <span class="mono">polygraph init</span>, set an API key, or start Ollama.'
+        + '</div>';
+    }
+  } else if (noticeEl) {
+    noticeEl.innerHTML = "";
+  }
+
+  // pick a default provider id
+  let defId = "";
+  if (opts.preferLocal) {
+    const local = providers.find(p => p.id === "ollama" && p.available);
+    if (local) defId = local.id;
+  }
+  if (!defId) { const a = providers.find(p => p.available); if (a) defId = a.id; }
+  if (!defId && providers.length) defId = providers[0].id;
+
+  provEl.innerHTML = providers.map(p => {
+    const dis = p.available ? "" : " disabled";
+    const why = p.available ? "" : (p.reason ? " — " + p.reason : " (unavailable)");
+    const sel = (p.id === defId) ? " selected" : "";
+    return '<option value="' + esc(p.id) + '"' + dis + sel + '>' + esc(p.label || p.id) + esc(why) + '</option>';
+  }).join("");
+
+  provEl.onchange = () => fillModelSelect(opts);
+  fillModelSelect(opts);
+}
+function _providerById(id) { return (_providersCache || []).find(p => p.id === id) || null; }
+function fillModelSelect(opts) {
+  const provEl = document.getElementById(opts.providerSel);
+  const modelEl = document.getElementById(opts.modelSel);
+  const customEl = opts.customInput ? document.getElementById(opts.customInput) : null;
+  if (!provEl || !modelEl) return;
+  const p = _providerById(provEl.value);
+  const models = (p && p.models) || [];
+  const def = p && p.default_model;
+  let html = models.map(m =>
+    '<option value="' + esc(m) + '"' + (m === def ? " selected" : "") + '>' + esc(m) + '</option>').join("");
+  if (!models.length) html = '<option value="">(provider default)</option>';
+  if (p && p.allow_custom) html += '<option value="' + CUSTOM_OPT + '">custom…</option>';
+  modelEl.innerHTML = html;
+  modelEl.onchange = () => {
+    if (customEl) customEl.style.display = (modelEl.value === CUSTOM_OPT) ? "" : "none";
+  };
+  if (customEl) customEl.style.display = "none";
+}
+function resolveProvider(providerSelId) {
+  const el = document.getElementById(providerSelId);
+  return (el && el.value) ? el.value : "";
+}
+function resolveModel(modelSelId, customInputId) {
+  const el = document.getElementById(modelSelId);
+  if (!el) return "";
+  if (el.value === CUSTOM_OPT) {
+    const c = customInputId ? document.getElementById(customInputId) : null;
+    return (c && c.value || "").trim();
+  }
+  return el.value || "";
 }
 
 // ---- inline-SVG chart helpers ------------------------------------------
@@ -500,9 +671,13 @@ let launchProgressTimer = null; // poll timer for an in-flight launched run
 let selectedPersonaPath = "";   // persona file fed into the New Run panel
 let selectedCorpusPath = "";    // generated corpus dir fed into the New Run panel
 let studioTab = "prompts";      // Studio sub-tab: "prompts" | "personas"
-let lastCorpusResult = null;    // last /api/corpus/generate response, for re-render
+let lastCorpusResult = null;    // last corpus-stream result frame, for re-render
+let corpusStream = null;        // live EventSource for the generator, or null when idle
 
-function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+function stopPoll() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  closeCorpusStream();  // any view transition also abandons a live generator stream
+}
 
 function setNav(active) {
   document.querySelectorAll("#navtabs .navtab").forEach(el => el.classList.remove("active"));
@@ -1297,6 +1472,7 @@ async function showNewRun() {
 }
 
 function renderNewRun(configs, pfiles) {
+  _builderProvidersReady = false;  // DOM is rebuilt; provider selects re-init on demand
   const cfgOpts = configs.length
     ? configs.map(c => '<option value="' + esc(c.path) + '">' + esc(c.name) + '</option>').join("")
     : '<option value="">(no configs found — a default config will be used)</option>';
@@ -1317,36 +1493,131 @@ function renderNewRun(configs, pfiles) {
       + '<span class="hint">This generated corpus will run as a fixed set; Mode/Count/Categories above are ignored.</span></div>'
     : '';
 
-  const form =
-    '<div class="panel"><h2>New run</h2>'
-    + '<div class="form-grid">'
-    + '<div class="field"><label>Config</label><select id="nr-config">' + cfgOpts + '</select></div>'
-    + '<div class="field"><label>Mode</label><select id="nr-mode">'
-      + ['','fixed','varied','adversarial','hybrid'].map(m => '<option value="' + m + '">' + (m || "(config default)") + '</option>').join("")
-      + '</select></div>'
-    + '<div class="field"><label>Count (varied/adversarial)</label><input type="number" id="nr-count" min="1" placeholder="config default"></div>'
-    + '<div class="field"><label>Per category</label><input type="number" id="nr-percat" min="1" placeholder="config default"></div>'
-    + '<div class="field"><label>Difficulty</label><select id="nr-diff">'
-      + ['','mild','standard','aggressive'].map(m => '<option value="' + m + '">' + (m || "(config default)") + '</option>').join("")
-      + '</select></div>'
-    + '<div class="field"><label>Persona panel</label><select id="nr-personas">' + personaOpts + '</select></div>'
-    + '</div>'
-    + '<div class="form-grid" style="padding-top:0">'
-    + '<div class="field"><label>Categories (optional)</label><div class="checks">' + catChecks + '</div></div>'
+  const cfgEditBtn = configs.length
+    ? '<button class="btn" onclick="loadConfigForEdit(document.getElementById(\'nr-config\').value)">Edit in builder</button>'
+    : '';
+
+  const pickForm =
+    '<div class="builder-sec" style="border-top:0;padding-top:14px">'
+    + '<div class="bs-title">Config</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field" style="grid-column:1 / -1"><label>Config</label>'
+      + '<select id="nr-config" onchange="updateNrConfigHint()">' + cfgOpts + '</select>'
+      + '<span class="field-hint" id="nr-config-hint">Blank fields below inherit this config\'s own settings.</span>'
+      + (configs.length ? '<div style="margin-top:8px"><button class="btn" type="button" onclick="testPickedConfigAdapter()">Test adapter connection</button>'
+          + '<span class="field-hint" style="display:inline;margin-left:8px">Verify this config\'s target is reachable before launching.</span>'
+          + '<div class="conn-result" id="nr-adapter-conn"></div></div>' : '')
+      + '</div>'
+    + '</div></div>'
+    + '<div class="builder-sec"><div class="bs-title">Overrides <span class="bs-note">optional — leave blank to use the config</span></div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Mode' + tip(TIP_MODE) + '</label><select id="nr-mode">'
+      + ['','fixed','varied','adversarial','hybrid'].map(m => '<option value="' + m + '">' + (m || "inherit from config") + '</option>').join("")
+      + '</select><span class="field-hint">How prompts are sourced for the run.</span></div>'
+    + '<div class="field"><label>Count' + tip(TIP_PERCAT) + '</label><input type="number" id="nr-count" min="1" placeholder="inherit from config">'
+      + '<span class="field-hint">Total prompts to generate.</span></div>'
+    + '<div class="field"><label>Per category' + tip(TIP_PERCAT) + '</label><input type="number" id="nr-percat" min="1" placeholder="inherit from config">'
+      + '<span class="field-hint">Prompts for each category.</span></div>'
+    + '<div class="field"><label>Difficulty' + tip(TIP_DIFFICULTY) + '</label><select id="nr-diff">'
+      + ['','mild','standard','aggressive'].map(m => '<option value="' + m + '">' + (m || "inherit from config") + '</option>').join("")
+      + '</select><span class="field-hint">Pressure level for adversarial prompts.</span></div>'
+    + '<div class="field"><label>Persona panel' + tip(TIP_PERSONA_POOL) + '</label><select id="nr-personas">' + personaOpts + '</select>'
+      + '<span class="field-hint">Reviewer panel that reacts to responses.</span></div>'
+    + '</div></div>'
+    + '<div class="builder-sec"><div class="bs-title">Scope &amp; output</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Categories <span class="opt">optional</span></label><div class="checks">' + catChecks + '</div>'
+      + '<span class="field-hint">Pick a subset, or leave all unchecked for the config\'s categories.</span></div>'
     + '<div class="field"><label>Report formats</label><div class="checks">' + fmtChecks + '</div></div>'
-    + '<div class="field"><label>Options</label><div class="checks"><label><input type="checkbox" id="nr-mock" checked> Mock (offline)</label></div></div>'
-    + '</div>'
+    + '<div class="field"><label>Backend</label><div class="checks"><label><input type="checkbox" id="nr-mock" checked> Mock (offline)</label></div>'
+      + '<span class="field-hint">Mock needs no API key.</span></div>'
+    + '</div></div>'
     + corpusSel
     + '<div class="launchbar"><button class="btn primary" id="nr-launch" onclick="launchRun()">Launch run</button>'
+    + cfgEditBtn
     + '<span class="hint">Runs in-process against this dashboard\'s store; progress appears below.</span></div>'
-    + '<div id="nr-progress"></div>'
+    + '<div id="nr-progress"></div>';
+
+  // "Build a config" pane — a real config builder (PART B).
+  const buildForm = builderFormHtml()
+    + '<div class="launchbar">'
+    + '<button class="btn primary" id="bld-launch" onclick="saveBuilderConfig(true)">Save &amp; launch</button>'
+    + '<button class="btn" id="bld-save" onclick="saveBuilderConfig(false)">Save config</button>'
+    + '<span class="hint">Saved configs appear in the picker; Inject from the AI Designer fills this form.</span></div>'
+    + '<div id="bld-result"></div>'
+    + '<div id="nr-progress"></div>';
+
+  const paths = '<div class="nr-paths">'
+    + '<div class="nr-path' + (newRunPath === "pick" ? " active" : "") + '" id="nrp-pick" onclick="setNewRunPath(\'pick\')">Pick an existing config</div>'
+    + '<div class="nr-path' + (newRunPath === "build" ? " active" : "") + '" id="nrp-build" onclick="setNewRunPath(\'build\')">Build a config</div>'
+    + '</div>';
+
+  const form = '<div class="panel tip-host"><h2>New run</h2>'
+    + paths
+    + '<div id="nr-pick-pane"' + (newRunPath === "pick" ? "" : ' style="display:none"') + '>' + pickForm + '</div>'
+    + '<div id="nr-build-pane"' + (newRunPath === "build" ? "" : ' style="display:none"') + '>' + buildForm + '</div>'
     + '</div>';
 
   const studioLink = '<div class="muted" style="padding:0 2px 8px">Need a prompt corpus or persona panel? Build one in the '
     + '<a href="#" onclick="showStudio();return false;">Studio</a> '
     + '(<a href="#" onclick="showStudio(\'prompts\');return false;">Prompts</a> · '
-    + '<a href="#" onclick="showStudio(\'personas\');return false;">Persona studio</a>).</div>';
+    + '<a href="#" onclick="showStudio(\'personas\');return false;">Persona studio</a>). '
+    + 'Or click <b>✦ Designer</b> in the header to draft a config from a description.</div>';
   app.innerHTML = form + studioLink;
+  if (newRunPath === "build") ensureBuilderProviders();
+  updateNrConfigHint();
+}
+
+// Read-only hint: resolve what the currently-picked config actually uses, so
+// "inherit from config" reads as a concrete amount rather than a vague word.
+// Fetches GET /api/config?path=<picker value>; never mutates request bodies or
+// element ids the launch flow relies on.
+let _nrHintToken = 0;
+async function updateNrConfigHint() {
+  const hint = document.getElementById("nr-config-hint");
+  const sel = document.getElementById("nr-config");
+  if (!hint || !sel) return;
+  const path = sel.value || "";
+  if (!path) {
+    hint.innerHTML = "No config selected — a built-in default config will be used.";
+    return;
+  }
+  const token = ++_nrHintToken;
+  hint.innerHTML = 'Reading this config…';
+  let data;
+  try { data = await getJSON("/api/config?path=" + encodeURIComponent(path)); }
+  catch (e) { if (token === _nrHintToken) hint.innerHTML = "Blank fields below inherit this config’s own settings."; return; }
+  if (token !== _nrHintToken) return;  // a newer selection superseded this one
+  const cfg = (data && data.config) || {};
+  const co = cfg.corpus || {};
+  const bits = [];
+  if (co.mode) bits.push('mode <b>' + esc(co.mode) + '</b>');
+  // amount: per_category pins a number; count pins a total; fixed corpus loads a dir
+  if (co.per_category != null && co.per_category !== "") bits.push('<b>' + esc(co.per_category) + '</b>/category');
+  else if (co.count != null && co.count !== "") bits.push('<b>' + esc(co.count) + '</b> total');
+  else if (co.mode === "fixed" || co.path || co.dir || co.corpus_dir) bits.push('loads the config’s corpus (no fixed count)');
+  if (co.difficulty) bits.push('difficulty <b>' + esc(co.difficulty) + '</b>');
+  const cats = co.categories || [];
+  if (Array.isArray(cats) && cats.length) bits.push('<b>' + cats.length + '</b> categor' + (cats.length === 1 ? 'y' : 'ies'));
+  hint.innerHTML = bits.length
+    ? 'This config runs ' + bits.join(' · ') + '. Blank overrides below inherit these.'
+    : 'This config pins no corpus amount — blank fields use its built-in defaults.';
+}
+
+// Test the selected existing config's adapter: read it via GET /api/config?path=
+// (the same endpoint the hint uses), then POST its adapter to /api/adapter/test.
+async function testPickedConfigAdapter() {
+  const sel = document.getElementById("nr-config");
+  const path = (sel && sel.value) || "";
+  if (!path) { renderConnResult("nr-adapter-conn", "bad", "Not connected — select a config first."); return; }
+  renderConnResult("nr-adapter-conn", "busy", "Reading config…");
+  let data;
+  try { data = await getJSON("/api/config?path=" + encodeURIComponent(path)); }
+  catch (e) { renderConnResult("nr-adapter-conn", "bad", "Not connected — could not read config: " + esc(e.message)); return; }
+  const ad = (data && data.config && data.config.adapter) || {};
+  const spec = { type: ad.type || "demo", options: ad.options || ad.opts || {} };
+  if (ad.name) spec.name = ad.name;
+  runAdapterTest("nr-adapter-conn", spec);
 }
 
 async function launchRun() {
@@ -1466,6 +1737,7 @@ function renderStudio() {
 }
 
 function setStudioTab(t) {
+  closeCorpusStream();  // leaving (or re-entering) the sub-tab abandons any live generator
   studioTab = t;
   document.querySelectorAll(".subtab").forEach(el => el.classList.remove("active"));
   document.querySelectorAll(".subtab").forEach(el => {
@@ -1489,70 +1761,206 @@ function renderPromptStudio() {
   const diffOpts = CORPUS_DIFFS.map(m =>
     '<option value="' + m + '"' + (m === "standard" ? " selected" : "") + '>' + m + '</option>').join("");
 
-  const gen = '<div class="panel"><h2>Generate a prompt corpus</h2>'
-    + '<div class="form-grid">'
-    + '<div class="field"><label>Mode</label><select id="cg-mode">' + modeOpts + '</select></div>'
-    + '<div class="field" style="grid-column:span 2"><label>Domain (optional)</label>'
-      + '<input type="text" id="cg-domain" placeholder="e.g. a budgeting assistant for freelancers"></div>'
-    + '<div class="field"><label>Difficulty (adversarial)</label><select id="cg-diff">' + diffOpts + '</select></div>'
-    + '<div class="field"><label>Count (total, optional)</label><input type="number" id="cg-count" min="1" placeholder="default"></div>'
-    + '<div class="field"><label>Per category (optional)</label><input type="number" id="cg-percat" min="1" placeholder="default"></div>'
-    + '<div class="field" style="grid-column:span 2"><label>Categories (optional, comma-separated)</label>'
-      + '<input type="text" id="cg-cats" placeholder="e.g. factual_qa, how_to, refusal"></div>'
-    + '<div class="field"><label>Seed (optional)</label><input type="number" id="cg-seed" placeholder="reproducible"></div>'
-    + '<div class="field"><label>Provider</label><input type="text" id="cg-provider" value="anthropic"></div>'
-    + '<div class="field"><label>Model (optional)</label><input type="text" id="cg-model" placeholder="provider default"></div>'
-    + '</div>'
-    + '<div class="form-grid" style="padding-top:0">'
-    + '<div class="field" style="grid-column:1 / -1"><label>Backend</label>'
+  const gen = '<div class="panel tip-host"><h2>Generate a prompt corpus</h2>'
+    // what to generate
+    + '<div class="builder-sec" style="border-top:0;padding-top:14px"><div class="bs-title">Prompts</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Mode' + tip(TIP_MODE) + '</label><select id="cg-mode">' + modeOpts + '</select>'
+      + '<span class="field-hint">Kind of prompts to synthesize.</span></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Domain <span class="opt">optional</span></label>'
+      + '<input type="text" id="cg-domain" placeholder="e.g. a budgeting assistant for freelancers">'
+      + '<span class="field-hint">Grounds the generated prompts in your use case.</span></div>'
+    + '<div class="field"><label>Difficulty <span class="opt">adversarial</span>' + tip(TIP_DIFFICULTY) + '</label><select id="cg-diff">' + diffOpts + '</select>'
+      + '<span class="field-hint">Pressure level for adversarial prompts.</span></div>'
+    + '<div class="field"><label>Count <span class="opt">total</span>' + tip(TIP_PERCAT) + '</label><input type="number" id="cg-count" min="1" placeholder="optional total">'
+      + '<span class="field-hint">Alternative to per-category: a grand total spread across categories.</span></div>'
+    + '<div class="field"><label>Per category' + tip(TIP_PERCAT) + '</label><input type="number" id="cg-percat" min="1" placeholder="blank = 8 per category">'
+      + '<span class="field-hint">Prompts for each category. Leave both blank for <b>8 per category</b>.</span></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Categories <span class="opt">optional, comma-separated</span></label>'
+      + '<input type="text" id="cg-cats" placeholder="e.g. factual_qa, how_to, refusal">'
+      + '<span class="field-hint">Blank lets the generator pick categories for the domain.</span></div>'
+    + '<div class="field"><label>Seed <span class="opt">optional</span>' + tip(TIP_SEED) + '</label><input type="number" id="cg-seed" placeholder="reproducible">'
+      + '<span class="field-hint">Fix for a repeatable corpus.</span></div>'
+    + '</div></div>'
+    // backend
+    + '<div class="builder-sec"><div class="bs-title">Backend</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Provider</label><select class="field" id="cg-provider"><option>loading…</option></select></div>'
+    + '<div class="field"><label>Model</label><select class="field" id="cg-model"><option>—</option></select>'
+      + '<input type="text" id="cg-model-custom" placeholder="custom model name" style="display:none;margin-top:4px"></div>'
+    + '<div class="field"><label>Mode</label>'
       + '<div class="checks"><label><input type="checkbox" id="cg-mock" checked> Mock (offline)</label></div>'
-      + '<span class="hint">Any provider works — <span class="mono">anthropic</span> is the default; use e.g. '
-      + '<span class="mono">ollama</span> for a fully local backend. Mock needs no key.</span></div>'
+      + '<span class="field-hint"><span class="mono">anthropic</span> is the default; use <span class="mono">ollama</span> for local. Mock needs no key.</span></div>'
+    + '</div>'
+    + '<div id="cg-provider-notice"></div>'
     + '</div>'
     + '<div class="launchbar"><button class="btn primary" id="cg-gen-btn" onclick="generateCorpus()">Generate corpus</button>'
     + '<span class="hint">Saves a loadable corpus dir; preview and exports appear below.</span></div>'
     + '<div id="cg-result"></div></div>';
 
   body.innerHTML = gen;
+  // populate provider/model dropdowns from /api/providers; default to the
+  // first available provider (Studio has no IP-locality constraint).
+  initProviderSelects({
+    providerSel: "cg-provider", modelSel: "cg-model", customInput: "cg-model-custom",
+    notice: "cg-provider-notice", preferLocal: false,
+  });
   if (lastCorpusResult) drawCorpusResult(lastCorpusResult);
 }
 
-async function generateCorpus() {
+// Close + forget any live generator stream. Safe to call repeatedly; used by
+// Cancel, by terminal/error events, and as a guard when leaving the sub-tab.
+function closeCorpusStream() {
+  if (corpusStream) {
+    try { corpusStream.close(); } catch (e) { /* already closed */ }
+    corpusStream = null;
+  }
+}
+
+function setGenBtnGenerating(on) {
   const btn = document.getElementById("cg-gen-btn");
+  if (!btn) return;
+  if (on) { btn.classList.add("disabled-btn"); btn.textContent = "Generating…"; }
+  else { btn.classList.remove("disabled-btn"); btn.textContent = "Generate corpus"; }
+}
+
+function cancelCorpusStream() {
+  closeCorpusStream();
+  setGenBtnGenerating(false);
+  const note = document.getElementById("cg-prog-note");
+  if (note) note.textContent = "Stopped.";
+  const cancel = document.getElementById("cg-cancel-btn");
+  if (cancel) cancel.remove();
+}
+
+function generateCorpus() {
   const out = document.getElementById("cg-result");
-  if (btn) { btn.classList.add("disabled-btn"); btn.textContent = "Generating…"; }
-  if (out) out.innerHTML = '<div class="empty">Generating corpus…</div>';
-  const numOrNull = id => {
+  if (!out) return;
+  // a generation is already streaming — ignore double-clicks
+  if (corpusStream) return;
+  closeCorpusStream();
+
+  const numOrParam = id => {
     const v = (document.getElementById(id).value || "").trim();
-    return v === "" ? null : Number(v);
+    return v === "" ? "" : String(Number(v));
   };
-  const body = {
+  const fields = {
     mode: document.getElementById("cg-mode").value,
     domain: (document.getElementById("cg-domain").value || "").trim(),
     difficulty: document.getElementById("cg-diff").value,
-    count: numOrNull("cg-count"),
-    per_category: numOrNull("cg-percat"),
+    count: numOrParam("cg-count"),
+    per_category: numOrParam("cg-percat"),
     categories: (document.getElementById("cg-cats").value || "").trim(),
-    seed: numOrNull("cg-seed"),
-    provider: (document.getElementById("cg-provider").value || "anthropic").trim(),
-    model: (document.getElementById("cg-model").value || "").trim() || null,
-    mock: document.getElementById("cg-mock").checked,
+    seed: numOrParam("cg-seed"),
+    provider: resolveProvider("cg-provider"),
+    model: resolveModel("cg-model", "cg-model-custom"),
+    mock: document.getElementById("cg-mock").checked ? "1" : "0",
   };
-  let resp;
-  try {
-    resp = await postJSON("/api/corpus/generate", body);
-  } catch (e) {
-    if (out) out.innerHTML = '<div class="err">Could not generate corpus: ' + esc(e.message) + '</div>';
-    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Generate corpus"; }
-    return;
-  }
-  if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Generate corpus"; }
-  if (!resp || !resp.path) {
-    if (out) out.innerHTML = '<div class="err">' + esc((resp && (resp.detail || resp.error)) || "generation failed") + '</div>';
-    return;
-  }
-  lastCorpusResult = resp;
-  drawCorpusResult(resp);
+  // same-origin relative URL; every value URL-encoded.
+  const qs = Object.keys(fields)
+    .map(k => encodeURIComponent(k) + "=" + encodeURIComponent(fields[k]))
+    .join("&");
+  const url = "/api/corpus/generate/stream?" + qs;
+
+  // scaffold the streaming UI: progress bar + count + scrollable live list.
+  out.innerHTML =
+      '<div class="cg-stream">'
+    + '  <div class="cg-prog-head"><span class="cg-prog-note" id="cg-prog-note">Starting…</span>'
+    + '    <span class="cg-prog-count" id="cg-prog-count"></span></div>'
+    + '  <div class="cg-bar"><i id="cg-prog-fill"></i></div>'
+    + '  <div class="cg-live" id="cg-live"><div class="empty">Waiting for the first prompt…</div></div>'
+    + '  <div class="launchbar" style="padding:8px 0 0">'
+    + '    <button class="btn" id="cg-cancel-btn" onclick="cancelCorpusStream()">Cancel</button></div>'
+    + '</div>';
+  setGenBtnGenerating(true);
+
+  let target = 0;
+  let produced = 0;
+  let firstPrompt = true;
+
+  const setProg = (i, t) => {
+    if (t) target = t;
+    if (i !== null && i !== undefined) produced = i;
+    const fill = document.getElementById("cg-prog-fill");
+    const cnt = document.getElementById("cg-prog-count");
+    const pctW = target > 0 ? Math.min(100, Math.round((produced / target) * 100)) : 0;
+    if (fill) fill.style.width = pctW + "%";
+    if (cnt) cnt.textContent = target > 0 ? ("generated " + produced + "/" + target) : "";
+  };
+
+  const es = new EventSource(url);
+  corpusStream = es;
+
+  es.addEventListener("plan", ev => {
+    let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+    const note = document.getElementById("cg-prog-note");
+    if (note) note.textContent = "Planning " + (d.target || 0) + " prompts…";
+    setProg(0, d.target || 0);
+  });
+
+  es.addEventListener("batch", ev => {
+    let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+    const note = document.getElementById("cg-prog-note");
+    if (note) note.textContent = "Generating… (batch " + ((d.index || 0) + 1) + ")";
+    setProg(d.produced, d.target);
+  });
+
+  es.addEventListener("prompt", ev => {
+    let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+    const live = document.getElementById("cg-live");
+    if (live) {
+      if (firstPrompt) { live.innerHTML = ""; firstPrompt = false; }
+      const row = document.createElement("div");
+      row.className = "cg-row";
+      row.innerHTML = '<span class="cg-tag">' + esc(d.category || "default") + "</span>" + esc(d.prompt || "");
+      live.appendChild(row);
+      live.scrollTop = live.scrollHeight;  // keep newest visible
+    }
+    const note = document.getElementById("cg-prog-note");
+    if (note) note.textContent = "Generating prompts…";
+    setProg(d.i, d.target);
+  });
+
+  es.addEventListener("done", ev => {
+    const note = document.getElementById("cg-prog-note");
+    if (note) note.textContent = "Saving corpus…";
+  });
+
+  es.addEventListener("result", ev => {
+    let d; try { d = JSON.parse(ev.data); } catch (e) { d = null; }
+    closeCorpusStream();
+    setGenBtnGenerating(false);
+    if (!d || !d.path) {
+      if (out) out.innerHTML = '<div class="err">' + esc((d && (d.detail || d.error)) || "generation failed") + '</div>';
+      return;
+    }
+    lastCorpusResult = d;
+    drawCorpusResult(d);  // terminal: replaces the live list with the final result
+  });
+
+  es.addEventListener("error", ev => {
+    // SSE "error" event with a payload (server-reported failure)
+    let d = null;
+    if (ev && ev.data) { try { d = JSON.parse(ev.data); } catch (e) { d = null; } }
+    if (d && d.error) {
+      closeCorpusStream();
+      setGenBtnGenerating(false);
+      if (out) out.innerHTML = '<div class="err">Could not generate corpus: ' + esc(d.error) + '</div>';
+    }
+    // a payload-less error is the EventSource onerror path, handled below.
+  });
+
+  // network drop / abort / stream closed before a terminal "result" frame.
+  es.onerror = () => {
+    if (!corpusStream) return;  // already finished cleanly
+    closeCorpusStream();
+    setGenBtnGenerating(false);
+    const note = document.getElementById("cg-prog-note");
+    if (note && firstPrompt && produced === 0) note.textContent = "Stopped.";
+    else if (note) note.textContent = "Stopped — stream ended before the corpus was saved.";
+    const cancel = document.getElementById("cg-cancel-btn");
+    if (cancel) cancel.remove();
+  };
 }
 
 function drawCorpusResult(resp) {
@@ -1722,9 +2130,506 @@ function usePersonaFile(path) {
   showNewRun();
 }
 
+// ---- New run: pick-existing vs build a config ---------------------------
+let newRunPath = "pick";   // "pick" | "build"
+
+function setNewRunPath(p) {
+  newRunPath = p;
+  document.querySelectorAll(".nr-path").forEach(el => el.classList.remove("active"));
+  const el = document.getElementById("nrp-" + p);
+  if (el) el.classList.add("active");
+  const pick = document.getElementById("nr-pick-pane");
+  const build = document.getElementById("nr-build-pane");
+  if (pick) pick.style.display = (p === "pick") ? "" : "none";
+  if (build) build.style.display = (p === "build") ? "" : "none";
+  if (p === "build") ensureBuilderProviders();
+  else if (typeof updateNrConfigHint === "function") updateNrConfigHint();
+}
+
+// ---- config builder -----------------------------------------------------
+const BUILD_ADAPTERS = ["demo", "llm", "http", "callable"];
+const BUILD_CORPUS_MODES = ["varied", "adversarial", "hybrid", "fixed"];
+const BUILD_DIFFS = ["mild", "standard", "aggressive"];
+const BUILD_GATES = ["strict", "weighted"];
+const BUILD_RT_PROFILES = ["all_frontier", "deep", "multi_frontier", "mixed", "local_swarm", "pressure", "quick", "jailbreak", "injection"];
+const BUILD_FORMATS = ["md", "html", "json", "docx", "pdf"];
+let _builderProvidersReady = false;
+let _builderLaunchAfterSave = false;
+
+function ensureBuilderProviders() {
+  if (_builderProvidersReady) return;
+  if (!document.getElementById("bld-provider")) return;
+  _builderProvidersReady = true;
+  initProviderSelects({
+    providerSel: "bld-provider", modelSel: "bld-model", customInput: "bld-model-custom",
+    notice: "bld-provider-notice", preferLocal: false,
+  });
+}
+
+function builderFormHtml() {
+  const opts = (arr, sel) => arr.map(v =>
+    '<option value="' + esc(v) + '"' + (v === sel ? " selected" : "") + '>' + esc(v) + '</option>').join("");
+  const fmtChecks = BUILD_FORMATS.map(f =>
+    '<label><input type="checkbox" class="bld-fmt" value="' + esc(f) + '"'
+    + (f === "md" || f === "html" ? " checked" : "") + '> ' + esc(f) + '</label>').join("");
+  return ''
+    // identity
+    + '<div class="builder-sec" style="border-top:0;padding-top:14px"><div class="bs-title">Identity</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Name</label><input type="text" id="bld-name" placeholder="my-eval">'
+      + '<span class="field-hint">Shown in the runs list and report.</span></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Domain <span class="opt">system under test</span></label>'
+      + '<input type="text" id="bld-domain" placeholder="e.g. a budgeting assistant for freelancers">'
+      + '<span class="field-hint">Plain-language description; grounds generated prompts.</span></div>'
+    + '</div></div>'
+    // adapter — the TARGET (system under test). Type-aware fields, not raw JSON.
+    + '<div class="builder-sec"><div class="bs-title">Target adapter'
+      + '<span class="bs-note">point the harness at the system under test</span></div>'
+    + '<div class="form-grid" style="padding:0 0 8px">'
+    + '<div class="field"><label>Type'
+      + tip("How the harness reaches the system under test. demo = built-in offline sample · llm = a provider/model · http = your own JSON/REST endpoint · callable = an importable Python function in this environment.")
+      + '</label><select id="bld-adapter" onchange="onAdapterTypeChange()">' + opts(BUILD_ADAPTERS, "demo") + '</select>'
+      + '<span class="field-hint">The kind of target the run reaches.</span></div>'
+    + '<div class="field"><label>Name <span class="opt">optional</span></label>'
+      + '<input type="text" id="bld-adapter-name" placeholder="e.g. staging-api">'
+      + '<span class="field-hint">A label for this target in the report.</span></div>'
+    + '</div>'
+    // ── demo ───────────────────────────────────────────────────────────
+    + '<div class="adapter-fields" id="adf-demo">'
+      + '<div class="field-hint" style="padding:2px 0 6px">A built-in offline sample target &mdash; no setup. Good for trying the harness end-to-end.</div>'
+    + '</div>'
+    // ── http ───────────────────────────────────────────────────────────
+    + '<div class="adapter-fields" id="adf-http" style="display:none">'
+      + '<div class="form-grid" style="padding:0 0 4px">'
+      + '<div class="field" style="grid-column:1 / -1"><label>URL <span class="opt">required</span>'
+        + tip("The endpoint the harness POSTs/GETs each case to. Use ${VAR} to interpolate an environment variable (e.g. an API host).")
+        + '</label><input type="text" id="bld-http-url" placeholder="your-host/v1/chat">'
+        + '<span class="field-hint">Where the target lives. <b>${VAR}</b> pulls from the environment.</span></div>'
+      + '<div class="field"><label>Method</label><select id="bld-http-method">' + opts(["POST", "GET"], "POST") + '</select>'
+        + '<span class="field-hint">HTTP verb for the request.</span></div>'
+      + '<div class="field"><label>Response path'
+        + tip("A JMESPath into the JSON response that yields the answer text. Defaults to text. Examples: choices[0].message.content · data.reply")
+        + '</label><input type="text" id="bld-http-respath" placeholder="text">'
+        + '<span class="field-hint">Where the answer is in the JSON reply (default <b>text</b>).</span></div>'
+      + '</div>'
+      + '<div class="field" style="padding:0 0 4px"><label>Headers <span class="opt">JSON, optional</span>'
+        + tip("Request headers as a JSON object. ${VAR} interpolates an environment variable, e.g. an auth token.")
+        + '</label><textarea id="bld-http-headers" placeholder=\'{ "Authorization": "Bearer ${API_TOKEN}", "Content-Type": "application/json" }\'></textarea>'
+        + '<span class="field-hint">Sent with every request. <b>${VAR}</b> reads the environment.</span></div>'
+      + '<div class="field" style="padding:0 0 4px"><label>Request body template <span class="opt">JSON</span>'
+        + tip("The JSON body sent each request. The literal {{prompt}} anywhere inside is replaced with the case prompt ({{category}} and {{id}} also work). Leave blank to send a simple prompt field.")
+        + '</label><textarea id="bld-http-body" placeholder=\'{ "messages": [ { "role": "user", "content": "{{prompt}}" } ] }\'></textarea>'
+        + '<span class="field-hint">The request payload. <b>{{prompt}}</b> is replaced with each case prompt (also <b>{{category}}</b>, <b>{{id}}</b>).</span></div>'
+    + '</div>'
+    // ── llm ────────────────────────────────────────────────────────────
+    + '<div class="adapter-fields" id="adf-llm" style="display:none">'
+      + '<div class="form-grid" style="padding:0 0 4px">'
+      + '<div class="field"><label>Provider</label><select class="field" id="bld-ad-provider"><option>loading&hellip;</option></select></div>'
+      + '<div class="field"><label>Model</label><select class="field" id="bld-ad-model"><option>&mdash;</option></select>'
+        + '<input type="text" id="bld-ad-model-custom" placeholder="custom model name" style="display:none;margin-top:4px"></div>'
+      + '<div class="field"><label>Max tokens</label><input type="number" id="bld-llm-maxtok" min="1" placeholder="512">'
+        + '<span class="field-hint">Cap on the target&#39;s reply length.</span></div>'
+      + '<div class="field"><label>Temperature</label><input type="number" id="bld-llm-temp" min="0" max="2" step="0.1" placeholder="0">'
+        + '<span class="field-hint">Sampling randomness (<b>0</b> = deterministic).</span></div>'
+      + '</div>'
+      + '<div id="bld-ad-provider-notice"></div>'
+      + '<div class="field" style="padding:0 0 4px"><label>System prompt <span class="opt">optional</span></label>'
+        + '<textarea id="bld-llm-system" placeholder="You are the assistant under test."></textarea>'
+        + '<span class="field-hint">Prepended to every case as the target&#39;s system message.</span></div>'
+      + '<details class="adapter-adv"><summary>Advanced</summary>'
+        + '<div class="form-grid" style="padding:8px 0 4px">'
+        + '<div class="field"><label>Base URL <span class="opt">optional</span>'
+          + tip("Override the API base URL — e.g. a local OpenAI-compatible server.")
+          + '</label><input type="text" id="bld-llm-baseurl" placeholder="http://localhost:11434/v1"></div>'
+        + '<div class="field"><label>API key env var <span class="opt">optional</span>'
+          + tip("Name of the environment variable holding the API key (e.g. OPENAI_API_KEY). The key value never leaves the environment.")
+          + '</label><input type="text" id="bld-llm-keyenv" placeholder="OPENAI_API_KEY"></div>'
+        + '</div></details>'
+    + '</div>'
+    // ── callable ───────────────────────────────────────────────────────
+    + '<div class="adapter-fields" id="adf-callable" style="display:none">'
+      + '<div class="field" style="padding:0 0 4px"><label>Import <span class="opt">module:function</span>'
+        + tip("An importable Python function (prompt|case) -> response, available in the environment running the harness. Written as module.path:function_name.")
+        + '</label><input type="text" id="bld-call-import" placeholder="my_pkg.targets:answer">'
+        + '<span class="field-hint">An importable Python function <b>(prompt|case) -&gt; response</b>, available in the environment running the harness. Written as <b>module:function</b>.</span></div>'
+    + '</div>'
+    // ── advanced raw JSON (power users) ────────────────────────────────
+    + '<details class="adapter-adv" id="adf-rawwrap"><summary>Advanced (raw JSON options)</summary>'
+      + '<div class="field" style="padding:8px 0 4px"><label>Options <span class="opt">JSON</span>'
+        + tip("Raw adapter options as JSON. When non-empty this OVERRIDES the fields above on Save / Test / Launch — for settings the form does not expose.")
+        + '</label>'
+        + '<textarea id="bld-adapter-opts" placeholder=\'{ "timeout": 90 }\'></textarea>'
+        + '<span class="field-hint">When non-empty, this is sent verbatim and <b>overrides the fields above</b>.</span></div>'
+    + '</details>'
+    + '<div style="padding:8px 0 4px"><button class="btn" id="bld-adapter-test" type="button" onclick="testBuilderAdapter()">Test connection</button>'
+      + '<span class="field-hint" style="display:inline;margin-left:8px">Sends one trivial query to verify the target is reachable before you run.</span>'
+      + '<div class="conn-result" id="bld-adapter-conn"></div></div>'
+    + '</div>'
+    // corpus
+    + '<div class="builder-sec"><div class="bs-title">Corpus</div><div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Mode' + tip(TIP_MODE) + '</label><select id="bld-mode">' + opts(BUILD_CORPUS_MODES, "varied") + '</select>'
+      + '<span class="field-hint">How prompts are sourced.</span></div>'
+    + '<div class="field"><label>Per category' + tip(TIP_PERCAT) + '</label><input type="number" id="bld-percat" min="1" value="8">'
+      + '<span class="field-hint">Prompts generated per category (default <b>8</b>).</span></div>'
+    + '<div class="field"><label>Difficulty' + tip(TIP_DIFFICULTY) + '</label><select id="bld-diff">' + opts(BUILD_DIFFS, "standard") + '</select>'
+      + '<span class="field-hint">Pressure level for adversarial prompts.</span></div>'
+    + '</div>'
+    + '<div class="field" style="padding:0 0 4px"><label>Categories</label>'
+      + '<div class="catchips" id="bld-catchips"></div>'
+      + '<div class="catadd" style="margin-top:8px"><input type="text" id="bld-catnew" placeholder="add a category…" '
+      + 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();addBuilderCat();}">'
+      + '<button class="btn" onclick="addBuilderCat()">+ Add category</button></div>'
+      + '<span class="field-hint">Leave empty to let the generator choose categories for the domain.</span></div>'
+    + '</div>'
+    // analyze + audit
+    + '<div class="builder-sec"><div class="bs-title">Analysis &amp; audit</div><div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Judges' + tip(TIP_JUDGES) + '</label><select id="bld-judges">' + opts(["1","2","3"], "1") + '</select>'
+      + '<span class="field-hint">Scoring models; more raises agreement signal.</span></div>'
+    + '<div class="field"><label>Gate mode' + tip(TIP_GATE) + '</label><select id="bld-gate">' + opts(BUILD_GATES, "weighted") + '</select>'
+      + '<span class="field-hint">How dimension scores combine into pass / fail.</span></div>'
+    + '<div class="field"><label>Persona pool' + tip(TIP_PERSONA_POOL) + '</label><input type="number" id="bld-personapool" min="0" value="5">'
+      + '<span class="field-hint">Reviewer personas; <b>0</b> disables the panel.</span></div>'
+    + '</div>'
+    + '<div class="checks" style="padding:2px 0 4px"><label><input type="checkbox" id="bld-forensic" checked> Forensic audit</label></div>'
+    + '</div>'
+    // report
+    + '<div class="builder-sec"><div class="bs-title">Report</div>'
+    + '<div class="field" style="padding:2px 0 4px"><label>Formats</label><div class="checks">' + fmtChecks + '</div>'
+      + '<span class="field-hint">Artifacts written when the run finishes.</span></div>'
+    + '</div>'
+    // red team + backend
+    + '<div class="builder-sec"><div class="bs-title">Red team &amp; backend</div><div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Red-team profile' + tip(TIP_RT_PROFILE) + '</label><select id="bld-rtprofile">' + opts(BUILD_RT_PROFILES, "all_frontier") + '</select>'
+      + '<span class="field-hint">Attack suite the run probes with.</span></div>'
+    + '<div class="field"><label>Provider</label><select class="field" id="bld-provider"><option>loading…</option></select></div>'
+    + '<div class="field"><label>Model</label><select class="field" id="bld-model"><option>—</option></select>'
+      + '<input type="text" id="bld-model-custom" placeholder="custom model name" style="display:none;margin-top:4px"></div>'
+    + '</div>'
+    + '<div id="bld-provider-notice"></div>'
+    + '<div class="checks" style="padding:2px 0 4px"><label><input type="checkbox" id="bld-mock" checked> Mock (offline) when launching</label></div>'
+    + '</div>';
+}
+
+// custom-category chip editor — each chip is an editable name + remove button.
+function addBuilderCat(name) {
+  const host = document.getElementById("bld-catchips");
+  if (!host) return;
+  const val = (typeof name === "string") ? name : ((document.getElementById("bld-catnew") || {}).value || "").trim();
+  if (typeof name !== "string") {
+    if (!val) return;
+    const inp = document.getElementById("bld-catnew");
+    if (inp) inp.value = "";
+  }
+  const chip = document.createElement("span");
+  chip.className = "catchip";
+  chip.innerHTML = '<input class="catname" type="text" value="' + esc(val) + '">'
+    + '<button class="catx" title="remove" onclick="this.parentNode.remove()">&times;</button>';
+  host.appendChild(chip);
+}
+function setBuilderCats(cats) {
+  const host = document.getElementById("bld-catchips");
+  if (!host) return;
+  host.innerHTML = "";
+  (cats || []).forEach(c => addBuilderCat(String(c)));
+}
+function getBuilderCats() {
+  return Array.from(document.querySelectorAll("#bld-catchips .catname"))
+    .map(el => (el.value || "").trim()).filter(Boolean);
+}
+
+// ---- type-aware target adapter -----------------------------------------
+let _adapterProvidersReady = false;
+
+// Show the field group for the selected type; lazily wire the llm provider
+// selects the first time the llm group is revealed.
+function onAdapterTypeChange() {
+  const sel = document.getElementById("bld-adapter");
+  const type = sel ? sel.value : "demo";
+  ["demo", "http", "llm", "callable"].forEach(t => {
+    const el = document.getElementById("adf-" + t);
+    if (el) el.style.display = (t === type) ? "" : "none";
+  });
+  if (type === "llm" && !_adapterProvidersReady && document.getElementById("bld-ad-provider")) {
+    _adapterProvidersReady = true;
+    initProviderSelects({
+      providerSel: "bld-ad-provider", modelSel: "bld-ad-model", customInput: "bld-ad-model-custom",
+      notice: "bld-ad-provider-notice", preferLocal: false,
+    });
+  }
+}
+
+// Parse a small JSON field; returns {} on blank, throws on malformed (caller
+// surfaces the message). Used for http headers / body / the raw-options box.
+function _parseJsonField(id) {
+  const raw = (document.getElementById(id) && document.getElementById(id).value || "").trim();
+  if (!raw) return undefined;
+  return JSON.parse(raw);
+}
+
+// Build the adapter {type, name?, options:{…}} spec from the per-type fields.
+// If the Advanced raw-JSON box is non-empty it wins (verbatim override).
+// Throws Error(message) for malformed JSON so callers can show it inline.
+function buildAdapterSpec() {
+  const type = (document.getElementById("bld-adapter") || {}).value || "demo";
+  const name = (document.getElementById("bld-adapter-name") || {}).value || "";
+  let options = {};
+  const rawBox = (document.getElementById("bld-adapter-opts") || {}).value || "";
+  if (rawBox.trim()) {
+    try { options = JSON.parse(rawBox); }
+    catch (e) { throw new Error("Advanced options is not valid JSON: " + e.message); }
+    if (!options || typeof options !== "object") throw new Error("Advanced options must be a JSON object.");
+  } else if (type === "http") {
+    const url = ((document.getElementById("bld-http-url") || {}).value || "").trim();
+    if (url) options.url = url;
+    const method = (document.getElementById("bld-http-method") || {}).value;
+    if (method && method !== "POST") options.method = method;
+    let headers, body;
+    try { headers = _parseJsonField("bld-http-headers"); }
+    catch (e) { throw new Error("Headers is not valid JSON: " + e.message); }
+    if (headers && Object.keys(headers).length) options.headers = headers;
+    try { body = _parseJsonField("bld-http-body"); }
+    catch (e) { throw new Error("Request body template is not valid JSON: " + e.message); }
+    if (body !== undefined) options.body_template = body;
+    const rp = ((document.getElementById("bld-http-respath") || {}).value || "").trim();
+    if (rp) options.response_path = rp;
+  } else if (type === "llm") {
+    const provider = resolveProvider("bld-ad-provider");
+    if (provider) options.provider = provider;
+    const model = resolveModel("bld-ad-model", "bld-ad-model-custom");
+    if (model) options.model = model;
+    const sysv = ((document.getElementById("bld-llm-system") || {}).value || "").trim();
+    if (sysv) options.system = sysv;
+    const mt = ((document.getElementById("bld-llm-maxtok") || {}).value || "").trim();
+    if (mt) options.max_tokens = Number(mt);
+    const tp = ((document.getElementById("bld-llm-temp") || {}).value || "").trim();
+    if (tp !== "") options.temperature = Number(tp);
+    const bu = ((document.getElementById("bld-llm-baseurl") || {}).value || "").trim();
+    if (bu) options.base_url = bu;
+    const ke = ((document.getElementById("bld-llm-keyenv") || {}).value || "").trim();
+    if (ke) options.api_key_env = ke;
+  } else if (type === "callable") {
+    const imp = ((document.getElementById("bld-call-import") || {}).value || "").trim();
+    if (imp) options.import = imp;
+  }
+  const spec = { type: type, options: options };
+  if (name.trim()) spec.name = name.trim();
+  return spec;
+}
+
+// assemble the builder form into a Config-shaped object.
+function assembleConfig() {
+  let adapter;
+  try { adapter = buildAdapterSpec(); }
+  catch (e) { adapter = { type: (document.getElementById("bld-adapter") || {}).value || "demo", options: {} }; }
+  const cfg = {
+    name: (document.getElementById("bld-name").value || "").trim() || "polygraph-run",
+    domain: (document.getElementById("bld-domain").value || "").trim() || null,
+    adapter: adapter,
+    corpus: {
+      mode: document.getElementById("bld-mode").value,
+      per_category: Number(document.getElementById("bld-percat").value || 8),
+      categories: getBuilderCats(),
+      difficulty: document.getElementById("bld-diff").value,
+    },
+    analyze: {
+      judges: Number(document.getElementById("bld-judges").value || 1),
+      gate_mode: document.getElementById("bld-gate").value,
+    },
+    audit: {
+      forensic: document.getElementById("bld-forensic").checked,
+      persona_pool: Number(document.getElementById("bld-personapool").value || 0) || null,
+    },
+    report: { formats: Array.from(document.querySelectorAll(".bld-fmt:checked")).map(el => el.value) },
+    redteam: { profile: document.getElementById("bld-rtprofile").value },
+    llm: { provider: resolveProvider("bld-provider") || "anthropic" },
+    mock: document.getElementById("bld-mock").checked,
+  };
+  const model = resolveModel("bld-model", "bld-model-custom");
+  if (model) { cfg.model = model; cfg.llm.model = model; }
+  return cfg;
+}
+
+// Test the adapter currently described in the builder form, before saving.
+function testBuilderAdapter() {
+  let spec;
+  try { spec = buildAdapterSpec(); }
+  catch (e) { renderConnResult("bld-adapter-conn", "bad", "Not connected — " + esc(e.message)); return; }
+  runAdapterTest("bld-adapter-conn", spec);
+}
+
+// populate the builder form FROM a config (Save→Load round-trip, or Inject).
+function loadConfigIntoBuilder(cfg) {
+  cfg = cfg || {};
+  ensureBuilderProviders();
+  const set = (id, v) => { const el = document.getElementById(id); if (el != null && v != null) el.value = v; };
+  set("bld-name", cfg.name || "");
+  set("bld-domain", cfg.domain || "");
+  const ad = cfg.adapter || {};
+  const adType = BUILD_ADAPTERS.indexOf(ad.type) >= 0 ? ad.type : "demo";
+  set("bld-adapter", adType);
+  set("bld-adapter-name", ad.name || "");
+  const opts = (ad.options || ad.opts || {});
+  // Spread known options across the type-aware fields; stash any leftover keys
+  // (the form does not expose) into the Advanced raw-JSON box so they survive.
+  const known = { demo: [], http: ["url", "method", "headers", "body_template", "response_path"],
+    llm: ["provider", "model", "system", "max_tokens", "temperature", "base_url", "api_key_env"],
+    callable: ["import", "target", "ref"] }[adType] || [];
+  const leftover = {};
+  Object.keys(opts).forEach(k => { if (known.indexOf(k) < 0) leftover[k] = opts[k]; });
+  const jstr = v => (v && typeof v === "object") ? JSON.stringify(v, null, 2) : (v != null ? String(v) : "");
+  // clear all per-type fields first
+  ["bld-http-url", "bld-http-respath", "bld-http-headers", "bld-http-body",
+   "bld-llm-system", "bld-llm-maxtok", "bld-llm-temp", "bld-llm-baseurl", "bld-llm-keyenv",
+   "bld-call-import"].forEach(id => { const e = document.getElementById(id); if (e) e.value = ""; });
+  if (adType === "http") {
+    set("bld-http-url", opts.url || "");
+    set("bld-http-method", (opts.method || "POST").toUpperCase() === "GET" ? "GET" : "POST");
+    if (opts.headers != null) set("bld-http-headers", jstr(opts.headers));
+    if (opts.body_template != null) set("bld-http-body", jstr(opts.body_template));
+    set("bld-http-respath", opts.response_path || "");
+  } else if (adType === "llm") {
+    if (opts.system != null) set("bld-llm-system", String(opts.system));
+    if (opts.max_tokens != null) set("bld-llm-maxtok", String(opts.max_tokens));
+    if (opts.temperature != null) set("bld-llm-temp", String(opts.temperature));
+    if (opts.base_url != null) set("bld-llm-baseurl", String(opts.base_url));
+    if (opts.api_key_env != null) set("bld-llm-keyenv", String(opts.api_key_env));
+  } else if (adType === "callable") {
+    set("bld-call-import", opts.import || opts.target || opts.ref || "");
+  }
+  set("bld-adapter-opts", Object.keys(leftover).length ? JSON.stringify(leftover, null, 2) : "");
+  onAdapterTypeChange();
+  // llm provider/model fields are async; fill after the selects populate
+  if (adType === "llm") {
+    setTimeout(() => {
+      const pv = document.getElementById("bld-ad-provider");
+      if (pv && opts.provider) { pv.value = opts.provider; fillModelSelect({ providerSel: "bld-ad-provider", modelSel: "bld-ad-model", customInput: "bld-ad-model-custom" }); }
+      const ms = document.getElementById("bld-ad-model");
+      if (ms && opts.model) {
+        const has = Array.from(ms.options).some(o => o.value === opts.model);
+        if (has) ms.value = opts.model;
+        else { ms.value = CUSTOM_OPT; const c = document.getElementById("bld-ad-model-custom"); if (c) { c.style.display = ""; c.value = opts.model; } }
+      }
+    }, 80);
+  }
+  const co = cfg.corpus || {};
+  set("bld-mode", BUILD_CORPUS_MODES.indexOf(co.mode) >= 0 ? co.mode : "varied");
+  if (co.per_category != null) set("bld-percat", co.per_category);
+  set("bld-diff", BUILD_DIFFS.indexOf(co.difficulty) >= 0 ? co.difficulty : "standard");
+  setBuilderCats(co.categories || []);
+  const an = cfg.analyze || {};
+  set("bld-judges", String(Math.max(1, Math.min(3, Number(an.judges || 1)))));
+  set("bld-gate", BUILD_GATES.indexOf(an.gate_mode) >= 0 ? an.gate_mode : "weighted");
+  const au = cfg.audit || {};
+  const fchk = document.getElementById("bld-forensic"); if (fchk) fchk.checked = (au.forensic !== false);
+  if (au.persona_pool != null) set("bld-personapool", au.persona_pool);
+  const rt = cfg.redteam || {};
+  set("bld-rtprofile", BUILD_RT_PROFILES.indexOf(rt.profile) >= 0 ? rt.profile : "all_frontier");
+  const fmts = (cfg.report && cfg.report.formats) || ["md", "html"];
+  document.querySelectorAll(".bld-fmt").forEach(el => { el.checked = fmts.indexOf(el.value) >= 0; });
+  // provider/model are async (selects may still be loading) — best-effort
+  const llm = cfg.llm || {};
+  setTimeout(() => {
+    const pv = document.getElementById("bld-provider");
+    if (pv && llm.provider) { pv.value = llm.provider; fillModelSelect({ providerSel: "bld-provider", modelSel: "bld-model", customInput: "bld-model-custom" }); }
+    const mv = cfg.model || llm.model;
+    const ms = document.getElementById("bld-model");
+    if (ms && mv) {
+      const has = Array.from(ms.options).some(o => o.value === mv);
+      if (has) ms.value = mv;
+      else { ms.value = CUSTOM_OPT; const c = document.getElementById("bld-model-custom"); if (c) { c.style.display = ""; c.value = mv; } }
+    }
+  }, 60);
+}
+
+async function saveBuilderConfig(thenLaunch) {
+  const out = document.getElementById("bld-result");
+  const cfg = assembleConfig();
+  if (out) out.innerHTML = '<div class="muted" style="padding:6px 0">Saving…</div>';
+  let resp;
+  try {
+    resp = await postJSON("/api/configs", { name: cfg.name, config: cfg });
+  } catch (e) {
+    if (out) out.innerHTML = '<div class="err">Could not save config: ' + esc(e.message) + '</div>';
+    return null;
+  }
+  if (out) out.innerHTML = '<div class="mv-up" style="padding:6px 0;font-weight:700">Saved '
+    + esc(resp.name) + ' <span class="tag-mono">' + esc(resp.path) + '</span></div>';
+  if (thenLaunch) launchBuiltConfig(resp.path, cfg.mock);
+  return resp;
+}
+
+function launchBuiltConfig(cfgPath, mock) {
+  const btn = document.getElementById("bld-launch");
+  if (btn) { btn.classList.add("disabled-btn"); btn.textContent = "Launching…"; }
+  const body = { config_path: cfgPath, overrides: { mock: !!mock } };
+  postJSON("/api/run", body).then(resp => {
+    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Save & launch"; }
+    if (!resp || !resp.run_id) {
+      const out = document.getElementById("bld-result");
+      if (out) out.innerHTML += '<div class="err">Could not start run: ' + esc((resp && resp.error) || "unknown") + '</div>';
+      return;
+    }
+    pollLaunch(resp.run_id);
+  }).catch(e => {
+    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Save & launch"; }
+    const out = document.getElementById("bld-result");
+    if (out) out.innerHTML += '<div class="err">Could not start run: ' + esc(e.message) + '</div>';
+  });
+}
+
+// Load an existing config into the builder for editing (from the picker).
+async function loadConfigForEdit(pathOrName) {
+  if (!pathOrName) return;
+  setNewRunPath("build");
+  let resp;
+  try {
+    resp = await getJSON("/api/config?path=" + encodeURIComponent(pathOrName));
+  } catch (e) {
+    const out = document.getElementById("bld-result");
+    if (out) out.innerHTML = '<div class="err">Could not load config: ' + esc(e.message) + '</div>';
+    return;
+  }
+  if (resp && resp.config) loadConfigIntoBuilder(resp.config);
+}
+
+// ---- dashboard AI Designer wiring (context: Run config) -----------------
+window.__dkDesignUrl = "/api/config/design";
+window.__dkRenderPreview = function(res) {
+  const cfg = res.config || {};
+  const co = cfg.corpus || {}, an = cfg.analyze || {}, au = cfg.audit || {}, rt = cfg.redteam || {};
+  const ad = cfg.adapter || {};
+  let secs = "";
+  secs += dkSection("Name", esc(cfg.name || "—"), true);
+  if (cfg.domain) secs += dkSection("Domain", esc(cfg.domain));
+  secs += dkSection("Adapter", esc(ad.type || "demo"), true);
+  secs += dkSection("Corpus", esc(co.mode || "varied") + ' · per-category ' + esc(co.per_category != null ? co.per_category : "—") + ' · ' + esc(co.difficulty || "standard"));
+  if (co.categories && co.categories.length) secs += dkSection("Categories (" + co.categories.length + ")", dkChips(co.categories));
+  secs += dkSection("Analyze", esc(an.judges != null ? an.judges : 1) + ' judge(s) · gate ' + esc(an.gate_mode || "weighted"));
+  secs += dkSection("Audit", (au.forensic ? "forensic on" : "forensic off") + ' · persona pool ' + esc(au.persona_pool != null ? au.persona_pool : "—"));
+  secs += dkSection("Report", dkChips((cfg.report && cfg.report.formats) || []));
+  secs += dkSection("Red team", esc(rt.profile || "all_frontier"), true);
+  return dkPreviewShell("Designed run config", res.provider, secs, res.notes);
+};
+window.__dkInject = function(cfg) {
+  setNewRunPath("build");
+  loadConfigIntoBuilder(cfg);
+  closeDesigner();
+};
+
 // ---- boot ---------------------------------------------------------------
+"""
+    + DESIGNER_DOCK_JS
+    + r"""
+// readiness pill: literal endpoint path is fine to embed on the dashboard.
+initStatusPill("/api/status");
 showRuns();
 </script>
 </body>
 </html>
 """
+)
+
+# Assemble the full self-contained dashboard document: shared <head> (theme),
+# shared header bar (in-page view switchers — this page is the dashboard), then
+# the SPA body/script.
+PAGE: str = _HEAD + header_html("runs", links=False) + _BODY

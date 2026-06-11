@@ -30,6 +30,13 @@ from __future__ import annotations
 
 import json
 
+from promptpolygraph.ui.chrome import (
+    DESIGNER_DOCK_JS,
+    THEME_CSS,
+    designer_dock_html,
+    header_html,
+)
+
 __all__ = ["render_arena_page"]
 
 
@@ -52,7 +59,14 @@ def render_arena_page(*, stream_url: str, transport: str = "sse") -> str:
     # "</" sequence so the data block can never close the <script> element.
     cfg = json.dumps({"streamUrl": stream_url, "transport": transport})
     cfg = cfg.replace("</", "<\\/")
-    return _TEMPLATE.replace("__ARENA_CONFIG__", cfg)
+    html = _TEMPLATE.replace("__THEME_CSS__", THEME_CSS)
+    # The Arena is a separate page, so the dashboard tabs link back to "/" and
+    # "Red Team" is the active surface (links=True).
+    html = html.replace("__ARENA_HEADER__", header_html("redteam", links=True))
+    # The shared AI Designer dock (context "Red team") + its shared open/close JS.
+    html = html.replace("__ARENA_DOCK__", designer_dock_html(context_label="Red team"))
+    html = html.replace("__DESIGNER_DOCK_JS__", DESIGNER_DOCK_JS)
+    return html.replace("__ARENA_CONFIG__", cfg)
 
 
 # The page is a single template; the only interpolation point is the config
@@ -64,64 +78,35 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Red-Team Arena — PromptPolygraph</title>
 <style>
+__THEME_CSS__
+  /* ── arena-specific tokens, mapped onto the shared palette so the Arena
+        stays color-consistent with the dashboard while keeping the extra
+        surfaces/severity colors its unique components need ──────────────── */
   :root {
-    --bg: #0a0c12;
-    --bg2: #0e111a;
-    --panel: #121622;
-    --panel-2: #181d2c;
-    --panel-3: #1d2436;
-    --line: #262d40;
+    --bg2: var(--panel);
+    --panel-3: var(--row-hover);
+    --line: var(--border);
     --line-2: #313a52;
-    --text: #e9edf6;
-    --muted: #8b94aa;
     --muted-2: #636c82;
-    --accent: #5cc8ff;
     --accent2: #9b8cff;
-    --green: #34d399;
+    --green: var(--pass);
     --green-deep: #0f6b48;
-    --red: #f4607e;
+    --red: var(--fail);
     --red-deep: #7c1730;
-    --amber: #f5c451;
-    --sev-none: #34d399;
+    --amber: var(--warn);
+    --sev-none: var(--pass);
     --sev-low: #8fd66a;
-    --sev-medium: #f5c451;
+    --sev-medium: var(--warn);
     --sev-high: #f59442;
-    --sev-critical: #f4476a;
+    --sev-critical: var(--fail);
     --shadow: 0 10px 34px rgba(0,0,0,.5);
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body {
-    background:
-      radial-gradient(1100px 640px at 78% -8%, rgba(92,200,255,.06), transparent 60%),
-      radial-gradient(900px 560px at 6% 108%, rgba(155,140,255,.05), transparent 55%),
-      var(--bg);
-    color: var(--text);
-    font: 14px/1.5 var(--sans);
-    -webkit-font-smoothing: antialiased;
-  }
-  a { color: var(--accent); }
   .nums { font-variant-numeric: tabular-nums; }
 
-  /* ── header ─────────────────────────────────────────────────────────── */
-  header.top {
-    display: flex; align-items: center; gap: 16px;
-    padding: 12px 22px; border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, rgba(20,24,38,.92), rgba(12,14,22,.7));
-    backdrop-filter: blur(6px);
-    position: sticky; top: 0; z-index: 30;
-  }
-  header.top .brand { display: flex; flex-direction: column; gap: 1px; }
-  header.top h1 { font-size: 16px; margin: 0; letter-spacing: .2px; font-weight: 700; }
-  header.top .tag { color: var(--muted); font-size: 11.5px; }
-  header.top a.home {
-    color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 600;
-    padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line);
-  }
-  header.top a.home:hover { color: var(--text); background: var(--panel-2); }
-  header.top .spacer { flex: 1; }
+  /* The arena page is a full-height single screen rather than a scrolling doc. */
+  html, body { height: 100%; }
+
+  /* ── arena status / run pill (inline-flex variant of the shared pill) ─── */
   .pill {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
@@ -140,11 +125,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
     padding: 11px 22px; border-bottom: 1px solid var(--line);
     background: var(--bg2);
   }
-  .seg-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
   .seg-toggle button {
     appearance: none; border: 0; background: var(--panel); color: var(--muted);
     font: 600 12.5px/1 var(--sans); padding: 8px 15px; cursor: pointer; letter-spacing: .3px;
+    transition: background .14s, color .14s;
   }
+  .seg-toggle button:hover { color: var(--text); }
   .seg-toggle button + button { border-left: 1px solid var(--line); }
   .seg-toggle button.on { background: var(--panel-3); color: var(--text); }
   .seg-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -153,27 +140,32 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .ctl label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
   .field, select.field {
     background: var(--panel); color: var(--text); border: 1px solid var(--line);
-    border-radius: 8px; padding: 7px 10px; font: 13px/1 var(--sans); min-width: 120px;
+    border-radius: var(--radius-sm); padding: 7px 10px; font: 13px/1 var(--sans); min-width: 120px;
+    transition: border-color .14s, box-shadow .14s;
   }
-  .field:focus, select.field:focus { outline: none; border-color: var(--accent); }
+  .field:focus, select.field:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
   .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
   .check input { accent-color: var(--accent); }
   .chips { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 2px; }
   .chip {
     background: var(--panel-2, var(--panel)); color: var(--muted); border: 1px solid var(--line);
-    border-radius: 999px; padding: 2px 9px; font: 11.5px/1.4 var(--sans); cursor: pointer;
+    border-radius: 999px; padding: 3px 10px; font: 11.5px/1.4 var(--sans); cursor: pointer;
+    transition: color .14s, border-color .14s, background .14s;
   }
-  .chip:hover { color: var(--text); border-color: var(--accent); }
+  .chip:hover { color: var(--text); border-color: var(--accent); background: var(--panel-3); }
+  .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .hint { font-size: 10.5px; color: var(--muted); cursor: help; text-transform: none; letter-spacing: 0; }
   .btn {
-    appearance: none; border: 1px solid var(--line); border-radius: 8px;
-    background: var(--panel-2); color: var(--text); font: 600 13px/1 var(--sans);
-    padding: 8px 14px; cursor: pointer;
+    appearance: none; display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: var(--panel-2); color: var(--text); font: 600 13px/1.2 var(--sans);
+    padding: 8px 14px; cursor: pointer; transition: background .14s, border-color .14s, filter .14s;
   }
   .btn:hover { background: var(--panel-3); }
-  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .btn.primary { background: linear-gradient(180deg, #1c4a6e, #143a59); border-color: #2a6791; color: #eaf6ff; }
-  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:active { filter: brightness(.96); }
+  .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #0b0d11; font-weight: 700; }
+  .btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
   .btn.danger { border-color: var(--red-deep); color: #ffd7df; }
   .btn[disabled] { opacity: .45; cursor: not-allowed; }
   .controls .spacer { flex: 1; }
@@ -296,6 +288,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   table.findings { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   table.findings th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
   table.findings td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.findings tbody tr { transition: background .14s; }
+  table.findings tbody tr:hover { background: var(--row-hover); }
   table.findings tr:last-child td { border-bottom: 0; }
   table.findings .sevpill { font: 800 10px/1 var(--mono); text-transform: uppercase; padding: 3px 7px; border-radius: 999px; color: #0a0c12; }
   table.findings code { font-family: var(--mono); color: var(--muted); font-size: 11px; }
@@ -388,15 +382,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 </style>
 </head>
 <body>
-<header class="top">
-  <div class="brand">
-    <h1>Red-Team Arena</h1>
-    <span class="tag">Authorized red-team of a target you control</span>
-  </div>
-  <a class="home" href="/">&#8592; Dashboard</a>
-  <span class="spacer"></span>
-  <span class="pill"><span class="dot" id="status-dot"></span><b id="status-text">idle</b></span>
-</header>
+__ARENA_HEADER__
+__ARENA_DOCK__
 
 <div class="controls">
   <div class="seg-toggle" role="tablist" aria-label="run source">
@@ -412,7 +399,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <option value="jailbreak">jailbreak</option>
         <option value="injection">injection</option>
       </select></span>
-    <span class="ctl"><label for="f-sources">OSS sources <span class="hint" title="Probe sources folded into the run alongside the LLM attackers. catalog needs no deps; garak/pyrit/deepteam need the [redteam] extra; dataset:&lt;name&gt; fetches on demand.">(?)</span></label>
+    <span class="ctl"><label for="f-sources">OSS sources <span class="tip tip-left" tabindex="0" role="img" aria-label="Extra probe sources folded in beside the LLM attackers (catalog needs no deps; garak/pyrit/deepteam need the [redteam] extra; dataset:&lt;name&gt; fetches on demand)." data-tip="Extra probe sources folded in beside the LLM attackers (catalog needs no deps; garak/pyrit/deepteam need the [redteam] extra; dataset:&lt;name&gt; fetches on demand)." title="Extra probe sources folded in beside the LLM attackers (catalog needs no deps; garak/pyrit/deepteam need the [redteam] extra; dataset:&lt;name&gt; fetches on demand).">?</span></label>
       <input class="field" id="f-sources" placeholder="e.g. catalog, garak, dataset:advbench" />
       <span class="chips" id="source-chips">
         <button type="button" class="chip" onclick="addSource('catalog')">+catalog</button>
@@ -424,6 +411,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <label class="check"><input type="checkbox" id="f-mock" checked /> mock (offline)</label>
     <button class="btn primary" id="btn-connect" onclick="connect()">Connect</button>
     <button class="btn danger" id="btn-stop" onclick="stopLive()" disabled>Stop</button>
+    <span class="tag" id="custom-roster" style="display:none;border-color:var(--accent2);color:#cdc2ff">
+      <b id="custom-roster-label">custom roster</b>
+      <span id="custom-roster-clear" title="clear back to the selected built-in profile"
+            style="cursor:pointer;margin-left:4px">&#10005;</span></span>
   </div>
 
   <div class="mode-group" id="group-replay">
@@ -434,6 +425,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <span class="spacer"></span>
+  <span class="pill" id="status-pill"><span class="dot" id="status-dot"></span><b id="status-text">idle</b></span>
   <span class="pill" id="run-pill" style="display:none">run <b id="run-id" class="nums">—</b></span>
 </div>
 
@@ -500,6 +492,80 @@ function el(tag, cls, txt) {
   return e;
 }
 function getCss(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim() || "#888"; }
+
+// ── provider / model dropdowns (GET /api/providers, cached) ──────────────
+// Each provider: {id,label,available,reason,needs_key,models,default_model,
+// allow_custom,base_url?}. Used by the Trace-in-code panel.
+var CUSTOM_OPT = "__custom__";
+var _providersCache = null;
+function loadProviders() {
+  if (_providersCache) return Promise.resolve(_providersCache);
+  return fetch("/api/providers").then(function(r){ return r.json(); }).then(function(list){
+    _providersCache = Array.isArray(list) ? list : [];
+    return _providersCache;
+  }).catch(function(){ _providersCache = []; return _providersCache; });
+}
+function _providerById(id) {
+  return (_providersCache || []).filter(function(p){ return p.id === id; })[0] || null;
+}
+// opts: {providerSel, modelSel, customInput, notice, preferLocal}
+function initProviderSelects(opts) {
+  var provEl = $(opts.providerSel), modelEl = $(opts.modelSel);
+  if (!provEl || !modelEl) return;
+  loadProviders().then(function(providers){
+    var noticeEl = opts.notice ? $(opts.notice) : null;
+    var anyAvailable = providers.some(function(p){ return p.available; });
+    if (!providers.length || !anyAvailable) {
+      if (noticeEl) noticeEl.innerHTML = '<div class="empty" style="text-align:left">'
+        + 'No providers configured — run <code>polygraph init</code>, set an API key, or start Ollama.</div>';
+    } else if (noticeEl) { noticeEl.innerHTML = ""; }
+
+    var defId = "";
+    if (opts.preferLocal) {
+      var local = providers.filter(function(p){ return p.id === "ollama" && p.available; })[0];
+      if (local) defId = local.id;
+    }
+    if (!defId) { var a = providers.filter(function(p){ return p.available; })[0]; if (a) defId = a.id; }
+    if (!defId && providers.length) defId = providers[0].id;
+
+    provEl.innerHTML = providers.map(function(p){
+      var dis = p.available ? "" : " disabled";
+      var why = p.available ? "" : (p.reason ? " — " + p.reason : " (unavailable)");
+      var sel = (p.id === defId) ? " selected" : "";
+      return '<option value="' + esc(p.id) + '"' + dis + sel + '>' + esc(p.label || p.id) + esc(why) + '</option>';
+    }).join("");
+    provEl.onchange = function(){ fillModelSelect(opts); };
+    fillModelSelect(opts);
+  });
+}
+function fillModelSelect(opts) {
+  var provEl = $(opts.providerSel), modelEl = $(opts.modelSel);
+  var customEl = opts.customInput ? $(opts.customInput) : null;
+  if (!provEl || !modelEl) return;
+  var p = _providerById(provEl.value);
+  var models = (p && p.models) || [];
+  var def = p && p.default_model;
+  var html = models.map(function(m){
+    return '<option value="' + esc(m) + '"' + (m === def ? " selected" : "") + '>' + esc(m) + '</option>';
+  }).join("");
+  if (!models.length) html = '<option value="">(provider default)</option>';
+  if (p && p.allow_custom) html += '<option value="' + CUSTOM_OPT + '">custom…</option>';
+  modelEl.innerHTML = html;
+  modelEl.onchange = function(){
+    if (customEl) customEl.style.display = (modelEl.value === CUSTOM_OPT) ? "" : "none";
+  };
+  if (customEl) customEl.style.display = "none";
+}
+function resolveProvider(id) { var el = $(id); return (el && el.value) ? el.value : ""; }
+function resolveModel(modelSelId, customInputId) {
+  var el = $(modelSelId);
+  if (!el) return "";
+  if (el.value === CUSTOM_OPT) {
+    var c = customInputId ? $(customInputId) : null;
+    return ((c && c.value) || "").trim();
+  }
+  return el.value || "";
+}
 var SEV = ["none", "low", "medium", "high", "critical"];
 var SEV_RANK = { none: 0, low: 1, medium: 2, high: 3, critical: 4 };
 function sevColor(s) {
@@ -507,6 +573,14 @@ function sevColor(s) {
   return getCss(m[s] || "--sev-medium");
 }
 function prettyStrat(s) { return String(s || "agent").replace(/_/g, " "); }
+// Plain-language explanation for an attacker's escalation mode (pair/crescendo).
+function attackerModeTip(mode) {
+  var base = "pair = iteratively refine against the target's refusal; crescendo = escalate gradually across turns.";
+  var m = String(mode || "").toLowerCase();
+  if (m === "pair") return "pair = iteratively refine against the target's refusal. " + base;
+  if (m === "crescendo") return "crescendo = escalate gradually across turns. " + base;
+  return base;
+}
 function backendLabel(m) {
   if (!m) return "";
   var p = m.provider || "";
@@ -527,6 +601,7 @@ var vulns = {};
 var runId = null;
 var view = "live";
 var ended = false;
+var customRosterRef = null;   // active AI-designed roster ref (?profile_ref=)
 var savedEvents = null;  // replay event log for re-animation
 var replayTimer = null;
 
@@ -592,7 +667,8 @@ function renderLane(aid) {
   var bl = backendLabel(a);
   if (bl) html += '<span class="tag"><b>' + esc(bl) + '</b></span>';
   if (a.intensity) html += '<span class="tag">intensity <b>' + esc(a.intensity) + '</b></span>';
-  if (a.mode) html += '<span class="tag">mode <b>' + esc(a.mode) + '</b></span>';
+  if (a.mode) html += '<span class="tag" title="' + esc(attackerModeTip(a.mode)) + '">mode <b>' + esc(a.mode) + '</b></span>';
+  if (a.converter) html += '<span class="tag" title="Transforms a probe (base64, rot13, many-shot, …) to test whether a guardrail can be evaded by encoding the same intent.">converter <b>' + esc(a.converter) + '</b></span>';
   if (turnsArr.length) html += '<span class="tag">turns <b>' + turnsArr.length + '</b></span>';
   html += '</div>';
   html += '<div class="think" id="think-' + esc(aid) + '"></div>';
@@ -839,26 +915,33 @@ function renderTracePanel(aid) {
   var box = $("dr-trace");
   var canTrace = !!runId;
   var html = '<div class="trace-ctl">'
-    + '<span class="ctl" style="flex:1 1 100%"><label for="tr-codepath">Code path <span class="hint" title="A local checkout of the target system. Indexed read-only; excerpts are secret-scrubbed and only sent to the provider below. Leave blank for the abstract finding summary.">(clone to hook up)</span></label>'
+    + '<span class="ctl" style="flex:1 1 100%"><label for="tr-codepath">Code path <span class="tip" tabindex="0" role="img" aria-label="A local checkout of the target. Indexed read-only; excerpts are secret-scrubbed and only sent to the chosen model. Enables the code-grounded root-cause ladder; blank = the finding summary." data-tip="A local checkout of the target. Indexed read-only; excerpts are secret-scrubbed and only sent to the chosen model. Enables the code-grounded root-cause ladder; blank = the finding summary." title="A local checkout of the target. Indexed read-only; excerpts are secret-scrubbed and only sent to the chosen model. Enables the code-grounded root-cause ladder; blank = the finding summary.">?</span></label>'
     + '<input class="field" id="tr-codepath" placeholder="/path/to/target/checkout (optional — enables the code-grounded ladder)" style="width:100%" /></span>'
     + '<span class="ctl"><label for="tr-provider">Provider</label>'
-    + '<input class="field" id="tr-provider" value="ollama" style="min-width:96px" /></span>'
+    + '<select class="field" id="tr-provider" style="min-width:120px"><option>loading…</option></select></span>'
     + '<span class="ctl"><label for="tr-model">Model</label>'
-    + '<input class="field" id="tr-model" placeholder="optional" style="min-width:96px" /></span>'
+    + '<select class="field" id="tr-model" style="min-width:120px"><option>—</option></select>'
+    + '<input class="field" id="tr-model-custom" placeholder="custom model" style="min-width:120px;display:none" /></span>'
     + '<button class="btn primary" id="tr-go"' + (canTrace ? "" : " disabled") + '>Trace in code</button>'
     + '</div>';
+  html += '<div id="tr-provider-notice"></div>';
   if (!canTrace) html += '<div class="empty">Trace becomes available once the run has a <code>run_id</code> (after it completes, or in replay).</div>';
   else html += '<div class="empty">Point <b>Code path</b> at a local checkout to get the code-grounded ladder; with the provider on a local model, source never leaves the machine. No path → the honest finding summary.</div>';
   box.innerHTML = html;
+  // populate provider/model dropdowns; prefer a local provider (ollama) so the
+  // IP-safe default keeps source on-machine.
+  initProviderSelects({
+    providerSel: "tr-provider", modelSel: "tr-model", customInput: "tr-model-custom",
+    notice: "tr-provider-notice", preferLocal: true,
+  });
   var go = $("tr-go");
   if (go) go.addEventListener("click", function(){ runTrace(aid, false); });
 }
 
 function runTrace(aid, consent) {
   var box = $("dr-trace");
-  var provider = ($("tr-provider") && $("tr-provider").value || "ollama").trim() || "ollama";
-  var model = ($("tr-model") && $("tr-model").value || "").trim() || null;
-  var savedProvider = provider, savedModel = model;
+  var provider = resolveProvider("tr-provider") || "ollama";
+  var model = resolveModel("tr-model", "tr-model-custom") || null;
   var ctlHtml = box.querySelector(".trace-ctl") ? box.querySelector(".trace-ctl").outerHTML : "";
   box.innerHTML = ctlHtml + '<div class="loading">Tracing root cause in code…</div>';
   rebindTrace(aid);
@@ -1033,6 +1116,9 @@ function buildStreamUrl() {
   params.push("mock=" + ($("f-mock").checked ? "1" : "0"));
   var src = ($("f-sources").value || "").trim();
   if (src) params.push("sources=" + encodeURIComponent(src));
+  // An AI-designed roster (built via /api/redteam/profile) runs via profile_ref;
+  // the stream honors it in addition to the built-in profile/sources/mock.
+  if (customRosterRef) params.push("profile_ref=" + encodeURIComponent(customRosterRef));
   return path + "?" + params.join("&");
 }
 function setLiveButtons(connected) {
@@ -1166,9 +1252,108 @@ function playReplay() {
   }, 120);
 }
 
+// ── AI Designer wiring (context: Red team) ───────────────────────────────
+// postJSON helper the shared dock JS expects (the dashboard has its own; the
+// Arena defines a minimal one here). Parses JSON even on non-2xx so {error}
+// surfaces. Relative URL only — no external origin.
+function postJSON(url, body) {
+  return fetch(url, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {})
+  }).then(function(r) {
+    return r.json().catch(function(){ return null; }).then(function(data) {
+      if (!r.ok) {
+        var msg = (data && (data.detail || data.error)) || ("HTTP " + r.status);
+        throw new Error(msg);
+      }
+      return data;
+    });
+  });
+}
+
+window.__dkDesignUrl = "/api/redteam/design";
+
+// Render the designed roster as a structured preview (strategy lanes + their
+// mode/converter/intensity, sources, turns, guard) — labelled fields, not chat.
+window.__dkRenderPreview = function(res) {
+  var cfg = res.config || {};
+  var secs = "";
+  secs += dkSection("Base profile", esc(cfg.base_profile || "deep"), true);
+  secs += dkSection("Multi-turn", esc(cfg.turns != null ? cfg.turns : "—") + " turn(s) · guard "
+    + (cfg.guard ? "on (Llama-Guard-style judge)" : "off"));
+  secs += dkSection("Sources", dkChips(cfg.sources || []));
+  var lanes = (cfg.strategies || []).map(function(s) {
+    var meta = [];
+    if (s.mode) meta.push("mode " + s.mode);
+    if (s.converter) meta.push("converter " + s.converter);
+    if (s.intensity) meta.push(s.intensity);
+    return '<div class="dk-lane"><div class="dk-lane-h">' + esc(prettyStrat(s.strategy)) + '</div>'
+      + (meta.length ? '<div class="dk-lane-m">' + esc(meta.join(" · ")) + '</div>' : '') + '</div>';
+  }).join("") || '<span class="muted">no strategy lanes</span>';
+  secs += '<div class="dk-section"><div class="dk-k">Strategy lanes ('
+    + ((cfg.strategies || []).length) + ')</div><div class="dk-v">' + lanes + '</div></div>';
+  return dkPreviewShell("Designed red team", res.provider, secs, res.notes);
+};
+
+// Inject: set the Live controls from the design AND build a runnable custom
+// roster via /api/redteam/profile, stashing the ref so Connect runs it.
+window.__dkInject = function(cfg) {
+  setView("live");
+  // 1) reflect the design in the visible Live controls
+  var prof = $("f-profile");
+  if (prof && cfg.base_profile) {
+    var has = false;
+    for (var i = 0; i < prof.options.length; i++) { if (prof.options[i].value === cfg.base_profile) { has = true; break; } }
+    if (!has) { var o = el("option", null, cfg.base_profile); o.value = cfg.base_profile; prof.appendChild(o); }
+    prof.value = cfg.base_profile;
+  }
+  var srcEl = $("f-sources");
+  if (srcEl && cfg.sources) srcEl.value = (cfg.sources || []).join(", ");
+  // turns/guard have no dedicated Live inputs — they ride in the custom roster
+  // we build next, so the designed depth + judge actually run.
+  _dkStatus("Building runnable roster…", "busy");
+  var provider = resolveProvider("dk-provider") || "anthropic";
+  var model = resolveModel("dk-model", "dk-model-custom") || null;
+  var body = { spec: cfg, provider: provider };
+  if (model) body.model = model;
+  postJSON("/api/redteam/profile", body).then(function(resp) {
+    if (!resp || !resp.ref) { _dkStatus((resp && resp.error) || "could not build roster", "err"); return; }
+    customRosterRef = resp.ref;
+    var n = (resp.attackers || []).length;
+    showCustomRoster(n);
+    _dkStatus("Custom roster ready (" + n + " lane(s)). Connect to run it.", "");
+    closeDesigner();
+  }).catch(function(e) {
+    _dkStatus("Could not build roster: " + (e && e.message ? e.message : String(e)), "err");
+  });
+};
+
+function showCustomRoster(nLanes) {
+  var chip = $("custom-roster");
+  var lbl = $("custom-roster-label");
+  if (lbl) lbl.textContent = "custom roster (" + (nLanes || 0) + " lane" + (nLanes === 1 ? "" : "s") + ")";
+  if (chip) chip.style.display = "";
+}
+function clearCustomRoster() {
+  customRosterRef = null;
+  var chip = $("custom-roster");
+  if (chip) chip.style.display = "none";
+}
+(function bindCustomRosterClear() {
+  var x = $("custom-roster-clear");
+  if (x) x.addEventListener("click", function(e){ e.stopPropagation(); clearCustomRoster(); });
+})();
+
+// shared dock open/close/Esc + Design→preview→Inject/Refine skeleton
+__DESIGNER_DOCK_JS__
+
 // ── boot ────────────────────────────────────────────────────────────────
 (function start() {
   renderSevBar(); renderOwasp();
+  // Readiness pill (shared init). The endpoint path is assembled at runtime so
+  // this self-contained page never embeds the domain word as a static literal;
+  // the resolved URL is the same readiness endpoint the dashboard uses.
+  initStatusPill("/api/status");
   setStatus("", "idle");
   setLiveButtons(false);
   if (CONFIG.transport === "ws") {
