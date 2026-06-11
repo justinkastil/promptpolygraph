@@ -256,19 +256,23 @@ polygraph redteam profiles      # list the preconfigured teams
   frontier model, each agent a distinct persona + temperature), `multi_frontier`
   (mixed vendors), `mixed` (local open + frontier), `local_swarm` (100% offline),
   `pressure`, `quick`, and `deep` (adaptive smart multi-turn).
-- **OSS-grounded, not blank-slate** — attackers seed + mutate from a catalog of
-  known techniques. `--sources` folds in optional **garak**, **PyRIT**,
-  **DeepTeam**, and on-demand **datasets** (AdvBench / HarmBench / JailbreakBench);
-  each runs through the same target → judge loop. Install the `[redteam]` extra.
+- **OSS sources** — attackers seed + mutate from a catalog of known techniques.
+  `--sources` folds in optional **garak**, **PyRIT**, **DeepTeam**, and on-demand
+  **datasets** (AdvBench / HarmBench / JailbreakBench); each runs through the same
+  target → judge loop. Install the `[redteam]` extra.
 - **Smart multi-turn** — PAIR iterative refinement, Crescendo escalation, and TAP
   candidate trees, per-attacker `mode`.
 - **Converters** — base64 / rot13 / leetspeak / payload-split / roleplay-wrap /
   many-shot transforms, per-attacker `converter`.
 - **Judges** — an LLM reviewer (default) or `--guard` for a Llama-Guard-style
   safety classifier on a local model.
-- **Live Arena** — watch the run in real time in the dashboard (`/redteam`, SSE)
-  or the service (`/ws/redteam`, WebSocket): attackers on the rails, target in
-  the centre, green/red breach accretion, drill-down to each mitigation.
+- **Arena** — the dashboard (`/redteam`, SSE) or service (`/ws/redteam`, WebSocket)
+  streams the run live, persists it for replay (Live/Replay toggle), and offers a
+  per-attacker drill-down: the multi-turn timeline plus a root cause that — when
+  `redteam.code_path` points at a local checkout and a model is available — traces
+  the breach to `file:line` rungs of the target source (local model by default;
+  air-gap and consent controls for any remote provider). Without a clone it shows
+  the finding summary (control, OWASP/ATLAS, mitigation).
 
 The report leads with the **attack success rate (ASR)**, an OWASP coverage table
 (tested vs breached), and OWASP/ATLAS tags on every finding. See

@@ -107,6 +107,17 @@ class RedTeamConfig(BaseModel):
     # / dataset:* register when the optional `[redteam]` extra is installed.
     sources: list[str] = Field(default_factory=list)
     source_count: int = 25          # max probes drawn from each external source
+    # Local checkout of the target system, enabling the code-grounded root-cause
+    # ladder (the model traces a breach to real file:line loci). None -> the
+    # abstract defense-stage ladder. Reuses the audit's code-reading; no remote.
+    code_path: str | None = None
+    # The code-dive (reading your source) defaults to a LOCAL model so source
+    # never leaves the machine. Frontier providers are allowed only with explicit
+    # consent, and `air_gap` hard-refuses any non-local provider for code dives.
+    code_dive_provider: str = "ollama"
+    code_dive_model: str | None = None
+    code_dive_base_url: str | None = None
+    air_gap: bool = False
 
 
 class ReportConfig(BaseModel):
