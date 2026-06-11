@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..models import Case, Response, Rubric, RunMeta, Score
+from ._env import render_template
+from .context import build_context
 
 
 # ─── Small shared helpers (also reused conceptually by the other renderers) ──
@@ -328,15 +330,31 @@ def render_markdown(
     audit: dict | None = None,
     baseline_diff: dict | None = None,
     pairwise: dict | None = None,
+    template: str = "default",
+    template_dir: str | None = None,
+    branding: dict | None = None,
 ) -> str:
-    """Render the full review as a Markdown string."""
-    _ = rubric  # rubric metadata already folded into the summary; kept for symmetry
-    parts: list[str] = []
-    parts += _cover(run_meta, summary, cases, scores)
-    parts += _category_table(summary, baseline_diff)
-    parts += _per_category_sections(cases, responses, scores, summary)
-    parts += _persona_panel(audit)
-    parts += _forensic_synthesis(audit)
-    parts += _ab_section(pairwise)
-    parts += _cost_latency_footer(summary)
-    return "\n".join(parts) + "\n"
+    """Render the full review as a Markdown string via a Jinja2 template.
+
+    `template` selects a built-in set ('default' or 'minimal'); `template_dir`,
+    if given, overrides the built-ins. Calling with only the original arguments
+    is fully backward-compatible (uses the 'default' set, no branding).
+    """
+    context = build_context(
+        run_meta,
+        cases,
+        responses,
+        scores,
+        summary,
+        rubric=rubric,
+        audit=audit,
+        baseline_diff=baseline_diff,
+        pairwise=pairwise,
+        branding=branding,
+    )
+    return render_template(
+        "report.md.j2",
+        context,
+        template=template,
+        template_dir=template_dir,
+    )

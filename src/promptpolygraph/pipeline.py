@@ -160,6 +160,8 @@ async def run_pipeline(
     paths = build_report(
         meta, cases, responses, scores, summary,
         rubric=rubric, audit=audit, formats=fmts, out_dir=str(rd),
+        template=cfg.report.template, template_dir=cfg.resolve(cfg.report.template_dir),
+        branding=cfg.report.branding,
     )
 
     meta.completed_at = RunMeta().created_at

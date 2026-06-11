@@ -1,0 +1,13 @@
+{%- macro fmt(v) -%}{% if v is none %}—{% else %}{{ v }}{% endif %}{%- endmacro -%}
+# {{ branding.title }}
+
+Run `{{ cover.run_id }}`{% if cover.model %} · {{ cover.model }}{% endif %}{% if cover.adapter %} · {{ cover.adapter }}{% endif %}
+
+**{{ cover.verdict }}** — {{ cover.categories_passing }}/{{ cover.categories_total }} categories passing
+
+## Category scores
+
+| Category | Count |{% for d in dimensions %} {{ d }} |{% endfor %} Pass |{% if has_baseline %} Δ |{% endif %}
+| --- | --- |{% for d in dimensions %} --- |{% endfor %} --- |{% if has_baseline %} --- |{% endif %}
+{% for cat in categories %}| {{ cat.name }} | {{ cat.count }} |{% for ds in cat.dim_scores %} {{ fmt(ds.value) }} |{% endfor %} {{ '✓' if cat.pass else '✗' }} |{% if has_baseline %} {% for d in cat.deltas %}{{ d.dimension }} {{ d.delta }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %} |{% endif %}
+{% endfor %}
