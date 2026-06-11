@@ -158,6 +158,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .field:focus, select.field:focus { outline: none; border-color: var(--accent); }
   .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
   .check input { accent-color: var(--accent); }
+  .chips { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 2px; }
+  .chip {
+    background: var(--panel-2, var(--panel)); color: var(--muted); border: 1px solid var(--line);
+    border-radius: 999px; padding: 2px 9px; font: 11.5px/1.4 var(--sans); cursor: pointer;
+  }
+  .chip:hover { color: var(--text); border-color: var(--accent); }
+  .hint { font-size: 10.5px; color: var(--muted); cursor: help; text-transform: none; letter-spacing: 0; }
   .btn {
     appearance: none; border: 1px solid var(--line); border-radius: 8px;
     background: var(--panel-2); color: var(--text); font: 600 13px/1 var(--sans);
@@ -405,8 +412,15 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <option value="jailbreak">jailbreak</option>
         <option value="injection">injection</option>
       </select></span>
-    <span class="ctl"><label for="f-sources">Sources</label>
-      <input class="field" id="f-sources" placeholder="comma-separated, optional" /></span>
+    <span class="ctl"><label for="f-sources">OSS sources <span class="hint" title="Probe sources folded into the run alongside the LLM attackers. catalog needs no deps; garak/pyrit/deepteam need the [redteam] extra; dataset:&lt;name&gt; fetches on demand.">(?)</span></label>
+      <input class="field" id="f-sources" placeholder="e.g. catalog, garak, dataset:advbench" />
+      <span class="chips" id="source-chips">
+        <button type="button" class="chip" onclick="addSource('catalog')">+catalog</button>
+        <button type="button" class="chip" onclick="addSource('garak')">+garak</button>
+        <button type="button" class="chip" onclick="addSource('pyrit')">+pyrit</button>
+        <button type="button" class="chip" onclick="addSource('deepteam')">+deepteam</button>
+        <button type="button" class="chip" onclick="addSource('dataset:advbench')">+dataset:advbench</button>
+      </span></span>
     <label class="check"><input type="checkbox" id="f-mock" checked /> mock (offline)</label>
     <button class="btn primary" id="btn-connect" onclick="connect()">Connect</button>
     <button class="btn danger" id="btn-stop" onclick="stopLive()" disabled>Stop</button>
@@ -825,6 +839,8 @@ function renderTracePanel(aid) {
   var box = $("dr-trace");
   var canTrace = !!runId;
   var html = '<div class="trace-ctl">'
+    + '<span class="ctl" style="flex:1 1 100%"><label for="tr-codepath">Code path <span class="hint" title="A local checkout of the target system. Indexed read-only; excerpts are secret-scrubbed and only sent to the provider below. Leave blank for the abstract finding summary.">(clone to hook up)</span></label>'
+    + '<input class="field" id="tr-codepath" placeholder="/path/to/target/checkout (optional — enables the code-grounded ladder)" style="width:100%" /></span>'
     + '<span class="ctl"><label for="tr-provider">Provider</label>'
     + '<input class="field" id="tr-provider" value="ollama" style="min-width:96px" /></span>'
     + '<span class="ctl"><label for="tr-model">Model</label>'
@@ -832,7 +848,7 @@ function renderTracePanel(aid) {
     + '<button class="btn primary" id="tr-go"' + (canTrace ? "" : " disabled") + '>Trace in code</button>'
     + '</div>';
   if (!canTrace) html += '<div class="empty">Trace becomes available once the run has a <code>run_id</code> (after it completes, or in replay).</div>';
-  else html += '<div class="empty">Defaults to a local model so source never leaves the machine. Click to analyze the breaching attempt for this attacker.</div>';
+  else html += '<div class="empty">Point <b>Code path</b> at a local checkout to get the code-grounded ladder; with the provider on a local model, source never leaves the machine. No path → the honest finding summary.</div>';
   box.innerHTML = html;
   var go = $("tr-go");
   if (go) go.addEventListener("click", function(){ runTrace(aid, false); });
@@ -847,8 +863,10 @@ function runTrace(aid, consent) {
   box.innerHTML = ctlHtml + '<div class="loading">Tracing root cause in code…</div>';
   rebindTrace(aid);
 
+  var codePath = ($("tr-codepath") && $("tr-codepath").value || "").trim() || null;
   var body = { run_id: runId, attacker_id: aid, provider: provider };
   if (model) body.model = model;
+  if (codePath) body.code_path = codePath;
   if (consent) body.consent = true;
 
   fetch("/api/redteam/trace", {
@@ -1020,6 +1038,13 @@ function buildStreamUrl() {
 function setLiveButtons(connected) {
   $("btn-connect").disabled = connected;
   $("btn-stop").disabled = !connected;
+}
+function addSource(name) {
+  var el = $("f-sources");
+  if (!el) return;
+  var have = el.value.split(",").map(function(s){ return s.trim(); }).filter(Boolean);
+  if (have.indexOf(name) === -1) have.push(name);
+  el.value = have.join(", ");
 }
 function connect() {
   if (view !== "live") return;

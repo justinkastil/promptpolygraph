@@ -202,6 +202,18 @@ PAGE: str = r"""<!DOCTYPE html>
   .filelist { list-style: none; padding: 0; margin: 6px 16px 12px; }
   .filelist li { padding: 6px 0; border-bottom: 1px dashed var(--border); display: flex; align-items: center; gap: 10px; }
   .tag-mono { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .subtabs { display: flex; gap: 4px; margin: 12px 0 14px; border-bottom: 1px solid var(--border); }
+  .subtab { padding: 7px 16px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; }
+  .subtab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .corpus-preview { max-height: 360px; overflow: auto; margin: 0 16px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+  .corpus-preview .pgroup { border-bottom: 1px dashed var(--border); }
+  .corpus-preview .pgroup:last-child { border-bottom: none; }
+  .corpus-preview .pcat { font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); padding: 8px 12px 4px; }
+  .corpus-preview .pitem { padding: 4px 12px 4px 22px; white-space: pre-wrap; word-break: break-word; font-size: 13px; border-top: 1px dashed var(--border); }
+  .corpus-summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 16px 2px; }
+  .corpus-summary .cchip { font-size: 11.5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
+  .selpath { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 16px 10px; }
+  .selpath .tag-mono { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -211,7 +223,7 @@ PAGE: str = r"""<!DOCTYPE html>
   <span class="navtabs" id="navtabs">
     <span class="navtab" id="nav-runs" onclick="showRuns()">Runs</span>
     <span class="navtab" id="nav-newrun" onclick="showNewRun()">New run</span>
-    <span class="navtab" id="nav-personas" onclick="showPersonas()">Personas</span>
+    <span class="navtab" id="nav-studio" onclick="showStudio()">Studio</span>
     <a class="navtab" id="nav-redteam" href="/redteam">Red Team</a>
   </span>
   <span class="spacer"></span>
@@ -478,7 +490,7 @@ function diffBlock(diff) {
 const app = document.getElementById("app");
 const crumb = document.getElementById("crumb");
 let pollTimer = null;
-let view = "runs";          // "runs" | "detail" | "compare" | "newrun" | "personas"
+let view = "runs";          // "runs" | "detail" | "compare" | "newrun" | "studio"
 let currentRunId = null;
 let currentTab = "results"; // "results" | "audit"
 let selectMode = false;     // compare-selection mode in the runs list
@@ -486,6 +498,9 @@ const selected = new Set(); // selected run ids for compare
 let runsCache = [];         // last /api/runs payload (chronological metadata)
 let launchProgressTimer = null; // poll timer for an in-flight launched run
 let selectedPersonaPath = "";   // persona file fed into the New Run panel
+let selectedCorpusPath = "";    // generated corpus dir fed into the New Run panel
+let studioTab = "prompts";      // Studio sub-tab: "prompts" | "personas"
+let lastCorpusResult = null;    // last /api/corpus/generate response, for re-render
 
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
@@ -1295,6 +1310,13 @@ function renderNewRun(configs, pfiles) {
   const fmtChecks = FORMAT_OPTS.map(f =>
     '<label><input type="checkbox" class="fmt-chk" value="' + esc(f) + '"' + (f === "md" || f === "html" ? " checked" : "") + '> ' + esc(f) + '</label>').join("");
 
+  const corpusSel = selectedCorpusPath
+    ? '<div class="selpath"><span class="muted">Selected corpus:</span> '
+      + '<span class="tag-mono">' + esc(selectedCorpusPath) + '</span> '
+      + '<button class="btn" onclick="clearSelectedCorpus()">Clear</button>'
+      + '<span class="hint">This generated corpus will run as a fixed set; Mode/Count/Categories above are ignored.</span></div>'
+    : '';
+
   const form =
     '<div class="panel"><h2>New run</h2>'
     + '<div class="form-grid">'
@@ -1314,13 +1336,16 @@ function renderNewRun(configs, pfiles) {
     + '<div class="field"><label>Report formats</label><div class="checks">' + fmtChecks + '</div></div>'
     + '<div class="field"><label>Options</label><div class="checks"><label><input type="checkbox" id="nr-mock" checked> Mock (offline)</label></div></div>'
     + '</div>'
+    + corpusSel
     + '<div class="launchbar"><button class="btn primary" id="nr-launch" onclick="launchRun()">Launch run</button>'
     + '<span class="hint">Runs in-process against this dashboard\'s store; progress appears below.</span></div>'
     + '<div id="nr-progress"></div>'
     + '</div>';
 
-  const studioLink = '<div class="muted" style="padding:0 2px 8px">Need a persona panel? Build one in the '
-    + '<a href="#" onclick="showPersonas();return false;">Persona studio</a>.</div>';
+  const studioLink = '<div class="muted" style="padding:0 2px 8px">Need a prompt corpus or persona panel? Build one in the '
+    + '<a href="#" onclick="showStudio();return false;">Studio</a> '
+    + '(<a href="#" onclick="showStudio(\'prompts\');return false;">Prompts</a> · '
+    + '<a href="#" onclick="showStudio(\'personas\');return false;">Persona studio</a>).</div>';
   app.innerHTML = form + studioLink;
 }
 
@@ -1338,6 +1363,7 @@ async function launchRun() {
     mock: document.getElementById("nr-mock").checked,
     formats: fmts.length ? fmts : ["md","html"],
   };
+  if (selectedCorpusPath) overrides.path = selectedCorpusPath;
   const body = { overrides: overrides };
   const cfgPath = document.getElementById("nr-config").value;
   if (cfgPath) body.config_path = cfgPath;
@@ -1416,12 +1442,181 @@ function drawLaunchProgress(runId, st) {
   pe.innerHTML = html;
 }
 
-// ---- Persona studio -----------------------------------------------------
-async function showPersonas() {
-  view = "personas"; currentRunId = null; crumb.textContent = "Personas";
-  setNav("personas");
+// ---- Studio (Prompts + Personas) ----------------------------------------
+async function showStudio(tab) {
+  view = "studio"; currentRunId = null;
+  setNav("studio");
   stopPoll();
-  app.innerHTML = '<div class="empty">Loading personas…</div>';
+  if (tab === "prompts" || tab === "personas") studioTab = tab;
+  crumb.textContent = "Studio";
+  renderStudio();
+}
+
+// kept as an alias so older links / saved bookmarks still resolve.
+function showPersonas() { showStudio("personas"); }
+
+function renderStudio() {
+  const subtabs = '<div class="subtabs">'
+    + '<div class="subtab' + (studioTab === "prompts" ? " active" : "") + '" onclick="setStudioTab(\'prompts\')">Prompts</div>'
+    + '<div class="subtab' + (studioTab === "personas" ? " active" : "") + '" onclick="setStudioTab(\'personas\')">Personas</div>'
+    + '</div>';
+  app.innerHTML = subtabs + '<div id="studiobody"><div class="empty">Loading…</div></div>';
+  if (studioTab === "prompts") renderPromptStudio();
+  else loadPersonaStudio();
+}
+
+function setStudioTab(t) {
+  studioTab = t;
+  document.querySelectorAll(".subtab").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".subtab").forEach(el => {
+    if ((el.getAttribute("onclick") || "").indexOf("'" + t + "'") >= 0) el.classList.add("active");
+  });
+  const b = document.getElementById("studiobody");
+  if (b) b.innerHTML = '<div class="empty">Loading…</div>';
+  if (t === "prompts") renderPromptStudio();
+  else loadPersonaStudio();
+}
+
+// ---- Studio · Prompt-corpus generator -----------------------------------
+const CORPUS_MODES = ["varied", "adversarial", "hybrid"];
+const CORPUS_DIFFS = ["mild", "standard", "aggressive"];
+
+function renderPromptStudio() {
+  const body = document.getElementById("studiobody");
+  if (!body) return;
+  const modeOpts = CORPUS_MODES.map(m =>
+    '<option value="' + m + '"' + (m === "varied" ? " selected" : "") + '>' + m + '</option>').join("");
+  const diffOpts = CORPUS_DIFFS.map(m =>
+    '<option value="' + m + '"' + (m === "standard" ? " selected" : "") + '>' + m + '</option>').join("");
+
+  const gen = '<div class="panel"><h2>Generate a prompt corpus</h2>'
+    + '<div class="form-grid">'
+    + '<div class="field"><label>Mode</label><select id="cg-mode">' + modeOpts + '</select></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Domain (optional)</label>'
+      + '<input type="text" id="cg-domain" placeholder="e.g. a budgeting assistant for freelancers"></div>'
+    + '<div class="field"><label>Difficulty (adversarial)</label><select id="cg-diff">' + diffOpts + '</select></div>'
+    + '<div class="field"><label>Count (total, optional)</label><input type="number" id="cg-count" min="1" placeholder="default"></div>'
+    + '<div class="field"><label>Per category (optional)</label><input type="number" id="cg-percat" min="1" placeholder="default"></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Categories (optional, comma-separated)</label>'
+      + '<input type="text" id="cg-cats" placeholder="e.g. factual_qa, how_to, refusal"></div>'
+    + '<div class="field"><label>Seed (optional)</label><input type="number" id="cg-seed" placeholder="reproducible"></div>'
+    + '<div class="field"><label>Provider</label><input type="text" id="cg-provider" value="anthropic"></div>'
+    + '<div class="field"><label>Model (optional)</label><input type="text" id="cg-model" placeholder="provider default"></div>'
+    + '</div>'
+    + '<div class="form-grid" style="padding-top:0">'
+    + '<div class="field" style="grid-column:1 / -1"><label>Backend</label>'
+      + '<div class="checks"><label><input type="checkbox" id="cg-mock" checked> Mock (offline)</label></div>'
+      + '<span class="hint">Any provider works — <span class="mono">anthropic</span> is the default; use e.g. '
+      + '<span class="mono">ollama</span> for a fully local backend. Mock needs no key.</span></div>'
+    + '</div>'
+    + '<div class="launchbar"><button class="btn primary" id="cg-gen-btn" onclick="generateCorpus()">Generate corpus</button>'
+    + '<span class="hint">Saves a loadable corpus dir; preview and exports appear below.</span></div>'
+    + '<div id="cg-result"></div></div>';
+
+  body.innerHTML = gen;
+  if (lastCorpusResult) drawCorpusResult(lastCorpusResult);
+}
+
+async function generateCorpus() {
+  const btn = document.getElementById("cg-gen-btn");
+  const out = document.getElementById("cg-result");
+  if (btn) { btn.classList.add("disabled-btn"); btn.textContent = "Generating…"; }
+  if (out) out.innerHTML = '<div class="empty">Generating corpus…</div>';
+  const numOrNull = id => {
+    const v = (document.getElementById(id).value || "").trim();
+    return v === "" ? null : Number(v);
+  };
+  const body = {
+    mode: document.getElementById("cg-mode").value,
+    domain: (document.getElementById("cg-domain").value || "").trim(),
+    difficulty: document.getElementById("cg-diff").value,
+    count: numOrNull("cg-count"),
+    per_category: numOrNull("cg-percat"),
+    categories: (document.getElementById("cg-cats").value || "").trim(),
+    seed: numOrNull("cg-seed"),
+    provider: (document.getElementById("cg-provider").value || "anthropic").trim(),
+    model: (document.getElementById("cg-model").value || "").trim() || null,
+    mock: document.getElementById("cg-mock").checked,
+  };
+  let resp;
+  try {
+    resp = await postJSON("/api/corpus/generate", body);
+  } catch (e) {
+    if (out) out.innerHTML = '<div class="err">Could not generate corpus: ' + esc(e.message) + '</div>';
+    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Generate corpus"; }
+    return;
+  }
+  if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Generate corpus"; }
+  if (!resp || !resp.path) {
+    if (out) out.innerHTML = '<div class="err">' + esc((resp && (resp.detail || resp.error)) || "generation failed") + '</div>';
+    return;
+  }
+  lastCorpusResult = resp;
+  drawCorpusResult(resp);
+}
+
+function drawCorpusResult(resp) {
+  const out = document.getElementById("cg-result");
+  if (!out) return;
+  const cats = resp.categories || {};
+  const chips = Object.keys(cats).sort().map(k =>
+    '<span class="cchip">' + esc(k) + ' <b>' + (cats[k] || 0) + '</b></span>').join("");
+  const isMock = resp.provider === "mock";
+  const summary = '<div class="corpus-summary">'
+    + '<span class="cchip"><b>' + (resp.count || 0) + '</b> prompts</span>'
+    + '<span class="cchip">mode <b>' + esc(resp.mode || "") + '</b></span>'
+    + '<span class="cchip">provider <b>' + esc(resp.provider || "") + '</b>' + (isMock ? ' (offline)' : '') + '</span>'
+    + chips + '</div>'
+    + '<div class="muted" style="padding:2px 16px 6px">Saved to <span class="tag-mono">' + esc(resp.path) + '</span></div>';
+
+  const ep = encodeURIComponent(resp.path);
+  const expBase = "/api/corpus/export?path=" + ep;
+  const exports = '<div class="btnrow" style="margin:2px 16px 12px">'
+    + '<a class="btn" href="' + expBase + '&format=json">Export JSON</a>'
+    + '<a class="btn" href="' + expBase + '&format=jsonl">Export JSONL</a>'
+    + '<a class="btn" href="' + expBase + '&format=csv">Export CSV</a>'
+    + '<a class="btn" href="' + expBase + '&format=json&prompts_only=1">Prompts only (JSON)</a>'
+    + '<a class="btn" href="' + expBase + '&format=jsonl&prompts_only=1">Prompts only (JSONL)</a>'
+    + '<button class="btn primary" onclick="useCorpusPath(\'' + esc(resp.path) + '\')">Use in new run</button>'
+    + '</div>';
+
+  // group preview by category, preserving order of appearance
+  const preview = resp.preview || [];
+  let previewHtml;
+  if (preview.length) {
+    const order = [], byCat = {};
+    for (const p of preview) {
+      const c = p.category || "default";
+      if (!byCat[c]) { byCat[c] = []; order.push(c); }
+      byCat[c].push(p.prompt || "");
+    }
+    previewHtml = '<div class="corpus-preview">' + order.map(c =>
+      '<div class="pgroup"><div class="pcat">' + esc(c) + ' (' + byCat[c].length + ')</div>'
+      + byCat[c].map(t => '<div class="pitem">' + dash(t) + '</div>').join("")
+      + '</div>').join("") + '</div>';
+    if (resp.count && preview.length < resp.count) {
+      previewHtml += '<div class="muted" style="padding:0 16px 10px">Showing first ' + preview.length
+        + ' of ' + resp.count + ' prompts — export for the full set.</div>';
+    }
+  } else {
+    previewHtml = '<div class="empty">No prompts returned.</div>';
+  }
+
+  out.innerHTML = summary + exports + previewHtml;
+}
+
+function useCorpusPath(path) {
+  selectedCorpusPath = path;
+  showNewRun();
+}
+
+function clearSelectedCorpus() {
+  selectedCorpusPath = "";
+  showNewRun();
+}
+
+// ---- Studio · Persona studio --------------------------------------------
+async function loadPersonaStudio() {
   let lib = [], files = [];
   try { lib = await getJSON("/api/personas"); } catch (e) { lib = []; }
   try { files = await getJSON("/api/personas/files"); } catch (e) { files = []; }
@@ -1474,7 +1669,8 @@ function renderPersonaStudio(lib, files) {
     : '<div class="empty">No personas in the bundled library.</div>';
   const libPanel = '<div class="panel"><h2>Persona library</h2>' + libHtml + '</div>';
 
-  app.innerHTML = create + gen + savedPanel + libPanel;
+  const body = document.getElementById("studiobody") || app;
+  body.innerHTML = create + gen + savedPanel + libPanel;
 }
 
 async function createPersona() {
