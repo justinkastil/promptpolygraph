@@ -238,6 +238,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_providers()
             return
 
+        if parts == ["api", "health"]:
+            self._api_health()
+            return
+
         if parts == ["api", "config"]:
             self._api_config_load(query)
             return
@@ -304,6 +308,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if parts == ["api", "corpus", "generate"]:
             self._api_corpus_generate()
+            return
+        if parts == ["api", "adapter", "test"]:
+            self._api_adapter_test()
             return
         if parts == ["api", "config", "design"]:
             self._api_config_design()
@@ -1031,7 +1038,7 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
-    # ---- providers (drives the provider/model dropdowns) ---------------
+    # ---- providers + readiness (drives dropdowns + the status pill) ----
     def _api_providers(self) -> None:
         from promptpolygraph.discovery import discover_providers
 
@@ -1039,6 +1046,65 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(discover_providers())
         except Exception as exc:
             self._json({"error": "discovery failed", "detail": str(exc)}, status=500)
+
+    def _api_health(self) -> None:
+        """Readiness for the status pill: which backends are usable, and whether
+        we'd run live or fall back to mock (offline)."""
+        from promptpolygraph.discovery import discover_providers
+
+        try:
+            provs = discover_providers()
+        except Exception:
+            provs = []
+        any_av = any(p.get("available") for p in provs)
+        self._json({
+            "ready": True,  # the harness always runs (mock is offline-safe)
+            "any_provider": any_av,
+            "mock_only": not any_av,
+            "status": "live" if any_av else "mock",
+            "providers": [{"id": p["id"], "available": p["available"], "reason": p["reason"]} for p in provs],
+        })
+
+    def _api_adapter_test(self) -> None:
+        """Probe a target adapter with one trivial query and report reachability.
+        A custom (callable) adapter with no `fn` surfaces here as 'not wired'."""
+        import time as _time
+
+        from promptpolygraph.adapters import build_adapter
+        from promptpolygraph.config import AdapterConfig
+        from promptpolygraph.models import Case
+
+        body = self._read_body()
+        spec = body.get("adapter")
+        if not isinstance(spec, dict):
+            self._json({"ok": False, "error": "adapter spec required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            adapter = build_adapter(AdapterConfig(**spec))
+        except Exception as exc:
+            self._json({"ok": False, "error": f"adapter not wired: {exc}"})
+            return
+
+        async def _probe() -> Any:
+            return await asyncio.wait_for(
+                adapter.query(Case(prompt="Connection check — please reply with: OK.", category="healthcheck")),
+                timeout=8.0,
+            )
+
+        t0 = _time.perf_counter()
+        try:
+            resp = asyncio.run(_probe())
+        except Exception as exc:
+            self._json({"ok": False, "name": getattr(adapter, "name", "?"), "error": str(exc)})
+            return
+        err = getattr(resp, "error", None)
+        self._json({
+            "ok": not err,
+            "name": getattr(adapter, "name", "?"),
+            "latency_ms": int((_time.perf_counter() - t0) * 1000),
+            "error": err,
+            "sample": (getattr(resp, "text", "") or "")[:160],
+        })
 
     # ---- config builder: AI design / save / load -----------------------
     def _configs_dir(self) -> Path:
