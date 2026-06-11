@@ -102,6 +102,11 @@ class RedTeamConfig(BaseModel):
     turns: int | None = None        # override the profile's escalation depth
     concurrency: int = 4
     target_description: str | None = None  # context handed to attackers + judge
+    # External probe sources run through the same target->judge loop as the LLM
+    # attackers. "catalog" is always available (no deps); garak / pyrit / deepteam
+    # / dataset:* register when the optional `[redteam]` extra is installed.
+    sources: list[str] = Field(default_factory=list)
+    source_count: int = 25          # max probes drawn from each external source
 
 
 class ReportConfig(BaseModel):

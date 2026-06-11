@@ -8,6 +8,13 @@ a one-line verdict), a severity-ranked vulnerability table, and per-vulnerabilit
 the example attempts (probe -> response -> judge rationale/evidence). The HTML is
 fully self-contained (inline CSS, no external assets) and severity color-coded;
 all text is escaped. `render_json(report)` returns a plain dict.
+
+Both renderers also include:
+- An ASR (attack success rate) headline near the summary.
+- An OWASP Top-10 (LLM) coverage table showing which catalog categories were
+  tested and which were breached.
+- OWASP + MITRE ATLAS columns on each vulnerability entry.
+- A sources line when external probe sources were used.
 """
 
 from __future__ import annotations
@@ -15,12 +22,18 @@ from __future__ import annotations
 from html import escape as _esc
 from typing import Any
 
+from .catalog import TECHNIQUES
 from .models import RedTeamReport, severity_rank
 
 # Severity ordering high -> low for display.
 _SEV_DISPLAY = ["critical", "high", "medium", "low", "none"]
 
 # console / markdown verdict glyphs handled in the CLI; here we keep it textual.
+
+# Sorted unique OWASP categories that the built-in technique catalog covers.
+_CATALOG_OWASP: tuple[str, ...] = tuple(
+    sorted({t.owasp for t in TECHNIQUES if t.owasp})
+)
 
 
 def _by_id(report: RedTeamReport) -> dict[str, Any]:
@@ -35,6 +48,35 @@ def _verdict_line(report: RedTeamReport) -> str:
     parts = [f"{by_sev[s]} {s}" for s in _SEV_DISPLAY if by_sev.get(s)]
     sev_str = ", ".join(parts) if parts else "no breaches"
     return f"{breaches}/{attacks} attacks breached ({sev_str})"
+
+
+def _asr_pct(report: RedTeamReport) -> str:
+    """Return ASR as a percentage string, e.g. '33.3%'."""
+    st = report.stats or {}
+    asr = st.get("asr")
+    if asr is None:
+        attacks = st.get("attacks", len(report.attempts))
+        breaches = st.get("breaches", 0)
+        asr = breaches / attacks if attacks else 0.0
+    return f"{asr * 100:.1f}%"
+
+
+def _owasp_coverage(report: RedTeamReport) -> list[dict[str, Any]]:
+    """Return a list of {owasp, tested, breached} for every catalog OWASP category."""
+    st = report.stats or {}
+    owasp_breached: set[str] = set(st.get("owasp_breached") or [])
+    # 'tested' = any vulnerability or attempt references this OWASP category
+    vuln_owasp: set[str] = {v.owasp for v in report.vulnerabilities if v.owasp}
+    # also consider categories that appear in the stats breached list as tested
+    tested_owasp = vuln_owasp | owasp_breached
+    return [
+        {
+            "owasp": cat,
+            "tested": cat in tested_owasp,
+            "breached": cat in owasp_breached,
+        }
+        for cat in _CATALOG_OWASP
+    ]
 
 
 def _trim(text: str | None, n: int = 600) -> str:
@@ -59,8 +101,24 @@ def render_md(report: RedTeamReport) -> str:
     out.append(f"- **Attackers:** {st.get('attackers', '?')}")
     out.append("")
     highest = report.vulnerabilities[0].severity if report.vulnerabilities else "none"
+    attacks = st.get("attacks", len(report.attempts))
+    breaches = st.get("breaches", 0)
+    defended = st.get("defended", attacks - breaches)
     out.append(f"## Verdict: {_verdict_line(report)} — highest severity **{highest.upper()}**")
     out.append("")
+    out.append(f"| Metric | Value |")
+    out.append(f"| --- | --- |")
+    out.append(f"| Attacks | {attacks} |")
+    out.append(f"| Breaches | {breaches} |")
+    out.append(f"| Defended | {defended} |")
+    out.append(f"| **Attack Success Rate (ASR)** | **{_asr_pct(report)}** |")
+    out.append("")
+
+    # External sources note.
+    sources = st.get("sources") or []
+    if sources:
+        out.append(f"*External probe sources included: {', '.join(str(s) for s in sources)}.*")
+        out.append("")
 
     # Severity-ranked vulnerability table.
     out.append("## Vulnerabilities (severity-ranked)")
@@ -73,8 +131,17 @@ def render_md(report: RedTeamReport) -> str:
         out.append("| --- | --- | ---: | --- |")
         for v in report.vulnerabilities:
             mit = (v.mitigation or "").replace("\n", " ").replace("|", "\\|")
+            # Append OWASP/ATLAS inline in the class cell so the column header
+            # stays compatible with existing consumers while still surfacing the
+            # standards mapping in the table.
             cls = v.vuln_class.replace("|", "\\|")
-            out.append(f"| {v.severity.upper()} | {cls} | {v.count} | {mit or '—'} |")
+            tags: list[str] = []
+            if v.owasp:
+                tags.append(v.owasp.replace("|", "\\|"))
+            if v.atlas:
+                tags.append(v.atlas.replace("|", "\\|"))
+            cls_cell = f"{cls} _{' · '.join(tags)}_" if tags else cls
+            out.append(f"| {v.severity.upper()} | {cls_cell} | {v.count} | {mit or '—'} |")
         out.append("")
 
         # Per-vulnerability example attempts.
@@ -84,6 +151,14 @@ def render_md(report: RedTeamReport) -> str:
             out.append(f"### {v.severity.upper()} — {v.vuln_class} ({v.count} breach"
                        f"{'es' if v.count != 1 else ''})")
             out.append("")
+            if v.owasp or v.atlas:
+                tags: list[str] = []
+                if v.owasp:
+                    tags.append(f"OWASP: {v.owasp}")
+                if v.atlas:
+                    tags.append(f"ATLAS: {v.atlas}")
+                out.append(f"*{' · '.join(tags)}*")
+                out.append("")
             if v.mitigation:
                 out.append(f"**Mitigation:** {v.mitigation}")
                 out.append("")
@@ -101,6 +176,19 @@ def render_md(report: RedTeamReport) -> str:
                     if ver.evidence:
                         out.append(f"  - *Evidence:* {_trim(ver.evidence, 300)}")
                 out.append("")
+
+    # OWASP Top-10 (LLM) coverage table.
+    out.append("## OWASP LLM Top-10 Coverage")
+    out.append("")
+    out.append("Coverage of OWASP Top-10 for LLM Applications categories in this run.")
+    out.append("")
+    out.append("| OWASP Category | Tested | Breached |")
+    out.append("| --- | :---: | :---: |")
+    for row in _owasp_coverage(report):
+        tested_glyph = "✓" if row["tested"] else "✗"
+        breached_glyph = "✓" if row["breached"] else "✗"
+        out.append(f"| {row['owasp']} | {tested_glyph} | {breached_glyph} |")
+    out.append("")
 
     return "\n".join(out).rstrip() + "\n"
 
@@ -154,6 +242,18 @@ td.num { text-align:right; }
 .attempt .lbl { font-weight:600; color:var(--muted); }
 .attempt pre { font-family:var(--mono); font-size:.82rem; white-space:pre-wrap; word-break:break-word;
   margin:.15rem 0 .6rem; background:#fff; border:1px solid var(--border); border-radius:5px; padding:.4rem .55rem; }
+.asr-banner { display:flex; gap:1.5rem; flex-wrap:wrap; margin:1rem 0; }
+.asr-stat { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+  padding:.6rem 1rem; min-width:110px; }
+.asr-stat .label { font-size:.75rem; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+.asr-stat .value { font-size:1.4rem; font-weight:700; margin-top:.1rem; }
+.asr-stat.asr-highlight { border-color:var(--high); }
+.asr-stat.asr-highlight .value { color:var(--high); }
+.tag { display:inline-block; font-size:.75rem; padding:.1rem .45rem; border-radius:4px;
+  background:var(--panel); border:1px solid var(--border); font-family:var(--mono); margin:.1rem .15rem .1rem 0; }
+.coverage td.yes { color:#1b7f37; font-weight:700; }
+.coverage td.no  { color:var(--muted); }
+.sources { font-size:.88rem; color:var(--muted); margin:.5rem 0 1rem; }
 """.strip()
 
 
@@ -165,6 +265,9 @@ def render_html(report: RedTeamReport) -> str:
     st = report.stats or {}
     by_id = _by_id(report)
     highest = report.vulnerabilities[0].severity if report.vulnerabilities else "none"
+    attacks = st.get("attacks", len(report.attempts))
+    breaches = st.get("breaches", 0)
+    defended = st.get("defended", attacks - breaches)
 
     h: list[str] = []
     h.append("<!doctype html>")
@@ -186,17 +289,34 @@ def render_html(report: RedTeamReport) -> str:
     h.append(f"<div class='verdict {_sev_class(highest)}'>"
              f"{_e(_verdict_line(report))} &mdash; highest severity {_e(highest.upper())}</div>")
 
+    # ASR banner with key metrics.
+    h.append("<div class='asr-banner'>")
+    h.append(f"<div class='asr-stat'><div class='label'>Attacks</div><div class='value'>{_e(attacks)}</div></div>")
+    h.append(f"<div class='asr-stat'><div class='label'>Breaches</div><div class='value'>{_e(breaches)}</div></div>")
+    h.append(f"<div class='asr-stat'><div class='label'>Defended</div><div class='value'>{_e(defended)}</div></div>")
+    h.append(f"<div class='asr-stat asr-highlight'><div class='label'>Attack Success Rate</div>"
+             f"<div class='value'>{_e(_asr_pct(report))}</div></div>")
+    h.append("</div>")
+
+    # External sources note.
+    sources = st.get("sources") or []
+    if sources:
+        sources_str = ", ".join(_e(str(s)) for s in sources)
+        h.append(f"<p class='sources'>External probe sources included: {sources_str}.</p>")
+
     h.append("<h2>Vulnerabilities (severity-ranked)</h2>")
     if not report.vulnerabilities:
         h.append("<p>No vulnerabilities found — the target defended every probe.</p>")
     else:
         h.append("<table><thead><tr><th>Severity</th><th>Vulnerability class</th>"
-                 "<th class='num'>Count</th><th>Mitigation</th></tr></thead><tbody>")
+                 "<th class='num'>Count</th><th>OWASP</th><th>ATLAS</th><th>Mitigation</th></tr></thead><tbody>")
         for v in report.vulnerabilities:
             h.append("<tr>"
                      f"<td><span class='pill {_sev_class(v.severity)}'>{_e(v.severity)}</span></td>"
                      f"<td>{_e(v.vuln_class)}</td>"
                      f"<td class='num'>{_e(v.count)}</td>"
+                     f"<td><span class='tag'>{_e(v.owasp or '—')}</span></td>"
+                     f"<td><span class='tag'>{_e(v.atlas or '—')}</span></td>"
                      f"<td>{_e(v.mitigation or '—')}</td></tr>")
         h.append("</tbody></table>")
 
@@ -207,6 +327,11 @@ def render_html(report: RedTeamReport) -> str:
                      f"{_e(v.vuln_class)} "
                      f"<span class='muted'>({_e(v.count)} breach"
                      f"{'es' if v.count != 1 else ''})</span></h3>")
+            if v.owasp or v.atlas:
+                if v.owasp:
+                    h.append(f"<span class='tag'>{_e(v.owasp)}</span>")
+                if v.atlas:
+                    h.append(f"<span class='tag'>{_e(v.atlas)}</span>")
             if v.mitigation:
                 h.append(f"<div class='mit'><strong>Mitigation:</strong> {_e(v.mitigation)}</div>")
             for aid in v.example_attempt_ids:
@@ -226,6 +351,21 @@ def render_html(report: RedTeamReport) -> str:
                 h.append("</div>")
             h.append("</div>")
 
+    # OWASP Top-10 (LLM) coverage table.
+    h.append("<h2>OWASP LLM Top-10 Coverage</h2>")
+    h.append("<p class='muted'>Coverage of OWASP Top-10 for LLM Applications categories in this run.</p>")
+    h.append("<table class='coverage'><thead><tr><th>OWASP Category</th>"
+             "<th>Tested</th><th>Breached</th></tr></thead><tbody>")
+    for row in _owasp_coverage(report):
+        t_cls = "yes" if row["tested"] else "no"
+        b_cls = "yes" if row["breached"] else "no"
+        t_glyph = "&#10003;" if row["tested"] else "&#10007;"
+        b_glyph = "&#10003;" if row["breached"] else "&#10007;"
+        h.append(f"<tr><td>{_e(row['owasp'])}</td>"
+                 f"<td class='{t_cls}'>{t_glyph}</td>"
+                 f"<td class='{b_cls}'>{b_glyph}</td></tr>")
+    h.append("</tbody></table>")
+
     h.append("</div></body></html>")
     return "\n".join(h)
 
@@ -234,4 +374,21 @@ def render_html(report: RedTeamReport) -> str:
 
 
 def render_json(report: RedTeamReport) -> dict:
-    return report.model_dump(mode="json")
+    """Return a plain dict representation of the report.
+
+    Extends the base model dump with two computed top-level keys:
+    - ``asr``: attack success rate as a float in [0, 1].
+    - ``coverage``: list of ``{owasp, tested, breached}`` for every OWASP
+      LLM Top-10 category present in the technique catalog.
+    """
+    d = report.model_dump(mode="json")
+    # Compute asr float (use stored value if present, else derive from stats).
+    st = report.stats or {}
+    asr = st.get("asr")
+    if asr is None:
+        attacks = st.get("attacks", len(report.attempts))
+        breaches = st.get("breaches", 0)
+        asr = breaches / attacks if attacks else 0.0
+    d["asr"] = float(asr)
+    d["coverage"] = _owasp_coverage(report)
+    return d

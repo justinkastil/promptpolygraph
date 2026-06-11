@@ -174,6 +174,7 @@ async def ws_redteam(
     config_name: str | None = Query(None),
     config_path: str | None = Query(None),
     mock: bool = Query(True),
+    sources: str | None = Query(None),
     key: str | None = Query(None),
 ) -> None:
     """Run a red-team and stream the live event feed to the browser Arena.
@@ -207,9 +208,11 @@ async def ws_redteam(
         await websocket.close(code=1011)
         return
 
+    src_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
+
     async def _drive() -> None:
         try:
-            await run_redteam(adapter, prof, emit=_emit, mock=mock)
+            await run_redteam(adapter, prof, emit=_emit, mock=mock, extra_sources=src_list)
         except Exception as exc:  # surface engine failures as a terminal error event
             loop.call_soon_threadsafe(
                 queue.put_nowait, RedTeamEvent(type="error", data={"detail": str(exc)})

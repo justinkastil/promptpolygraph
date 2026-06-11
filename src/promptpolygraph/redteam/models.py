@@ -34,6 +34,8 @@ class Attacker(BaseModel):
     intensity: str = "standard"        # mild | standard | aggressive
     persona: str = ""                  # behavioral flavor so same-model agents attack differently
     temperature: float = 0.9           # higher = more varied probes
+    mode: str = "escalate"             # escalate (default) | pair | crescendo (smart multi-turn)
+    converter: str | None = None       # optional probe transform (base64, rot13, many_shot, …)
 
 
 class BreachVerdict(BaseModel):
@@ -62,6 +64,8 @@ class Vulnerability(BaseModel):
     count: int
     example_attempt_ids: list[str] = Field(default_factory=list)
     mitigation: str = ""
+    owasp: str = ""                    # OWASP Top-10 for LLM Apps id (from the catalog)
+    atlas: str = ""                    # MITRE ATLAS technique id (indicative)
 
 
 class RedTeamProfile(BaseModel):
@@ -71,6 +75,7 @@ class RedTeamProfile(BaseModel):
     description: str = ""
     attackers: list[Attacker] = Field(default_factory=list)
     turns: int = 1                     # multi-turn escalation depth per attacker
+    judge_kind: str = "model"          # model (LLM reviewer) | llama_guard (safety classifier)
     judge_provider: str = "anthropic"
     judge_model: str | None = None
     judge_base_url: str | None = None

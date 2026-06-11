@@ -608,15 +608,29 @@ def cmd_redteam(cfg: Config, args) -> int:
     elif cfg.redteam.turns is not None:
         prof.turns = cfg.redteam.turns
     prof.target_description = cfg.redteam.target_description or cfg.domain
+    if getattr(args, "guard", False):
+        prof.judge_kind = "llama_guard"
 
-    adapter = build_adapter(cfg.adapter)
+    sources = (
+        [s.strip() for s in args.sources.split(",") if s.strip()]
+        if getattr(args, "sources", None) is not None
+        else list(cfg.redteam.sources)
+    )
+
+    try:
+        adapter = build_adapter(cfg.adapter)
+    except Exception:
+        # zero-config demo: fall back to the offline demo target (mirrors the Arena)
+        from .adapters import DemoAdapter
+        adapter = DemoAdapter(name="demo", style="everyday")
     print(_color(f"redteam: profile={prof.name} target={adapter.name} "
-                 f"mock={_is_mock(cfg)}", "dim"))
+                 f"mock={_is_mock(cfg)}" + (f" sources={','.join(sources)}" if sources else ""), "dim"))
 
     report = asyncio.run(
         run_redteam(
             adapter, prof, emit=_redteam_printer(),
             mock=_is_mock(cfg), concurrency=cfg.redteam.concurrency,
+            extra_sources=sources, source_count=cfg.redteam.source_count,
         )
     )
 
@@ -817,6 +831,10 @@ def build_parser() -> argparse.ArgumentParser:
     rtsub.add_parser("profiles", parents=[common], help="list built-in red-team profiles")
     prt.add_argument("--profile", help="built-in profile name (default: cfg.redteam.profile)")
     prt.add_argument("--turns", type=int, help="override escalation depth per attacker")
+    prt.add_argument("--sources", help="comma-separated OSS probe sources to fold in "
+                                       "(e.g. catalog,garak,pyrit,dataset:advbench)")
+    prt.add_argument("--guard", action="store_true",
+                     help="judge breaches with a Llama-Guard-style safety classifier instead of the LLM reviewer")
     prt.add_argument("--format", default="md,html", help="md,html,json")
 
     pall = sub.add_parser("all", parents=[common], help="run -> analyze -> audit -> report")
