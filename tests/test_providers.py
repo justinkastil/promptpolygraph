@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import urllib.error
 import urllib.request
 
 from promptpolygraph import ui
@@ -59,7 +60,6 @@ def test_providers_endpoint(tmp_path):
 def _post(base, path, body):
     req = urllib.request.Request(base + path, data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"}, method="POST")
-    import urllib.error
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, json.loads(r.read())
