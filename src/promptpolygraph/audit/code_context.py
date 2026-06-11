@@ -85,6 +85,52 @@ class CodeIndex:
             body += f"\n… (+{extra} more files)"
         return body
 
+    def window(
+        self,
+        rel: str,
+        center_line: int,
+        *,
+        before: int = 12,
+        after: int = 12,
+        max_bytes: int = 4_000,
+    ) -> str:
+        """Line-numbered window around ``center_line`` of a cited file.
+
+        Gives a suggested diff enough surrounding context to be applied by hand.
+        ``rel`` is a repo-relative path (as it appears in excerpts / the repo
+        map); ``center_line`` is 1-based. Returns "" when the file is unknown or
+        unreadable. The byte budget is bounded so this stays prompt-cheap.
+        """
+        match = next((p for r, p in self._files if r == rel), None)
+        if match is None:
+            # tolerate a path that differs only by leading "./" or separators
+            norm = rel.lstrip("./").replace("\\", "/")
+            match = next(
+                (p for r, p in self._files if r.lstrip("./").replace("\\", "/") == norm),
+                None,
+            )
+        if match is None:
+            return ""
+        try:
+            lines = match.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            return ""
+        if not lines:
+            return ""
+        center = max(1, min(int(center_line), len(lines)))
+        lo = max(0, center - 1 - max(0, before))
+        hi = min(len(lines), center + max(0, after))
+        out_lines: list[str] = []
+        size = 0
+        for n, line in enumerate(lines[lo:hi], start=lo + 1):
+            rendered = f"{n:>5}| {line}"
+            if size + len(rendered) + 1 > max_bytes:
+                out_lines.append("      | … (truncated)")
+                break
+            out_lines.append(rendered)
+            size += len(rendered) + 1
+        return "\n".join(out_lines)
+
     def _score(self, rel: str, terms: list[str]) -> int:
         path_l = rel.lower()
         sample = self._sample.get(rel, "")
@@ -160,6 +206,30 @@ def _excerpt(path: Path, terms: list[str], max_bytes: int) -> str:
         out_lines.append(rendered)
         size += len(rendered) + 1
     return "\n".join(out_lines)
+
+
+def file_window(
+    code_path: str | None,
+    rel: str,
+    center_line: int,
+    *,
+    index: CodeIndex | None = None,
+    before: int = 12,
+    after: int = 12,
+) -> str:
+    """Convenience wrapper around :meth:`CodeIndex.window`.
+
+    Returns a slightly larger surrounding window for a cited ``rel``:line so a
+    proposed diff has context. Degrades to "" when no path/source is available.
+    Pass a shared ``index`` to avoid re-walking the tree.
+    """
+    if index is None:
+        if not code_path:
+            return ""
+        index = CodeIndex(code_path)
+    if not index.ok or not index._files:
+        return ""
+    return index.window(rel, center_line, before=before, after=after)
 
 
 def build_code_context(

@@ -7,10 +7,12 @@ noise does not trip CI.
 
 from __future__ import annotations
 
+from statistics import median
 from typing import Any
 
 # Movement smaller than this (in score points) is treated as noise.
-_DELTA_BAND = 0.5
+DELTA_BAND = 0.5
+_DELTA_BAND = DELTA_BAND  # backward-compatible internal alias
 
 
 def diff_baseline(summary: dict[str, Any], baseline: dict[str, Any]) -> dict[str, Any]:
@@ -57,4 +59,50 @@ def diff_baseline(summary: dict[str, Any], baseline: dict[str, Any]) -> dict[str
         "by_category": by_category,
         "regressions": regressions,
         "improvements": improvements,
+    }
+
+
+def rolling_baseline_summary(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Collapse a window of run summaries into one baseline summary.
+
+    For each category/dimension the baseline value is the median of that
+    dimension's per-run means across the window (None values ignored). The
+    result is summary-shaped — `category_scores[cat][dim]` and `dimensions` —
+    so it can be passed straight into `diff_baseline(current, rolling)` to flag
+    rolling-window regressions. An empty window yields an empty baseline.
+    """
+    dimensions: list[str] = []
+    for summ in summaries:
+        for d in summ.get("dimensions") or []:
+            if d not in dimensions:
+                dimensions.append(d)
+
+    # Collect every category seen, preserving a stable sorted order.
+    cats: set[str] = set()
+    for summ in summaries:
+        cats |= set((summ.get("category_scores") or {}).keys())
+
+    category_scores: dict[str, dict[str, Any]] = {}
+    for cat in sorted(cats):
+        entry: dict[str, Any] = {}
+        counts: list[int] = []
+        for dim in dimensions:
+            vals: list[float] = []
+            for summ in summaries:
+                cat_entry = (summ.get("category_scores") or {}).get(cat) or {}
+                v = cat_entry.get(dim)
+                if v is not None:
+                    vals.append(float(v))
+            entry[dim] = float(median(vals)) if vals else None
+        for summ in summaries:
+            cat_entry = (summ.get("category_scores") or {}).get(cat) or {}
+            if cat_entry.get("count") is not None:
+                counts.append(int(cat_entry["count"]))
+        entry["count"] = max(counts) if counts else 0
+        category_scores[cat] = entry
+
+    return {
+        "dimensions": dimensions,
+        "category_scores": category_scores,
+        "window": len(summaries),
     }

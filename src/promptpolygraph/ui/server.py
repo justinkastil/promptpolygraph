@@ -140,6 +140,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_runs()
             return
 
+        if parts == ["api", "compare"]:
+            self._api_compare(query)
+            return
+
         if len(parts) >= 3 and parts[0] == "api" and parts[1] == "runs":
             run_id = parts[2]
             tail = parts[3] if len(parts) > 3 else None
@@ -216,6 +220,43 @@ class _Handler(BaseHTTPRequestHandler):
                 }
             )
         self._json(out)
+
+    def _api_compare(self, query: dict[str, list[str]]) -> None:
+        """Optional server-side comparison of N runs.
+
+        Best-effort and fully guarded: the dashboard UI builds its own
+        comparison client-side from ``/api/runs`` + ``/api/runs/{id}`` and never
+        depends on this endpoint. If ``promptpolygraph.compare.compare_runs`` is
+        importable we use it; otherwise we fall back to the package's pairwise
+        A/B over the first two run ids. Any failure yields an empty payload so a
+        caller can degrade gracefully.
+        """
+        raw = (query.get("runs", [""])[0] or "").strip()
+        ids = [r.strip() for r in raw.split(",") if r.strip()]
+        if len(ids) < 2:
+            self._json({"error": "compare needs >= 2 run ids"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            import promptpolygraph.compare as _cmp
+
+            store = self._open_store()
+            # Prefer an N-run helper if the package exposes one.
+            compare_runs = getattr(_cmp, "compare_runs", None)
+            if callable(compare_runs):
+                try:
+                    self._json(compare_runs(ids, store=store))  # type: ignore[call-arg]
+                    return
+                except Exception:
+                    pass  # fall through to pairwise
+            # Fallback: pairwise A/B over the first two runs.
+            a, b = ids[0], ids[1]
+            cases = store.get_cases(a)
+            scores_a = store.get_scores(a)
+            scores_b = store.get_scores(b)
+            result = _cmp.pairwise(cases, scores_a, scores_b, run_a=a, run_b=b)
+            self._json(result)
+        except Exception as exc:
+            self._json({"error": "compare unavailable", "detail": str(exc)}, status=HTTPStatus.NOT_FOUND)
 
     def _api_audit(self, run_id: str) -> None:
         afile = self.out_dir / run_id / "audit.json"

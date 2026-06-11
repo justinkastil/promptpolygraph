@@ -40,6 +40,12 @@ class AssertionSpec(BaseModel):
     value: Any = None
     flags: str = ""  # e.g. regex flags like "i"
     description: str = ""
+    # v0.3 (additive, all optional -> old specs validate unchanged):
+    weight: float = 1.0              # relative weight in the case's assertion score
+    threshold: float | None = None   # per-test pass threshold on a [0,1] value (None = boolean pass)
+    metric: str | None = None        # named metric this assertion contributes to
+    negate: bool = False             # invert pass/value (the "not-" modifier)
+    options: dict[str, Any] = Field(default_factory=dict)  # scorer-specific config
 
 
 class Case(BaseModel):
@@ -84,6 +90,10 @@ class AssertionResult(BaseModel):
     passed: bool
     description: str = ""
     detail: str = ""
+    # v0.3 (additive): continuous scorers carry a [0,1] value + weight + metric tag.
+    value: float | None = None
+    weight: float = 1.0
+    metric: str | None = None
 
 
 class Score(BaseModel):
@@ -105,6 +115,9 @@ class Score(BaseModel):
     judges: list[dict[str, Any]] = Field(default_factory=list)
     agreement: float | None = None
     verdict_pass: bool | None = None
+    # v0.3 (additive): weighted assertion aggregate + named/derived metric values.
+    assertion_score: float | None = None
+    metrics: dict[str, float | None] = Field(default_factory=dict)
 
 
 # ─── Rubric ───────────────────────────────────────────────────────────────
@@ -114,6 +127,7 @@ class Dimension(BaseModel):
     name: str
     description: str = ""
     anchors: dict[str, str] = Field(default_factory=dict)  # e.g. {"10": "...", "7-9": "..."}
+    metric: str | None = None  # v0.3 (additive): optional named-metric tag
 
 
 class Rubric(BaseModel):
@@ -174,6 +188,13 @@ class RunMeta(BaseModel):
     completed_cases: int = 0
     corpus_fingerprint: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
+    # v0.3 (additive) — run lineage for comparison/trend. All optional.
+    project: str = "default"
+    rubric_fingerprint: str | None = None
+    config_fingerprint: str | None = None
+    sut_git_sha: str | None = None      # git SHA of the system under test, if provided
+    sut_ref: str | None = None          # branch / tag / PR ref of the SUT
+    labels: dict[str, str] = Field(default_factory=dict)  # ci-run-id, actor, env, ...
 
 
 def fingerprint(cases: list[Case]) -> str:
@@ -187,4 +208,21 @@ def fingerprint(cases: list[Case]) -> str:
         (c.prompt, c.category, c.subcategory or "") for c in cases
     )
     blob = json.dumps(payload, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def rubric_fingerprint(rubric: "Rubric") -> str:
+    """Stable hash of the scoring rubric (cosmetic `notes` excluded), so two
+    runs are only score-comparable when they were graded the same way."""
+    payload = rubric.model_dump(mode="json")
+    payload.pop("notes", None)
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def config_fingerprint(config: dict[str, Any]) -> str:
+    """Stable hash of the run config, excluding fields that don't affect the
+    system-under-test's answers (output dir, mock flag)."""
+    norm = {k: v for k, v in (config or {}).items() if k not in ("out_dir", "mock")}
+    blob = json.dumps(norm, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]

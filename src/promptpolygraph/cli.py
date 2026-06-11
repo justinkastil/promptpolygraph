@@ -30,10 +30,20 @@ from . import audit as AU
 from . import corpus as C
 from . import persona as P
 from .adapters import build_adapter
+from .compare import compare_runs as compare_runs_fn
 from .compare import pairwise as pairwise_fn
+from .compare import trend as trend_fn
 from .config import Config
 from .llm import make_client
-from .models import Case, Response, RunMeta, Score, fingerprint
+from .models import (
+    Case,
+    Response,
+    RunMeta,
+    Score,
+    config_fingerprint,
+    fingerprint,
+    rubric_fingerprint,
+)
 from .report import build_report
 from .runner import SQLiteStore
 from .runner.runner import Runner, RunnerOptions, run_corpus
@@ -167,6 +177,11 @@ def cmd_run(cfg: Config, args) -> RunMeta:
         total_cases=len(cases),
         corpus_fingerprint=fingerprint(cases),
         config=cfg.model_dump(mode="json"),
+        project=os.environ.get("POLYGRAPH_PROJECT") or cfg.name or "default",
+        config_fingerprint=config_fingerprint(cfg.model_dump(mode="json")),
+        rubric_fingerprint=rubric_fingerprint(_rubric(cfg)),
+        sut_git_sha=os.environ.get("POLYGRAPH_SUT_GIT_SHA"),
+        sut_ref=os.environ.get("POLYGRAPH_SUT_REF"),
     )
     store.save_run(meta)
     store.save_cases(meta.run_id, cases)
@@ -223,12 +238,12 @@ def cmd_analyze(cfg: Config, run_id: str) -> dict:
         A.analyze_run(
             cases, responses, rubric,
             client=client, judges=cfg.analyze.judges, model=cfg.analyze.judge_model or cfg.model,
-            temperature=cfg.analyze.temperature, mock=_is_mock(cfg),
+            temperature=cfg.analyze.temperature, mock=_is_mock(cfg), config=cfg,
         )
     )
     for s in scores:
         store.save_score(run_id, s)
-    summary = A.summarize(cases, responses, scores, rubric)
+    summary = A.summarize(cases, responses, scores, rubric, config=cfg)
     _save_json(_run_dir(cfg, run_id) / "summary.json", summary)
     store.export_jsonl(run_id, _run_dir(cfg, run_id) / "cases.jsonl")
     _print_summary(summary)
@@ -269,7 +284,7 @@ def cmd_report(cfg: Config, run_id: str, formats: list[str], baseline_id: str | 
     rubric = _rubric(cfg)
     rd = _run_dir(cfg, run_id)
     summary_path = rd / "summary.json"
-    summary = json.loads(summary_path.read_text()) if summary_path.exists() else A.summarize(cases, responses, scores, rubric)
+    summary = json.loads(summary_path.read_text()) if summary_path.exists() else A.summarize(cases, responses, scores, rubric, config=cfg)
     audit_path = rd / "audit.json"
     audit = json.loads(audit_path.read_text()) if audit_path.exists() else None
     baseline_diff = None
@@ -291,15 +306,102 @@ def cmd_report(cfg: Config, run_id: str, formats: list[str], baseline_id: str | 
     return paths
 
 
-def cmd_compare(cfg: Config, run_a: str, run_b: str) -> dict:
+def cmd_compare(cfg: Config, args) -> dict:
     store = _store(cfg)
-    cases = store.get_cases(run_a)
-    pw = pairwise_fn(cases, store.get_scores(run_a), store.get_scores(run_b))
-    pw["run_a"], pw["run_b"] = run_a, run_b
-    _save_json(_run_dir(cfg, run_a) / f"pairwise_vs_{run_b}.json", pw)
-    print(f"A/B {run_a[:8]} vs {run_b[:8]}: "
-          f"wins_a={pw.get('wins_a')} wins_b={pw.get('wins_b')} ties={pw.get('ties')}")
-    return pw
+
+    # N-run mode (--runs id1,id2,...) takes precedence; falls back to --run-a/--run-b.
+    run_list = [r.strip() for r in args.runs.split(",") if r.strip()] if getattr(args, "runs", None) else []
+    if not run_list and getattr(args, "run_a", None) and getattr(args, "run_b", None):
+        run_list = [args.run_a, args.run_b]
+    if len(run_list) < 2:
+        raise SystemExit("compare requires --runs id1,id2[,...] or --run-a and --run-b")
+
+    report = compare_runs_fn(
+        store, run_list, cfg.out_dir, baseline_run_id=getattr(args, "baseline", None)
+    )
+
+    # Write the ComparisonReport against the chronologically-latest run dir.
+    latest = report["run_ids"][-1]
+    suffix = "_".join(r[:8] for r in report["run_ids"])
+    _save_json(_run_dir(cfg, latest) / f"comparison_{suffix}.json", report)
+
+    ov = report["overall"]
+    if "wins_a" in ov:
+        a, b = report["run_ids"]
+        print(f"A/B {a[:8]} vs {b[:8]}: wins_a={ov['wins_a']} wins_b={ov['wins_b']} ties={ov['ties']}")
+    else:
+        print(f"compared {len(report['run_ids'])} runs ({report['comparability']}):")
+        for row in ov["per_run"]:
+            print(f"  {row['run_id'][:8]}  pass={row['overall_pass']}  "
+                  f"{row['categories_passing']}/{row['categories_total']} categories")
+    print(f"regressions={len(report['regressions'])}  improvements={len(report['improvements'])}")
+    return report
+
+
+def cmd_trend(cfg: Config, args) -> list:
+    store = _store(cfg)
+    blocks = trend_fn(
+        store,
+        project=getattr(args, "project", None),
+        out_dir=cfg.out_dir,
+        window=getattr(args, "window", 30) or 30,
+    )
+    out = Path(cfg.out_dir).expanduser() / "trend.json"
+    _save_json(out, blocks)
+    print(f"trend over project={args.project or '(latest corpus)'} window={args.window}: "
+          f"{len(blocks)} categories -> {out}")
+    for blk in blocks:
+        for dim in blk["dimensions"]:
+            slope = dim["slope"]
+            if slope is None:
+                continue
+            arrow = "↑" if slope > 0 else ("↓" if slope < 0 else "→")
+            print(f"  {blk['category']:<18} {dim['dimension']:<12} slope={slope:+.3f}/run {arrow}")
+    return blocks
+
+
+def cmd_regressions(cfg: Config, args) -> dict:
+    store = _store(cfg)
+    rd = _run_dir(cfg, args.run)
+    cur_path = rd / "summary.json"
+    if cur_path.exists():
+        current = json.loads(cur_path.read_text())
+    else:
+        cases = store.get_cases(args.run)
+        current = A.summarize(cases, store.get_responses(args.run), store.get_scores(args.run), _rubric(cfg), config=cfg)
+
+    against = args.against
+    if against.startswith("rolling:"):
+        n = int(against.split(":", 1)[1] or "5")
+        meta = store.get_run(args.run)
+        fp = meta.corpus_fingerprint if meta else None
+        # Most recent comparable runs strictly before `args.run`, newest-first.
+        prior = [
+            m for m in store.list_runs()
+            if m.run_id != args.run and (fp is None or m.corpus_fingerprint == fp)
+        ]
+        prior.sort(key=lambda m: m.created_at or "", reverse=True)
+        window = prior[:n]
+        summaries = []
+        for m in window:
+            p = _run_dir(cfg, m.run_id) / "summary.json"
+            if p.exists():
+                summaries.append(json.loads(p.read_text()))
+        baseline = A.rolling_baseline_summary(summaries)
+        label = f"rolling:{len(summaries)}"
+    else:
+        bpath = _run_dir(cfg, against) / "summary.json"
+        baseline = json.loads(bpath.read_text()) if bpath.exists() else {}
+        label = against[:8]
+
+    diff = A.diff_baseline(current, baseline)
+    out = rd / f"regressions_vs_{label.replace(':', '_')}.json"
+    _save_json(out, diff)
+    print(f"regressions {args.run[:8]} vs {label}: "
+          f"{len(diff['regressions'])} regressions, {len(diff['improvements'])} improvements -> {out}")
+    for r in diff["regressions"]:
+        print(f"  ↓ {r['category']}/{r['dimension']}: {r['baseline']:.2f} -> {r['current']:.2f} ({r['delta']:+.2f})")
+    return diff
 
 
 def cmd_personas(cfg: Config, args) -> None:
@@ -514,9 +616,19 @@ def build_parser() -> argparse.ArgumentParser:
     prp.add_argument("--format", default="md,html")
     prp.add_argument("--baseline", help="prior run id for delta columns")
 
-    pc = sub.add_parser("compare", parents=[common], help="A/B two runs")
-    pc.add_argument("--run-a", dest="run_a", required=True)
-    pc.add_argument("--run-b", dest="run_b", required=True)
+    pc = sub.add_parser("compare", parents=[common], help="compare N runs (A/B or trend matrix)")
+    pc.add_argument("--run-a", dest="run_a", help="first run (A/B mode)")
+    pc.add_argument("--run-b", dest="run_b", help="second run (A/B mode)")
+    pc.add_argument("--runs", help="comma-separated run ids for an N-run comparison")
+    pc.add_argument("--baseline", help="baseline run id for regression/delta classification")
+
+    ptr = sub.add_parser("trend", parents=[common], help="longitudinal trend over a project's runs")
+    ptr.add_argument("--project", help="project to trend (default: latest corpus)")
+    ptr.add_argument("--window", type=int, default=30, help="most-recent runs to include")
+
+    prg = sub.add_parser("regressions", parents=[common], help="regressions of a run vs a baseline")
+    prg.add_argument("--run", required=True, help="run to evaluate")
+    prg.add_argument("--against", required=True, help="baseline run id, or 'rolling:N'")
 
     pp = sub.add_parser("personas", parents=[common], help="manage personas")
     psub = pp.add_subparsers(dest="persona_cmd", required=True)
@@ -590,7 +702,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "report":
         cmd_report(cfg, args.run, args.format.split(","), baseline_id=args.baseline)
     elif args.cmd == "compare":
-        cmd_compare(cfg, args.run_a, args.run_b)
+        cmd_compare(cfg, args)
+    elif args.cmd == "trend":
+        cmd_trend(cfg, args)
+    elif args.cmd == "regressions":
+        cmd_regressions(cfg, args)
     elif args.cmd == "personas":
         cmd_personas(cfg, args)
     elif args.cmd == "dashboard":

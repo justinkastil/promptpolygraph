@@ -65,6 +65,7 @@ class HTTPAdapter(BaseAdapter):
         tokens_in_path: str | None = None,
         tokens_out_path: str | None = None,
         model_path: str | None = None,
+        cost_path: str | None = None,
         timeout: float = 60.0,
         **_: Any,
     ):
@@ -77,6 +78,7 @@ class HTTPAdapter(BaseAdapter):
         self._tokens_in_path = tokens_in_path
         self._tokens_out_path = tokens_out_path
         self._model_path = model_path
+        self._cost_path = cost_path
         self._client = httpx.AsyncClient(timeout=timeout)
 
     async def query(self, case: Case) -> Response:
@@ -104,6 +106,7 @@ class HTTPAdapter(BaseAdapter):
             latency_ms=self._elapsed_ms(start),
             tokens_in=_search_int(self._tokens_in_path, data),
             tokens_out=_search_int(self._tokens_out_path, data),
+            cost_usd=_search_float(self._cost_path, data),
             model=_search_str(self._model_path, data),
             source=self.name,
             raw=data if isinstance(data, dict) else {"body": data},
@@ -128,3 +131,13 @@ def _search_str(path: str | None, data: Any) -> str | None:
         return None
     v = jmespath.search(path, data)
     return str(v) if v is not None else None
+
+
+def _search_float(path: str | None, data: Any) -> float | None:
+    if not path:
+        return None
+    v = jmespath.search(path, data)
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None

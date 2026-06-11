@@ -39,11 +39,50 @@ class RunConfig(BaseModel):
     resume: bool = True
 
 
+class MetricSpec(BaseModel):
+    """A named/derived metric. `formula` is a safe expression over named metrics
+    + dimension means (e.g. "2*precision*recall/(precision+recall+1e-9)" for F1)."""
+
+    name: str
+    formula: str | None = None  # None = a plain named metric aggregated from scorers
+    aggregate: str = "mean"  # mean | min | max | p50 | p95 | rate
+    threshold: float | None = None  # if set, the metric participates in the gate
+
+
+# A loose mirror of models.AssertionSpec for config-declared shared assertions
+# (kept here to avoid a config->models import cycle; coerced to AssertionSpec downstream).
+class AssertionSpecModel(BaseModel):
+    kind: str
+    value: Any = None
+    flags: str = ""
+    description: str = ""
+    weight: float = 1.0
+    threshold: float | None = None
+    metric: str | None = None
+    negate: bool = False
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScorersConfig(BaseModel):
+    # Custom-code (python/callable) assertion sandbox: disabled (CI-safe default) |
+    # expr (AST-restricted expression) | subprocess (separate process, timeout).
+    sandbox: str = "disabled"
+    shared: list[AssertionSpecModel] = Field(default_factory=list)  # assertions applied to every case
+
+
+class EmbeddersConfig(BaseModel):
+    provider: str = "mock"  # mock (deterministic offline) | openai
+    model: str | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
 class AnalyzeConfig(BaseModel):
     rubric: str | None = None  # path to rubric.yaml
     judges: int = 1  # ensemble size
     judge_model: str | None = None
     temperature: float = 0.0
+    dimension_weights: dict[str, float] = Field(default_factory=dict)  # weighted-gate dims
+    gate_mode: str = "strict"  # strict (every applicable dim >= threshold) | weighted
 
 
 class ReportConfig(BaseModel):
@@ -71,6 +110,9 @@ class Config(BaseModel):
     analyze: AnalyzeConfig = Field(default_factory=AnalyzeConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
+    scorers: ScorersConfig = Field(default_factory=ScorersConfig)
+    embedders: EmbeddersConfig = Field(default_factory=EmbeddersConfig)
+    metrics: list[MetricSpec] = Field(default_factory=list)  # named/derived metrics
     personas_path: str | None = None  # a personas.yaml for this run
     out_dir: str = "polygraph_out"
     model: str | None = None  # default model for judges/audit/generation
