@@ -1514,7 +1514,7 @@ function renderNewRun(configs, pfiles) {
     + '<div class="field"><label>Mode' + tip(TIP_MODE) + '</label><select id="nr-mode">'
       + ['','fixed','varied','adversarial','hybrid'].map(m => '<option value="' + m + '">' + (m || "inherit from config") + '</option>').join("")
       + '</select><span class="field-hint">How prompts are sourced for the run.</span></div>'
-    + '<div class="field"><label>Count (varied / adversarial)' + tip(TIP_PERCAT) + '</label><input type="number" id="nr-count" min="1" placeholder="inherit from config">'
+    + '<div class="field"><label>Count' + tip(TIP_PERCAT) + '</label><input type="number" id="nr-count" min="1" placeholder="inherit from config">'
       + '<span class="field-hint">Total prompts to generate.</span></div>'
     + '<div class="field"><label>Per category' + tip(TIP_PERCAT) + '</label><input type="number" id="nr-percat" min="1" placeholder="inherit from config">'
       + '<span class="field-hint">Prompts for each category.</span></div>'

@@ -606,7 +606,7 @@ function initStatusPill(readyUrl) {
     var live = (h.status === "live");
     pill.classList.remove("live", "mock");
     pill.classList.add(live ? "live" : "mock");
-    txt.textContent = live ? "Live" : "Mock-only (offline)";
+    txt.textContent = live ? "Live" : "Mock";  // short label; full detail in the tooltip
     var provs = h.providers || [];
     var lines = [];
     if (live) lines.push("Live — at least one model backend is wired.");
