@@ -6,6 +6,8 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-11
+
 ### Added
 - **Control-plane dashboard** — launch runs from the UI (pick a config + dials +
   persona panel, watch live progress), not just browse them.
@@ -58,6 +60,7 @@ Initial public release.
 - Deployable service: FastAPI API + worker + Postgres job queue + scheduler + webhooks
   + dashboard; one Docker image, AWS/GCP deploy guides; CI workflow.
 
-[Unreleased]: https://github.com/justinkastil/promptpolygraph/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/justinkastil/promptpolygraph/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.4.0
 [0.3.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.3.0
 [0.1.1]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.1.1
