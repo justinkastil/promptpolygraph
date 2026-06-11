@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import queue
 import re
 import threading
 import webbrowser
@@ -20,8 +21,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
+from .arena import render_arena_page
 from .page import PAGE
 
 # ── Control-plane state ─────────────────────────────────────────────────────
@@ -185,6 +187,14 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path == "/" or path == "/index.html":
             self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            return
+
+        if path == "/redteam":
+            self._redteam_page(query)
+            return
+
+        if path == "/api/redteam/stream":
+            self._api_redteam_stream(query)
             return
 
         if not path.startswith("/api/"):
@@ -700,6 +710,149 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
         self._json({"panel": [p.model_dump() for p in panel], "path": str(path)})
+
+    # ---- red-team arena -------------------------------------------------
+    def _redteam_page(self, query: dict[str, list[str]]) -> None:
+        """Serve the Arena page, wiring its SSE URL to the requested run.
+
+        Any ``profile`` / ``config_name`` / ``config_path`` / ``mock`` query
+        params are passed straight through to the stream URL so the page opens
+        the right stream.
+        """
+        passthrough: list[tuple[str, str]] = []
+        for key in ("profile", "config_name", "config_path", "mock"):
+            vals = query.get(key)
+            if vals and vals[0] != "":
+                passthrough.append((key, vals[0]))
+        qs = ("?" + urlencode(passthrough)) if passthrough else ""
+        stream_url = "/api/redteam/stream" + qs
+        try:
+            html = render_arena_page(stream_url=stream_url, transport="sse")
+        except Exception as exc:  # never 500 the page on a render glitch
+            self._json({"error": "could not render arena", "detail": str(exc)}, status=500)
+            return
+        self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def _redteam_target(self, query: dict[str, list[str]]) -> Any:
+        """Build the target adapter for a stream from query params.
+
+        Defaults to an everyday-style DemoAdapter (runs offline). If a config is
+        named/pathed and resolvable, builds the configured adapter instead.
+        """
+        from promptpolygraph.adapters import DemoAdapter, build_adapter
+        from promptpolygraph.config import Config
+
+        cfg_path = None
+        cp = (query.get("config_path", [""])[0] or "").strip()
+        if cp:
+            p = Path(cp).expanduser()
+            if p.is_file():
+                cfg_path = str(p.resolve())
+        if cfg_path is None:
+            name = (query.get("config_name", [""])[0] or "").strip()
+            if name:
+                cfg_path = self._resolve_config_path({"config_name": name})
+        if cfg_path:
+            try:
+                return build_adapter(Config.load(cfg_path).adapter)
+            except Exception:
+                pass  # fall back to the demo target
+        return DemoAdapter(style="everyday")
+
+    def _api_redteam_stream(self, query: dict[str, list[str]]) -> None:
+        """Stream a red-team run as Server-Sent Events.
+
+        Runs ``run_redteam`` in a worker thread whose ``emit`` callback pushes
+        ``RedTeamEvent`` frames into a queue; this handler drains the queue and
+        writes ``ev.to_sse()`` frames until a terminal ``done``/``error`` event,
+        then closes. The worker never blocks the server, and a client disconnect
+        is tolerated (the next write raises and we stop).
+        """
+        from promptpolygraph.redteam import RedTeamEvent, get_profile, run_redteam
+
+        profile_name = (query.get("profile", ["all_frontier"])[0] or "all_frontier").strip() or "all_frontier"
+        mock_raw = (query.get("mock", ["1"])[0] or "1").strip().lower()
+        mock = mock_raw not in ("0", "false", "no", "")
+        mock = _want_mock(mock)  # force offline when no key is configured
+        sources = [s.strip() for s in (query.get("sources", [""])[0] or "").split(",") if s.strip()]
+
+        try:
+            profile = get_profile(profile_name)
+        except Exception:
+            profile = get_profile("all_frontier")
+
+        try:
+            adapter = self._redteam_target(query)
+        except Exception:
+            from promptpolygraph.adapters import DemoAdapter
+
+            adapter = DemoAdapter(style="everyday")
+
+        # Open the SSE response.
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+        except Exception:
+            return
+
+        evq: queue.Queue[Any] = queue.Queue(maxsize=2048)
+        _SENTINEL = object()
+
+        def _emit(ev: RedTeamEvent) -> None:
+            try:
+                evq.put(ev, timeout=5.0)
+            except Exception:
+                pass  # drop on backpressure rather than stall the worker
+
+        def _worker() -> None:
+            try:
+                asyncio.run(run_redteam(adapter, profile, emit=_emit, mock=mock, concurrency=4,
+                                        extra_sources=sources))
+            except Exception as exc:
+                try:
+                    evq.put(RedTeamEvent(type="error", text=str(exc),
+                                         data={"message": str(exc)}), timeout=2.0)
+                except Exception:
+                    pass
+            finally:
+                try:
+                    evq.put(_SENTINEL, timeout=2.0)
+                except Exception:
+                    pass
+
+        worker = threading.Thread(target=_worker, daemon=True)
+        worker.start()
+
+        # Drain the queue -> SSE frames. Stop on the sentinel, a terminal event,
+        # or a client disconnect (write raises).
+        try:
+            # An initial comment frame opens the pipe promptly for the client.
+            self.wfile.write(b": arena stream open\n\n")
+            self.wfile.flush()
+            while True:
+                try:
+                    item = evq.get(timeout=30.0)
+                except queue.Empty:
+                    # heartbeat so proxies/clients keep the connection
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
+                    if not worker.is_alive() and evq.empty():
+                        break
+                    continue
+                if item is _SENTINEL:
+                    break
+                self.wfile.write(item.to_sse().encode("utf-8"))
+                self.wfile.flush()
+                if getattr(item, "type", None) in ("done", "error"):
+                    break
+        except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
+            pass  # client went away — let the daemon worker finish on its own
+        except Exception:
+            pass
 
     # ---- quiet logging --------------------------------------------------
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003

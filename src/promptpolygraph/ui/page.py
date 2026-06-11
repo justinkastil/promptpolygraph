@@ -157,7 +157,7 @@ PAGE: str = r"""<!DOCTYPE html>
 
   /* ── control plane ── */
   header.top .navtabs { display: flex; gap: 2px; }
-  header.top .navtab { padding: 5px 12px; cursor: pointer; color: var(--muted); border-radius: 7px; font-weight: 600; font-size: 13px; }
+  header.top .navtab { padding: 5px 12px; cursor: pointer; color: var(--muted); border-radius: 7px; font-weight: 600; font-size: 13px; text-decoration: none; }
   header.top .navtab:hover { background: var(--panel-2); color: var(--text); }
   header.top .navtab.active { color: var(--text); background: var(--panel-2); }
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; padding: 14px 16px; }
@@ -212,6 +212,7 @@ PAGE: str = r"""<!DOCTYPE html>
     <span class="navtab" id="nav-runs" onclick="showRuns()">Runs</span>
     <span class="navtab" id="nav-newrun" onclick="showNewRun()">New run</span>
     <span class="navtab" id="nav-personas" onclick="showPersonas()">Personas</span>
+    <a class="navtab" id="nav-redteam" href="/redteam">Red Team</a>
   </span>
   <span class="spacer"></span>
   <span class="crumb" id="crumb" onclick="showRuns()">All runs</span>

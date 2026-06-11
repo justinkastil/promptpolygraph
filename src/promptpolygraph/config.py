@@ -97,6 +97,18 @@ class AnalyzeConfig(BaseModel):
     gate_mode: str = "strict"  # strict (every applicable dim >= threshold) | weighted
 
 
+class RedTeamConfig(BaseModel):
+    profile: str = "all_frontier"   # out-of-the-box team (a built-in profile name or a custom one)
+    turns: int | None = None        # override the profile's escalation depth
+    concurrency: int = 4
+    target_description: str | None = None  # context handed to attackers + judge
+    # External probe sources run through the same target->judge loop as the LLM
+    # attackers. "catalog" is always available (no deps); garak / pyrit / deepteam
+    # / dataset:* register when the optional `[redteam]` extra is installed.
+    sources: list[str] = Field(default_factory=list)
+    source_count: int = 25          # max probes drawn from each external source
+
+
 class ReportConfig(BaseModel):
     template: str = "default"  # built-in template set: default | minimal
     template_dir: str | None = None  # a custom template directory (overrides built-in)
@@ -122,6 +134,7 @@ class Config(BaseModel):
     analyze: AnalyzeConfig = Field(default_factory=AnalyzeConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
+    redteam: RedTeamConfig = Field(default_factory=RedTeamConfig)
     scorers: ScorersConfig = Field(default_factory=ScorersConfig)
     embedders: EmbeddersConfig = Field(default_factory=EmbeddersConfig)
     metrics: list[MetricSpec] = Field(default_factory=list)  # named/derived metrics
