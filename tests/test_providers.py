@@ -54,3 +54,32 @@ def test_providers_endpoint(tmp_path):
         data = json.loads(r.read())
     assert isinstance(data, list)
     assert {p["id"] for p in data} >= {"anthropic", "openai", "ollama"}
+
+
+def _post(base, path, body):
+    req = urllib.request.Request(base + path, data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    import urllib.error
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+
+def test_health_status(tmp_path):
+    base = _start(tmp_path)
+    with urllib.request.urlopen(base + "/api/health", timeout=5) as r:
+        h = json.loads(r.read())
+    assert h["status"] in ("live", "mock")
+    assert isinstance(h["any_provider"], bool) and h["mock_only"] == (not h["any_provider"])
+    assert h["providers"]
+
+
+def test_adapter_test_demo_ok_and_custom_not_wired(tmp_path):
+    base = _start(tmp_path)
+    st, ok = _post(base, "/api/adapter/test", {"adapter": {"type": "demo"}})
+    assert st == 200 and ok["ok"] is True and ok["name"]
+    # a custom (callable) adapter with no fn must report it's not wired
+    st, bad = _post(base, "/api/adapter/test", {"adapter": {"type": "callable"}})
+    assert st == 200 and bad["ok"] is False and "wired" in bad["error"].lower()

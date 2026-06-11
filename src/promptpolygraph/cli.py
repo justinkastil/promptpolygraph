@@ -469,6 +469,16 @@ def cmd_init(cfg: Config, args) -> int:
             print(_color(f"      models: {', '.join(p.get('models') or []) or '—'}", "dim"))
             available.append(p)
 
+    if available:
+        print(_color("\nstatus: ● ready — runs live on a configured provider", "green"))
+    else:
+        print(_color("\nstatus: ● mock-only — set a key or start Ollama to run live", "yellow"))
+
+    print(_color("target (system under test):", "bold"))
+    print("  configure `adapter:` in your config — type: demo (offline sample) | llm (a model) | "
+          "http (a web API) | callable (your own module:function for a custom integration).")
+    print(_color("  the dashboard's New-run screen has a 'Test connection' button to verify it (green = good to go).", "dim"))
+
     default = available[0] if available else None
     out = Path(args.out or "promptpolygraph.yaml").expanduser()
     if out.exists() and not args.force:
@@ -781,12 +791,19 @@ def _load_cfg(args) -> Config:
 
 
 def _add_corpus_dials(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--mode", choices=["fixed", "varied", "adversarial", "hybrid"])
-    p.add_argument("--count", type=int)
-    p.add_argument("--per-category", dest="per_category", type=int)
-    p.add_argument("--categories")
-    p.add_argument("--difficulty", choices=["mild", "standard", "aggressive"])
-    p.add_argument("--concurrency", type=int)
+    p.add_argument("--mode", choices=["fixed", "varied", "adversarial", "hybrid"],
+                   help="fixed: load a saved set (reproducible) · varied: LLM-generate fresh prompts · "
+                        "adversarial: red-team/edge prompts · hybrid: fixed core + generated supplement")
+    p.add_argument("--count", type=int, help="total prompts to generate (alternative to --per-category)")
+    p.add_argument("--per-category", dest="per_category", type=int,
+                   help="prompts per category (varied/adversarial)")
+    p.add_argument("--categories", help="comma-separated category names to cover")
+    p.add_argument("--difficulty", choices=["mild", "standard", "aggressive"],
+                   help="adversarial pressure level for generated probes")
+    p.add_argument("--concurrency", type=int, help="parallel in-flight requests to the target")
+    p.add_argument("--seed", type=int,
+                   help="fix the RNG so 'varied' generation is reproducible (same seed => same prompts); "
+                        "omit for fresh prompts each run")
     p.add_argument("--domain", help="one-line description of the system under test; tailors generated prompts")
 
 
