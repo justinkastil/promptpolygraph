@@ -6,6 +6,17 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-11
+
+### Added
+- **Corpus export in the dashboard** — a run's prompt corpus downloads as JSON,
+  JSONL, or CSV from the run detail view (the UI face of `polygraph export`),
+  with a `prompts_only` option. New `GET /api/runs/{id}/corpus` endpoint.
+- **Persona-panel export in the studio** — saved persona panels download as YAML
+  from the Persona studio. New `GET /api/personas/files/download` endpoint,
+  bounded to the studio's saved files + bundled example panels (no arbitrary
+  file reads).
+
 ## [0.5.0] - 2026-06-11
 
 ### Added

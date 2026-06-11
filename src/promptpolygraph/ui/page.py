@@ -819,6 +819,8 @@ function renderDetail(run, summary, cases) {
     + '<a class="btn" target="_blank" href="/api/runs/' + esc(run.run_id) + '/report?format=md">Report (Markdown)</a>'
     + '<a class="btn" href="/api/runs/' + esc(run.run_id) + '/report?format=pdf">Download PDF</a>'
     + '<a class="btn" href="/api/runs/' + esc(run.run_id) + '/report?format=docx">Download DOCX</a>'
+    + '<a class="btn" href="/api/runs/' + esc(run.run_id) + '/corpus?format=json">Export corpus (JSON)</a>'
+    + '<a class="btn" href="/api/runs/' + esc(run.run_id) + '/corpus?format=csv">Corpus (CSV)</a>'
     + '</div>';
 
   const tabs =
@@ -1458,6 +1460,7 @@ function renderPersonaStudio(lib, files) {
     filesHtml = '<ul class="filelist">' + files.map(f =>
       '<li><b>' + esc(f.name) + '</b> <span class="tag-mono">' + esc(f.path) + '</span>'
       + '<span class="spacer" style="flex:1"></span>'
+      + '<a class="btn" href="/api/personas/files/download?path=' + encodeURIComponent(f.path) + '">Export YAML</a>'
       + '<button class="btn" onclick="usePersonaFile(\'' + esc(f.path) + '\')">Use in new run</button></li>'
     ).join("") + '</ul>';
   } else {
