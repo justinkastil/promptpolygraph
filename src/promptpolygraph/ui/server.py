@@ -231,6 +231,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_corpus_dir_export(query)
             return
 
+        if parts == ["api", "corpus", "generate", "stream"]:
+            self._api_corpus_generate_stream(query)
+            return
+
         if parts == ["api", "redteam", "runs"]:
             self._api_redteam_runs()
             return
@@ -1060,6 +1064,117 @@ class _Handler(BaseHTTPRequestHandler):
             "provider": "mock" if mock else provider,
             "preview": [{"prompt": c.prompt, "category": c.category} for c in cases[:40]],
         })
+
+    def _api_corpus_generate_stream(self, query: dict[str, list[str]]) -> None:
+        """Generate a corpus and stream progress as SSE: plan -> batch/prompt … ->
+        result. Lets the Studio show generation steps + prompts appearing live."""
+        from promptpolygraph.config import CorpusConfig
+        from promptpolygraph.corpus import build_corpus
+
+        def q1(k: str, d: str = "") -> str:
+            return (query.get(k, [d])[0] or d)
+
+        def qint(k: str) -> int | None:
+            v = q1(k)
+            try:
+                return int(v) if v not in ("", None) else None
+            except (TypeError, ValueError):
+                return None
+
+        mode = q1("mode", "varied").strip() or "varied"
+        domain = q1("domain").strip() or None
+        provider = (q1("provider", "anthropic").strip().lower()) or "anthropic"
+        model = q1("model") or None
+        base_url = q1("base_url") or None
+        difficulty = q1("difficulty", "standard").strip() or "standard"
+        cats = [c.strip() for c in q1("categories").split(",") if c.strip()]
+        mock = q1("mock", "1").strip().lower() not in ("0", "false", "no", "")
+        mock = _want_mock(mock)
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(model, provider=provider, base_url=base_url)
+            except Exception:
+                client, mock = None, True
+        cfg = CorpusConfig(mode=mode, count=qint("count"), per_category=qint("per_category"),
+                           categories=cats, difficulty=difficulty, seed=qint("seed"))
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+        except Exception:
+            return
+
+        evq: queue.Queue[Any] = queue.Queue(maxsize=4096)
+        _SENTINEL = object()
+
+        def _frame(stage: str, data: dict) -> bytes:
+            return f"event: {stage}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode("utf-8")
+
+        def _prog(stage: str, info: dict) -> None:
+            try:
+                evq.put((stage, info), timeout=5.0)
+            except Exception:
+                pass
+
+        def _worker() -> None:
+            try:
+                cases = build_corpus(cfg, resolve=lambda p: p, client=client, mock=mock,
+                                     domain=domain, progress=_prog)
+                slug = _slugify(domain or mode, fallback="corpus")
+                out = self._corpus_dir() / slug
+                out.mkdir(parents=True, exist_ok=True)
+                by_cat: dict[str, list[dict]] = {}
+                for c in cases:
+                    by_cat.setdefault(c.category, []).append(c.model_dump(mode="json"))
+                for cat, rows in by_cat.items():
+                    (out / f"{cat}.json").write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+                evq.put(("result", {
+                    "path": str(out), "count": len(cases),
+                    "categories": {k: len(v) for k, v in by_cat.items()},
+                    "mode": mode, "provider": "mock" if mock else provider,
+                    "preview": [{"prompt": c.prompt, "category": c.category} for c in cases[:40]],
+                }), timeout=5.0)
+            except Exception as exc:
+                try:
+                    evq.put(("error", {"error": str(exc)}), timeout=2.0)
+                except Exception:
+                    pass
+            finally:
+                try:
+                    evq.put(_SENTINEL, timeout=2.0)
+                except Exception:
+                    pass
+
+        worker = threading.Thread(target=_worker, daemon=True)
+        worker.start()
+        try:
+            self.wfile.write(b": corpus stream open\n\n")
+            self.wfile.flush()
+            while True:
+                try:
+                    item = evq.get(timeout=30.0)
+                except queue.Empty:
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
+                    if not worker.is_alive() and evq.empty():
+                        break
+                    continue
+                if item is _SENTINEL:
+                    break
+                stage, data = item
+                self.wfile.write(_frame(stage, data))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
+            pass
+        except Exception:
+            pass
 
     def _api_corpus_dir_export(self, query: dict[str, list[str]]) -> None:
         """Download a generated corpus dir as json | jsonl | csv. Bounded to

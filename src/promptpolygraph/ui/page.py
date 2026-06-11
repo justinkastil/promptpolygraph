@@ -212,6 +212,17 @@ PAGE: str = r"""<!DOCTYPE html>
   .corpus-preview .pitem { padding: 4px 12px 4px 22px; white-space: pre-wrap; word-break: break-word; font-size: 13px; border-top: 1px dashed var(--border); }
   .corpus-summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 16px 2px; }
   .corpus-summary .cchip { font-size: 11.5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
+  .cg-stream { margin: 6px 16px 12px; }
+  .cg-stream .cg-prog-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .cg-stream .cg-prog-note { font-size: 12.5px; color: var(--text); font-weight: 600; }
+  .cg-stream .cg-prog-count { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .cg-bar { height: 6px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden; }
+  .cg-bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .18s ease; }
+  .cg-live { max-height: 300px; overflow: auto; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+  .cg-live .cg-row { padding: 6px 12px; border-top: 1px dashed var(--border); white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+  .cg-live .cg-row:first-child { border-top: none; }
+  .cg-live .cg-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); margin-right: 8px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); }
+  .cg-live .empty { padding: 14px 12px; }
   .selpath { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 16px 10px; }
   .selpath .tag-mono { color: var(--accent); }
 </style>
@@ -500,9 +511,13 @@ let launchProgressTimer = null; // poll timer for an in-flight launched run
 let selectedPersonaPath = "";   // persona file fed into the New Run panel
 let selectedCorpusPath = "";    // generated corpus dir fed into the New Run panel
 let studioTab = "prompts";      // Studio sub-tab: "prompts" | "personas"
-let lastCorpusResult = null;    // last /api/corpus/generate response, for re-render
+let lastCorpusResult = null;    // last corpus-stream result frame, for re-render
+let corpusStream = null;        // live EventSource for the generator, or null when idle
 
-function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+function stopPoll() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  closeCorpusStream();  // any view transition also abandons a live generator stream
+}
 
 function setNav(active) {
   document.querySelectorAll("#navtabs .navtab").forEach(el => el.classList.remove("active"));
@@ -1466,6 +1481,7 @@ function renderStudio() {
 }
 
 function setStudioTab(t) {
+  closeCorpusStream();  // leaving (or re-entering) the sub-tab abandons any live generator
   studioTab = t;
   document.querySelectorAll(".subtab").forEach(el => el.classList.remove("active"));
   document.querySelectorAll(".subtab").forEach(el => {
@@ -1517,42 +1533,159 @@ function renderPromptStudio() {
   if (lastCorpusResult) drawCorpusResult(lastCorpusResult);
 }
 
-async function generateCorpus() {
+// Close + forget any live generator stream. Safe to call repeatedly; used by
+// Cancel, by terminal/error events, and as a guard when leaving the sub-tab.
+function closeCorpusStream() {
+  if (corpusStream) {
+    try { corpusStream.close(); } catch (e) { /* already closed */ }
+    corpusStream = null;
+  }
+}
+
+function setGenBtnGenerating(on) {
   const btn = document.getElementById("cg-gen-btn");
+  if (!btn) return;
+  if (on) { btn.classList.add("disabled-btn"); btn.textContent = "Generating…"; }
+  else { btn.classList.remove("disabled-btn"); btn.textContent = "Generate corpus"; }
+}
+
+function cancelCorpusStream() {
+  closeCorpusStream();
+  setGenBtnGenerating(false);
+  const note = document.getElementById("cg-prog-note");
+  if (note) note.textContent = "Stopped.";
+  const cancel = document.getElementById("cg-cancel-btn");
+  if (cancel) cancel.remove();
+}
+
+function generateCorpus() {
   const out = document.getElementById("cg-result");
-  if (btn) { btn.classList.add("disabled-btn"); btn.textContent = "Generating…"; }
-  if (out) out.innerHTML = '<div class="empty">Generating corpus…</div>';
-  const numOrNull = id => {
+  if (!out) return;
+  // a generation is already streaming — ignore double-clicks
+  if (corpusStream) return;
+  closeCorpusStream();
+
+  const numOrParam = id => {
     const v = (document.getElementById(id).value || "").trim();
-    return v === "" ? null : Number(v);
+    return v === "" ? "" : String(Number(v));
   };
-  const body = {
+  const fields = {
     mode: document.getElementById("cg-mode").value,
     domain: (document.getElementById("cg-domain").value || "").trim(),
     difficulty: document.getElementById("cg-diff").value,
-    count: numOrNull("cg-count"),
-    per_category: numOrNull("cg-percat"),
+    count: numOrParam("cg-count"),
+    per_category: numOrParam("cg-percat"),
     categories: (document.getElementById("cg-cats").value || "").trim(),
-    seed: numOrNull("cg-seed"),
+    seed: numOrParam("cg-seed"),
     provider: (document.getElementById("cg-provider").value || "anthropic").trim(),
-    model: (document.getElementById("cg-model").value || "").trim() || null,
-    mock: document.getElementById("cg-mock").checked,
+    model: (document.getElementById("cg-model").value || "").trim(),
+    mock: document.getElementById("cg-mock").checked ? "1" : "0",
   };
-  let resp;
-  try {
-    resp = await postJSON("/api/corpus/generate", body);
-  } catch (e) {
-    if (out) out.innerHTML = '<div class="err">Could not generate corpus: ' + esc(e.message) + '</div>';
-    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Generate corpus"; }
-    return;
-  }
-  if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Generate corpus"; }
-  if (!resp || !resp.path) {
-    if (out) out.innerHTML = '<div class="err">' + esc((resp && (resp.detail || resp.error)) || "generation failed") + '</div>';
-    return;
-  }
-  lastCorpusResult = resp;
-  drawCorpusResult(resp);
+  // same-origin relative URL; every value URL-encoded.
+  const qs = Object.keys(fields)
+    .map(k => encodeURIComponent(k) + "=" + encodeURIComponent(fields[k]))
+    .join("&");
+  const url = "/api/corpus/generate/stream?" + qs;
+
+  // scaffold the streaming UI: progress bar + count + scrollable live list.
+  out.innerHTML =
+      '<div class="cg-stream">'
+    + '  <div class="cg-prog-head"><span class="cg-prog-note" id="cg-prog-note">Starting…</span>'
+    + '    <span class="cg-prog-count" id="cg-prog-count"></span></div>'
+    + '  <div class="cg-bar"><i id="cg-prog-fill"></i></div>'
+    + '  <div class="cg-live" id="cg-live"><div class="empty">Waiting for the first prompt…</div></div>'
+    + '  <div class="launchbar" style="padding:8px 0 0">'
+    + '    <button class="btn" id="cg-cancel-btn" onclick="cancelCorpusStream()">Cancel</button></div>'
+    + '</div>';
+  setGenBtnGenerating(true);
+
+  let target = 0;
+  let produced = 0;
+  let firstPrompt = true;
+
+  const setProg = (i, t) => {
+    if (t) target = t;
+    if (i !== null && i !== undefined) produced = i;
+    const fill = document.getElementById("cg-prog-fill");
+    const cnt = document.getElementById("cg-prog-count");
+    const pctW = target > 0 ? Math.min(100, Math.round((produced / target) * 100)) : 0;
+    if (fill) fill.style.width = pctW + "%";
+    if (cnt) cnt.textContent = target > 0 ? ("generated " + produced + "/" + target) : "";
+  };
+
+  const es = new EventSource(url);
+  corpusStream = es;
+
+  es.addEventListener("plan", ev => {
+    let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+    const note = document.getElementById("cg-prog-note");
+    if (note) note.textContent = "Planning " + (d.target || 0) + " prompts…";
+    setProg(0, d.target || 0);
+  });
+
+  es.addEventListener("batch", ev => {
+    let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+    const note = document.getElementById("cg-prog-note");
+    if (note) note.textContent = "Generating… (batch " + ((d.index || 0) + 1) + ")";
+    setProg(d.produced, d.target);
+  });
+
+  es.addEventListener("prompt", ev => {
+    let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+    const live = document.getElementById("cg-live");
+    if (live) {
+      if (firstPrompt) { live.innerHTML = ""; firstPrompt = false; }
+      const row = document.createElement("div");
+      row.className = "cg-row";
+      row.innerHTML = '<span class="cg-tag">' + esc(d.category || "default") + "</span>" + esc(d.prompt || "");
+      live.appendChild(row);
+      live.scrollTop = live.scrollHeight;  // keep newest visible
+    }
+    const note = document.getElementById("cg-prog-note");
+    if (note) note.textContent = "Generating prompts…";
+    setProg(d.i, d.target);
+  });
+
+  es.addEventListener("done", ev => {
+    const note = document.getElementById("cg-prog-note");
+    if (note) note.textContent = "Saving corpus…";
+  });
+
+  es.addEventListener("result", ev => {
+    let d; try { d = JSON.parse(ev.data); } catch (e) { d = null; }
+    closeCorpusStream();
+    setGenBtnGenerating(false);
+    if (!d || !d.path) {
+      if (out) out.innerHTML = '<div class="err">' + esc((d && (d.detail || d.error)) || "generation failed") + '</div>';
+      return;
+    }
+    lastCorpusResult = d;
+    drawCorpusResult(d);  // terminal: replaces the live list with the final result
+  });
+
+  es.addEventListener("error", ev => {
+    // SSE "error" event with a payload (server-reported failure)
+    let d = null;
+    if (ev && ev.data) { try { d = JSON.parse(ev.data); } catch (e) { d = null; } }
+    if (d && d.error) {
+      closeCorpusStream();
+      setGenBtnGenerating(false);
+      if (out) out.innerHTML = '<div class="err">Could not generate corpus: ' + esc(d.error) + '</div>';
+    }
+    // a payload-less error is the EventSource onerror path, handled below.
+  });
+
+  // network drop / abort / stream closed before a terminal "result" frame.
+  es.onerror = () => {
+    if (!corpusStream) return;  // already finished cleanly
+    closeCorpusStream();
+    setGenBtnGenerating(false);
+    const note = document.getElementById("cg-prog-note");
+    if (note && firstPrompt && produced === 0) note.textContent = "Stopped.";
+    else if (note) note.textContent = "Stopped — stream ended before the corpus was saved.";
+    const cancel = document.getElementById("cg-cancel-btn");
+    if (cancel) cancel.remove();
+  };
 }
 
 function drawCorpusResult(resp) {
