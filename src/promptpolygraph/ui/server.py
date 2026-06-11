@@ -31,6 +31,10 @@ from .page import PAGE
 # Keyed by run_id -> {"stage", "completed?", "total?", "error?", ...}. A
 # background daemon thread mutates this; handlers only read it. Plain dict
 # writes are atomic enough under CPython's GIL for this single-key-per-run use.
+# When a corpus-generation request leaves both count and per-category blank, use
+# this many prompts per category (so "default" produces a real corpus, not zero).
+_DEFAULT_PER_CATEGORY = 8
+
 PROGRESS: dict[str, dict[str, Any]] = {}
 # AI-designed custom red-team profiles, keyed by a short ref so the SSE stream
 # (GET) can run a full custom roster without cramming it into the query string.
@@ -1234,8 +1238,10 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 client, mock = None, True
 
-        cfg = CorpusConfig(mode=mode, count=_int(body.get("count")),
-                           per_category=_int(body.get("per_category")),
+        count, per_cat = _int(body.get("count")), _int(body.get("per_category"))
+        if not count and not per_cat:
+            per_cat = _DEFAULT_PER_CATEGORY  # blank => a real default, not zero
+        cfg = CorpusConfig(mode=mode, count=count, per_category=per_cat,
                            categories=cats, difficulty=difficulty, seed=_int(body.get("seed")))
         try:
             cases = build_corpus(cfg, resolve=lambda p: p, client=client, mock=mock, domain=domain)
@@ -1294,7 +1300,10 @@ class _Handler(BaseHTTPRequestHandler):
                 client = make_client(model, provider=provider, base_url=base_url)
             except Exception:
                 client, mock = None, True
-        cfg = CorpusConfig(mode=mode, count=qint("count"), per_category=qint("per_category"),
+        count, per_cat = qint("count"), qint("per_category")
+        if not count and not per_cat:
+            per_cat = _DEFAULT_PER_CATEGORY  # blank => a real default, not zero
+        cfg = CorpusConfig(mode=mode, count=count, per_category=per_cat,
                            categories=cats, difficulty=difficulty, seed=qint("seed"))
 
         try:
