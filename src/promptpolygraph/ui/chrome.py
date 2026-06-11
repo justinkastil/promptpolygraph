@@ -20,7 +20,7 @@ web fonts — so both pages remain fully self-contained and offline-capable.
 
 from __future__ import annotations
 
-__all__ = ["THEME_CSS", "header_html"]
+__all__ = ["THEME_CSS", "header_html", "designer_dock_html", "DESIGNER_DOCK_JS"]
 
 
 # The canonical look comes from the dashboard's original palette. Both pages
@@ -108,6 +108,89 @@ THEME_CSS: str = r"""
   .err { color: var(--fail); padding: 16px; }
   .muted { color: var(--muted); }
   .mono { font-family: var(--mono); font-size: 12px; }
+
+  /* ── shared header Designer toggle ───────────────────────────────────── */
+  header.top .designer-toggle {
+    appearance: none; border: 1px solid var(--accent); border-radius: 8px;
+    background: rgba(106,163,255,.12); color: var(--text); cursor: pointer;
+    font: 700 12.5px/1 var(--sans); padding: 7px 12px; letter-spacing: .2px;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  header.top .designer-toggle:hover { background: rgba(106,163,255,.2); }
+  header.top .designer-toggle .glyph { color: var(--accent); font-size: 13px; }
+  header.top .designer-toggle[aria-expanded="true"] { background: var(--accent); color: #0b0d11; }
+  header.top .designer-toggle[aria-expanded="true"] .glyph { color: #0b0d11; }
+
+  /* ── shared AI Designer dock (slides in from the right) ──────────────── */
+  .dock-scrim {
+    position: fixed; inset: 0; background: rgba(3,4,8,.42); z-index: 44;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .dock-scrim.open { opacity: 1; pointer-events: auto; }
+  .designer-dock {
+    position: fixed; top: 0; right: 0; height: 100%; width: min(440px, 96vw);
+    background: var(--panel); border-left: 1px solid var(--border);
+    transform: translateX(102%); transition: transform .26s cubic-bezier(.2,.8,.2,1);
+    z-index: 45; display: flex; flex-direction: column;
+    box-shadow: -10px 0 34px rgba(0,0,0,.45);
+  }
+  .designer-dock.open { transform: translateX(0); }
+  .designer-dock .dk-head {
+    display: flex; align-items: center; gap: 9px; padding: 14px 16px;
+    border-bottom: 1px solid var(--border); background: var(--panel-2);
+  }
+  .designer-dock .dk-head .dk-glyph { color: var(--accent); font-size: 15px; }
+  .designer-dock .dk-head strong { font-size: 14px; }
+  .designer-dock .dk-head .dk-ctx {
+    font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+    color: var(--accent); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px;
+    background: rgba(106,163,255,.08);
+  }
+  .designer-dock .dk-head .dk-x {
+    margin-left: auto; cursor: pointer; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; font-size: 13px;
+  }
+  .designer-dock .dk-head .dk-x:hover { color: var(--text); background: var(--panel); }
+  .designer-dock .dk-body { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 13px; }
+  .designer-dock .dk-body > .field label { color: var(--muted); }
+  .designer-dock .dk-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .designer-dock .dk-row > .field { flex: 1; min-width: 130px; }
+  .designer-dock .dk-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .designer-dock textarea { min-height: 84px; }
+
+  /* structured design preview (labelled fields, NOT chat bubbles) */
+  .dk-preview { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); overflow: hidden; }
+  .dk-preview .dk-pv-head {
+    padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+  }
+  .dk-preview .dk-pv-head .dk-prov {
+    margin-left: auto; font-size: 10px; font-weight: 600; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+  }
+  .dk-section { padding: 9px 12px; border-top: 1px solid var(--border); }
+  .dk-section:first-child { border-top: 0; }
+  .dk-section .dk-k {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 4px;
+  }
+  .dk-section .dk-v { font-size: 12.5px; word-break: break-word; }
+  .dk-section .dk-v.mono { font-family: var(--mono); }
+  .dk-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .dk-chip {
+    font-size: 11px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text);
+  }
+  .dk-lane {
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; margin-top: 6px;
+    background: var(--panel-2); font-size: 12px;
+  }
+  .dk-lane:first-child { margin-top: 0; }
+  .dk-lane .dk-lane-h { font-weight: 700; }
+  .dk-lane .dk-lane-m { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .dk-notes { font-size: 12px; color: var(--warn); padding: 9px 12px; border-top: 1px solid var(--border); white-space: pre-wrap; }
+  .dk-status { font-size: 12.5px; color: var(--muted); }
+  .dk-status.err { color: var(--fail); }
+  .dk-status.busy { color: var(--accent); }
 """
 
 
@@ -174,6 +257,16 @@ def header_html(active: str, *, links: bool) -> str:
         # Dashboard: the crumb is a clickable "back to all runs" switcher.
         crumb = '<span class="crumb" id="crumb" onclick="showRuns()">All runs</span>'
 
+    # Shared Designer toggle — identical on both surfaces. Each page defines its
+    # own toggleDesigner() (open/close) and design/inject handlers; the dock
+    # markup + CSS are shared via designer_dock_html() + THEME_CSS.
+    designer_btn = (
+        '<button type="button" class="designer-toggle" id="designer-toggle" '
+        'aria-expanded="false" aria-controls="designer-dock" '
+        'onclick="toggleDesigner()" title="Open the AI Designer (Esc to close)">'
+        '<span class="glyph" aria-hidden="true">&#10022;</span> Designer</button>'
+    )
+
     return (
         '<header class="top">'
         '<h1>PromptPolygraph</h1>'
@@ -181,5 +274,186 @@ def header_html(active: str, *, links: bool) -> str:
         + nav
         + '<span class="spacer"></span>'
         + crumb
+        + designer_btn
         + "</header>"
     )
+
+
+def designer_dock_html(*, context_label: str) -> str:
+    """Return the shared AI Designer dock markup.
+
+    The dock is a structured (non-chat) side panel: a description textarea, the
+    provider/model selects (wired by each page from ``/api/providers``), a
+    Design button, and a structured result preview with Inject + Refine. The
+    markup is identical on both surfaces; only ``context_label`` differs
+    ("Run config" on the dashboard, "Red team" in the Arena). Each page wires
+    ``designerDesign()`` / ``designerInject()`` / ``designerRefine()`` and the
+    provider-select init against these stable IDs.
+
+    Args:
+        context_label: the short label shown beside the dock title.
+    """
+    return (
+        '<div class="dock-scrim" id="dock-scrim" onclick="closeDesigner()"></div>'
+        '<aside class="designer-dock" id="designer-dock" role="dialog" aria-modal="false" '
+        'aria-label="AI Designer">'
+        '<div class="dk-head">'
+        '<span class="dk-glyph" aria-hidden="true">&#10022;</span>'
+        '<strong>AI Designer</strong>'
+        '<span class="dk-ctx" id="dk-context">' + context_label + '</span>'
+        '<span class="dk-x" id="dk-close" onclick="closeDesigner()" role="button" '
+        'tabindex="0">close &#10005;</span>'
+        '</div>'
+        '<div class="dk-body">'
+        '<div class="field"><label for="dk-desc">Describe your system under test '
+        'and what you want to evaluate / attack</label>'
+        '<textarea id="dk-desc" placeholder="e.g. a budgeting assistant for freelancers '
+        'with a tool that reads bank records; check it refuses risky money moves and '
+        'never leaks another user&#39;s data"></textarea></div>'
+        '<div class="dk-row">'
+        '<div class="field"><label for="dk-provider">Provider</label>'
+        '<select class="field" id="dk-provider"><option>loading&hellip;</option></select></div>'
+        '<div class="field"><label for="dk-model">Model</label>'
+        '<select class="field" id="dk-model"><option>&mdash;</option></select>'
+        '<input type="text" class="field" id="dk-model-custom" placeholder="custom model name" '
+        'style="display:none;margin-top:4px"></div>'
+        '</div>'
+        '<div id="dk-provider-notice"></div>'
+        '<label class="check"><input type="checkbox" id="dk-mock" checked> Mock (offline)</label>'
+        '<div class="dk-actions">'
+        '<button class="btn primary" id="dk-design" onclick="designerDesign()">Design</button>'
+        '<span class="dk-status" id="dk-status"></span>'
+        '</div>'
+        '<div id="dk-result"></div>'
+        '</div>'
+        '</aside>'
+    )
+
+
+# Shared dock behavior, identical on both surfaces. It covers open/close (with
+# Esc), the provider/model dropdown init, the busy/error/empty status line, and
+# the Design→preview→Inject/Refine flow skeleton. The page-specific pieces are
+# injected as three globals the page MUST define before this runs:
+#   * window.__dkDesignUrl  — the design endpoint to POST {description,provider,model,mock}
+#   * window.__dkRenderPreview(result) -> HTML  — structured (non-chat) preview
+#   * window.__dkInject(config)  — fill that page's form/controls from the design
+# Both pages reuse the provider-dropdown helpers (initProviderSelects / resolve*)
+# already defined on each page. No external URLs; all fetches are relative.
+DESIGNER_DOCK_JS: str = r"""
+var _dkLastDesign = null;     // last {config, notes, provider} from a Design call
+var _dkProviderReady = false; // lazily populate provider/model selects on first open
+
+function _dkStatus(msg, kind) {
+  var el = document.getElementById("dk-status");
+  if (!el) return;
+  el.className = "dk-status" + (kind ? " " + kind : "");
+  el.textContent = msg || "";
+}
+function _dkSetBusy(on) {
+  var b = document.getElementById("dk-design");
+  if (b) { b.classList.toggle("disabled-btn", !!on); b.textContent = on ? "Designing…" : "Design"; }
+}
+
+function openDesigner() {
+  var dock = document.getElementById("designer-dock");
+  var scrim = document.getElementById("dock-scrim");
+  var tog = document.getElementById("designer-toggle");
+  if (!dock) return;
+  dock.classList.add("open");
+  if (scrim) scrim.classList.add("open");
+  if (tog) tog.setAttribute("aria-expanded", "true");
+  if (!_dkProviderReady && typeof initProviderSelects === "function") {
+    _dkProviderReady = true;
+    initProviderSelects({
+      providerSel: "dk-provider", modelSel: "dk-model", customInput: "dk-model-custom",
+      notice: "dk-provider-notice", preferLocal: false,
+    });
+  }
+  var ta = document.getElementById("dk-desc");
+  if (ta) ta.focus();
+}
+function closeDesigner() {
+  var dock = document.getElementById("designer-dock");
+  var scrim = document.getElementById("dock-scrim");
+  var tog = document.getElementById("designer-toggle");
+  if (dock) dock.classList.remove("open");
+  if (scrim) scrim.classList.remove("open");
+  if (tog) tog.setAttribute("aria-expanded", "false");
+}
+function toggleDesigner() {
+  var dock = document.getElementById("designer-dock");
+  if (dock && dock.classList.contains("open")) closeDesigner(); else openDesigner();
+}
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") {
+    var dock = document.getElementById("designer-dock");
+    if (dock && dock.classList.contains("open")) closeDesigner();
+  }
+});
+
+// Run a Design call against the page-supplied endpoint, then hand the result to
+// the page-supplied structured renderer. Keeps the description for Refine.
+function designerDesign() {
+  if (typeof postJSON !== "function" || !window.__dkDesignUrl) return;
+  var ta = document.getElementById("dk-desc");
+  var desc = (ta && ta.value || "").trim();
+  var out = document.getElementById("dk-result");
+  if (!desc) { _dkStatus("Describe the system under test first.", "err"); if (ta) ta.focus(); return; }
+  var provider = (typeof resolveProvider === "function") ? resolveProvider("dk-provider") : "";
+  var model = (typeof resolveModel === "function") ? resolveModel("dk-model", "dk-model-custom") : "";
+  var mockEl = document.getElementById("dk-mock");
+  var body = { description: desc, mock: !!(mockEl && mockEl.checked) };
+  if (provider) body.provider = provider;
+  if (model) body.model = model;
+  _dkSetBusy(true);
+  _dkStatus("Designing…", "busy");
+  if (out) out.innerHTML = "";
+  postJSON(window.__dkDesignUrl, body).then(function(res) {
+    _dkSetBusy(false);
+    if (!res || !res.config) { _dkStatus((res && res.error) || "design returned nothing", "err"); return; }
+    _dkLastDesign = res;
+    _dkStatus("", "");
+    if (out && typeof window.__dkRenderPreview === "function") out.innerHTML = window.__dkRenderPreview(res);
+    _dkBindResultActions();
+  }).catch(function(e) {
+    _dkSetBusy(false);
+    _dkStatus("Design failed: " + (e && e.message ? e.message : String(e)), "err");
+  });
+}
+
+// Refine = keep the description, re-run Design (the user can edit the text first).
+function designerRefine() { designerDesign(); }
+
+function _dkBindResultActions() {
+  var inj = document.getElementById("dk-inject");
+  if (inj) inj.addEventListener("click", function() {
+    if (_dkLastDesign && _dkLastDesign.config && typeof window.__dkInject === "function") {
+      window.__dkInject(_dkLastDesign.config);
+      _dkStatus("Injected into the form. Review, then Save / Launch.", "");
+    }
+  });
+  var ref = document.getElementById("dk-refine");
+  if (ref) ref.addEventListener("click", designerRefine);
+}
+
+// Shared structured-preview chrome the page renderers wrap their fields in.
+// `sections` is pre-built HTML of .dk-section blocks; `notes` is the rationale.
+function dkPreviewShell(title, provider, sections, notes) {
+  var head = '<div class="dk-pv-head"><span>' + esc(title) + '</span>'
+    + (provider ? '<span class="dk-prov">' + esc(provider) + '</span>' : '') + '</div>';
+  var notesHtml = notes ? '<div class="dk-notes">' + esc(notes) + '</div>' : '';
+  var actions = '<div class="dk-section" style="display:flex;gap:8px">'
+    + '<button class="btn primary" id="dk-inject">Inject</button>'
+    + '<button class="btn" id="dk-refine">Refine</button></div>';
+  return '<div class="dk-preview">' + head + sections + notesHtml + actions + '</div>';
+}
+function dkSection(label, valueHtml, mono) {
+  return '<div class="dk-section"><div class="dk-k">' + esc(label) + '</div>'
+    + '<div class="dk-v' + (mono ? " mono" : "") + '">' + valueHtml + '</div></div>';
+}
+function dkChips(items) {
+  return '<div class="dk-chips">' + (items || []).map(function(i){
+    return '<span class="dk-chip">' + esc(i) + '</span>';
+  }).join("") + '</div>';
+}
+"""
