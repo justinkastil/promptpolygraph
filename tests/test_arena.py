@@ -59,13 +59,17 @@ def test_render_arena_page_honesty_rule_is_mode_gated():
     assert "Air-gap" in html or "air-gap" in html
 
 
-def test_render_arena_page_no_banned_terms():
+def test_render_arena_page_has_no_disallowed_terms():
+    """The rendered page must not surface any term from POLYGRAPH_DISALLOWED_TERMS
+    (a comma-separated list supplied by the environment — e.g. internal CI). The
+    list is intentionally NOT hardcoded here so the public source enumerates
+    nothing; with no env var set this is a no-op."""
+    import os
+
     html = render_arena_page(stream_url="/api/redteam/stream?profile=quick").lower()
-    for term in (
-        "alpha", "beta", "gamma", "delta",
-        "e1", "e2", "e3", "e4", "e5",
-    ):
-        assert term not in html, f"banned term present: {term}"
+    terms = [t.strip().lower() for t in os.environ.get("POLYGRAPH_DISALLOWED_TERMS", "").split(",") if t.strip()]
+    for term in terms:
+        assert term not in html, "disallowed term present in rendered page"
 
 
 def test_render_arena_page_escapes_script_close_in_url():
