@@ -88,6 +88,20 @@ adapter:
 For anything exotic, implement `async def query(self, case) -> Response` and pass an in-process
 callable with `--callable mymodule:my_fn`.
 
+### Run on local / open models (Ollama, vLLM, LM Studio)
+The grader/judge, audit agents, and corpus generation can run against any OpenAI-compatible
+endpoint — not just Anthropic — so the **whole eval can run 100% locally on open models, no API key**:
+
+```yaml
+llm:
+  provider: ollama          # anthropic (default) | openai | ollama | vllm | lmstudio | openai-compatible
+  base_url: http://localhost:11434/v1   # default for ollama; set for other servers
+model: llama3.1             # the model NAME for the judge/audit/generation
+```
+A local provider (ollama, …) needs no key and runs live; Anthropic/OpenAI fall back to `--mock` when
+their key is absent. To also point the **system under test** at a local model:
+`adapter: { type: llm, options: { provider: ollama, model: llama3.1 } }`.
+
 ### 2. Choose a corpus mode (dials)
 ```bash
 polygraph run --config c.yaml --mode fixed                       # deterministic set; stable ids for baselining

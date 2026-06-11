@@ -90,7 +90,13 @@ class LLMAdapter(BaseAdapter):
         **_: Any,
     ):
         super().__init__(name)
-        self._provider = provider.lower()
+        prov = provider.lower()
+        # Local OpenAI-compatible servers (Ollama / vLLM / LM Studio) speak the
+        # OpenAI protocol; normalize them to the openai path with a sane default URL.
+        if prov in ("ollama", "vllm", "lmstudio", "local"):
+            base_url = base_url or "http://localhost:11434/v1"
+            prov = "openai"
+        self._provider = prov
         self._model = model
         self._system = system
         self._max_tokens = max_tokens
