@@ -219,6 +219,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_personas()
             return
 
+        if parts == ["api", "personas", "files", "download"]:
+            self._api_persona_download(query)
+            return
+
         if parts == ["api", "personas", "files"]:
             self._api_persona_files()
             return
@@ -238,6 +242,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._api_audit(run_id)
             elif tail == "report":
                 self._api_report(run_id, query)
+            elif tail == "corpus":
+                self._api_corpus_export(run_id, query)
             else:
                 self._not_found("unknown run sub-resource")
             return
@@ -395,6 +401,60 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(data)
+
+    def _send_download(self, data: bytes, filename: str, content_type: str) -> None:
+        """Serve raw bytes as a browser download (attachment)."""
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def _api_corpus_export(self, run_id: str, query: dict[str, list[str]]) -> None:
+        """Download a run's prompt corpus as json | jsonl | csv (the UI face of
+        ``polygraph export``). ``prompts_only=1`` trims to prompt+category."""
+        import csv
+        import io
+
+        store = self._open_store()
+        run = store.get_run(run_id)
+        if run is None:
+            self._not_found("run not found")
+            return
+        cases = store.get_cases(run_id)
+        fmt = (query.get("format", ["json"])[0] or "json").lower()
+        prompts_only = (query.get("prompts_only", ["0"])[0] or "0").lower() in ("1", "true", "yes")
+
+        if prompts_only:
+            rows: list[Any] = [{"prompt": c.prompt, "category": c.category} for c in cases]
+        else:
+            rows = [c.model_dump(mode="json", exclude={"id"}) for c in cases]
+
+        if fmt == "json":
+            data = json.dumps(rows, indent=2, ensure_ascii=False).encode("utf-8")
+            ctype = "application/json"
+        elif fmt == "jsonl":
+            data = ("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n").encode("utf-8")
+            ctype = "application/x-ndjson"
+        elif fmt == "csv":
+            buf = io.StringIO()
+            cols = ["prompt", "category", "subcategory", "expected_shape", "expected_behavior"]
+            w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+            w.writeheader()
+            for c in cases:
+                w.writerow({"prompt": c.prompt, "category": c.category,
+                            "subcategory": getattr(c, "subcategory", None) or "",
+                            "expected_shape": getattr(c, "expected_shape", None) or "",
+                            "expected_behavior": getattr(c, "expected_behavior", None) or ""})
+            data = buf.getvalue().encode("utf-8")
+            ctype = "text/csv"
+        else:
+            self._not_found("unknown corpus format")
+            return
+        self._send_download(data, f"{run_id[:8]}-corpus.{fmt}", ctype)
 
     # ---- control plane: configs ----------------------------------------
     def _api_configs(self) -> None:
@@ -635,6 +695,47 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
         self._json(out)
+
+    def _persona_files_allowed(self) -> set[str]:
+        """Resolved paths of persona files the UI is allowed to serve — the saved
+        studio files plus the bundled example panels. Bounds the download endpoint
+        so it can't be used to read arbitrary files."""
+        allowed: set[str] = set()
+        try:
+            pd = self.out_dir / "personas"
+            if pd.is_dir():
+                for y in list(pd.glob("*.yaml")) + list(pd.glob("*.yml")):
+                    allowed.add(str(y.resolve()))
+        except Exception:
+            pass
+        try:
+            examples = _repo_root() / "examples"
+            if examples.is_dir():
+                for d in examples.iterdir():
+                    pf = d / "personas.yaml"
+                    if pf.is_file():
+                        allowed.add(str(pf.resolve()))
+        except Exception:
+            pass
+        return allowed
+
+    def _api_persona_download(self, query: dict[str, list[str]]) -> None:
+        """Download a saved persona panel as YAML. Only files listed by
+        ``/api/personas/files`` are servable."""
+        want = (query.get("path", [""])[0] or "").strip()
+        if not want:
+            self._not_found("path required")
+            return
+        rp = str(Path(want).expanduser().resolve())
+        if rp not in self._persona_files_allowed():
+            self._not_found("persona file not found")
+            return
+        try:
+            data = Path(rp).read_bytes()
+        except Exception:
+            self._not_found("could not read persona file")
+            return
+        self._send_download(data, Path(rp).name, "application/x-yaml")
 
     def _save_personas_yaml(self, path: Path, personas: list[Any]) -> None:
         import yaml
