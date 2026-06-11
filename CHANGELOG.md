@@ -6,6 +6,32 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-06-11
+
+### Added
+- Generation progress: corpus generation streams steps (plan/batch/prompt) — a
+  live progress bar + prompt list in the Studio, a live counter in the CLI.
+- Provider discovery + `polygraph init`: detects usable backends (API key present
+  / Ollama reachable) and their models; `GET /api/providers` + `GET /api/status`
+  drive provider/model dropdowns and a header status pill (Live vs Mock-only).
+- Config builder (New run): compose a config (identity, a type-aware target
+  adapter, corpus + custom-category editor, analysis/audit/report, red-team,
+  backend), save (`POST /api/configs`) / load (`GET /api/config`) / launch.
+- AI Designer: a collapsible dock that designs a run config (`POST /api/config/design`)
+  or a red-team config (`POST /api/redteam/design`, grounded in the technique
+  catalog + installed sources + profiles) and injects it; a designed red-team
+  roster runs as a custom profile (`POST /api/redteam/profile` → `?profile_ref=`).
+- Target connection: a "Test connection" button + `POST /api/adapter/test`; a
+  callable adapter is configurable by `module:function` import string.
+- Tooltips across the config/Studio/Arena controls.
+
+### Changed
+- Unified the Arena and dashboard chrome (shared header/theme via `ui/chrome.py`).
+- Corpus generation defaults to 8 prompts/category when count + per-category are
+  blank (was zero); the UI states the amount.
+- The rendered-page term check reads its list from the environment rather than
+  hardcoding any terms in the source.
+
 ## [0.6.0] - 2026-06-11
 
 ### Added

@@ -28,6 +28,18 @@ __all__ = [
 ]
 
 
+def _resolve_callable(ref: str) -> Any:
+    """Import a callable from a 'module:function' (or 'module.function') string,
+    so a custom in-process adapter can be configured from a config file / the UI
+    without code changes. The function may take `case` or a plain prompt str."""
+    import importlib
+
+    mod_name, _, attr = ref.replace(":", ".").rpartition(".")
+    if not mod_name:
+        raise ValueError(f"callable adapter ref must be 'module:function', got {ref!r}")
+    return getattr(importlib.import_module(mod_name), attr)
+
+
 def build_adapter(cfg: AdapterConfig, **extra: Any) -> Adapter:
     """Construct an adapter from config. `extra` lets callers inject a callable."""
     options = {**cfg.options, **extra}
@@ -39,5 +51,10 @@ def build_adapter(cfg: AdapterConfig, **extra: Any) -> Adapter:
     if kind == "demo":
         return DemoAdapter(name=cfg.name or "demo", **options)
     if kind == "callable":
-        return CallableAdapter(name=cfg.name or "callable", **options)
+        # Accept a live `fn`, or an import string under fn/import/target/ref.
+        fn = options.pop("fn", None)
+        ref = options.pop("import", None) or options.pop("target", None) or options.pop("ref", None)
+        if fn is None and isinstance(ref, str) and ref.strip():
+            fn = _resolve_callable(ref.strip())
+        return CallableAdapter(name=cfg.name or "callable", fn=fn, **options)
     raise ValueError(f"unknown adapter type: {cfg.type!r}")

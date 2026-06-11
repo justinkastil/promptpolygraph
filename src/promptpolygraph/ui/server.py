@@ -31,7 +31,14 @@ from .page import PAGE
 # Keyed by run_id -> {"stage", "completed?", "total?", "error?", ...}. A
 # background daemon thread mutates this; handlers only read it. Plain dict
 # writes are atomic enough under CPython's GIL for this single-key-per-run use.
+# When a corpus-generation request leaves both count and per-category blank, use
+# this many prompts per category (so "default" produces a real corpus, not zero).
+_DEFAULT_PER_CATEGORY = 8
+
 PROGRESS: dict[str, dict[str, Any]] = {}
+# AI-designed custom red-team profiles, keyed by a short ref so the SSE stream
+# (GET) can run a full custom roster without cramming it into the query string.
+CUSTOM_PROFILES: dict[str, dict[str, Any]] = {}
 
 
 def _slugify(text: str, *, fallback: str = "panel") -> str:
@@ -227,8 +234,24 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_persona_files()
             return
 
+        if parts == ["api", "providers"]:
+            self._api_providers()
+            return
+
+        if parts == ["api", "status"]:
+            self._api_status()
+            return
+
+        if parts == ["api", "config"]:
+            self._api_config_load(query)
+            return
+
         if parts == ["api", "corpus", "export"]:
             self._api_corpus_dir_export(query)
+            return
+
+        if parts == ["api", "corpus", "generate", "stream"]:
+            self._api_corpus_generate_stream(query)
             return
 
         if parts == ["api", "redteam", "runs"]:
@@ -285,6 +308,21 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if parts == ["api", "corpus", "generate"]:
             self._api_corpus_generate()
+            return
+        if parts == ["api", "adapter", "test"]:
+            self._api_adapter_test()
+            return
+        if parts == ["api", "config", "design"]:
+            self._api_config_design()
+            return
+        if parts == ["api", "configs"]:
+            self._api_config_save()
+            return
+        if parts == ["api", "redteam", "design"]:
+            self._api_redteam_design()
+            return
+        if parts == ["api", "redteam", "profile"]:
+            self._api_redteam_profile()
             return
         if parts == ["api", "redteam", "trace"]:
             self._api_redteam_trace()
@@ -905,11 +943,21 @@ class _Handler(BaseHTTPRequestHandler):
         mock = mock_raw not in ("0", "false", "no", "")
         mock = _want_mock(mock)  # force offline when no key is configured
         sources = [s.strip() for s in (query.get("sources", [""])[0] or "").split(",") if s.strip()]
+        profile_ref = (query.get("profile_ref", [""])[0] or "").strip()
 
-        try:
-            profile = get_profile(profile_name)
-        except Exception:
-            profile = get_profile("all_frontier")
+        profile = None
+        if profile_ref and profile_ref in CUSTOM_PROFILES:
+            try:
+                from promptpolygraph.redteam.models import RedTeamProfile
+
+                profile = RedTeamProfile.model_validate(CUSTOM_PROFILES[profile_ref])
+            except Exception:
+                profile = None
+        if profile is None:
+            try:
+                profile = get_profile(profile_name)
+            except Exception:
+                profile = get_profile("all_frontier")
 
         try:
             adapter = self._redteam_target(query)
@@ -990,6 +1038,228 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+    # ---- providers + readiness (drives dropdowns + the status pill) ----
+    def _api_providers(self) -> None:
+        from promptpolygraph.discovery import discover_providers
+
+        try:
+            self._json(discover_providers())
+        except Exception as exc:
+            self._json({"error": "discovery failed", "detail": str(exc)}, status=500)
+
+    def _api_status(self) -> None:
+        """Readiness for the status pill: which backends are usable, and whether
+        we'd run live or fall back to mock (offline)."""
+        from promptpolygraph.discovery import discover_providers
+
+        try:
+            provs = discover_providers()
+        except Exception:
+            provs = []
+        any_av = any(p.get("available") for p in provs)
+        self._json({
+            "ready": True,  # the harness always runs (mock is offline-safe)
+            "any_provider": any_av,
+            "mock_only": not any_av,
+            "status": "live" if any_av else "mock",
+            "providers": [{"id": p["id"], "available": p["available"], "reason": p["reason"]} for p in provs],
+        })
+
+    def _api_adapter_test(self) -> None:
+        """Probe a target adapter with one trivial query and report reachability.
+        A custom (callable) adapter with no `fn` surfaces here as 'not wired'."""
+        import time as _time
+
+        from promptpolygraph.adapters import build_adapter
+        from promptpolygraph.config import AdapterConfig
+        from promptpolygraph.models import Case
+
+        body = self._read_body()
+        spec = body.get("adapter")
+        if not isinstance(spec, dict):
+            self._json({"ok": False, "error": "adapter spec required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            adapter = build_adapter(AdapterConfig(**spec))
+        except Exception as exc:
+            self._json({"ok": False, "error": f"adapter not wired: {exc}"})
+            return
+
+        async def _probe() -> Any:
+            return await asyncio.wait_for(
+                adapter.query(Case(prompt="Connection check — please reply with: OK.", category="connection_check")),
+                timeout=8.0,
+            )
+
+        t0 = _time.perf_counter()
+        try:
+            resp = asyncio.run(_probe())
+        except Exception as exc:
+            self._json({"ok": False, "name": getattr(adapter, "name", "?"), "error": str(exc)})
+            return
+        err = getattr(resp, "error", None)
+        self._json({
+            "ok": not err,
+            "name": getattr(adapter, "name", "?"),
+            "latency_ms": int((_time.perf_counter() - t0) * 1000),
+            "error": err,
+            "sample": (getattr(resp, "text", "") or "")[:160],
+        })
+
+    # ---- config builder: AI design / save / load -----------------------
+    def _configs_dir(self) -> Path:
+        d = self.out_dir / "configs"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _api_config_design(self) -> None:
+        """AI-design a run config from a natural-language description."""
+        from promptpolygraph.configdesign import design_config
+
+        body = self._read_body()
+        desc = str(body.get("description") or "").strip()
+        if not desc:
+            self._json({"error": "description required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        provider = (body.get("provider") or "anthropic").strip().lower()
+        model = body.get("model") or None
+        base_url = body.get("base_url") or None
+        mock = _want_mock(bool(body.get("mock")))
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(model, provider=provider, base_url=base_url)
+            except Exception:
+                client, mock = None, True
+        try:
+            result = asyncio.run(design_config(client, desc, mock=mock))
+        except Exception as exc:
+            self._json({"error": "design failed", "detail": str(exc)}, status=500)
+            return
+        result["provider"] = "mock" if mock else provider
+        self._json(result)
+
+    def _api_config_save(self) -> None:
+        """Validate + persist a config as a named yaml under out_dir/configs/."""
+        import yaml
+
+        from promptpolygraph.config import Config
+
+        body = self._read_body()
+        config = body.get("config")
+        if not isinstance(config, dict):
+            self._json({"error": "config object required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            Config(**config)  # validate (unknown keys ignored)
+        except Exception as exc:
+            self._json({"error": "invalid config", "detail": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+        name = _slugify(str(body.get("name") or config.get("name") or "config"), fallback="config")
+        path = self._configs_dir() / f"{name}.yaml"
+        path.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        self._json({"name": name, "path": str(path)})
+
+    def _api_config_load(self, query: dict[str, list[str]]) -> None:
+        """Load a config (by path or name) into a dict for editing. Bounded to
+        the example configs + out_dir/configs + cwd/configs that /api/configs lists."""
+        import yaml
+
+        want = (query.get("path", [""])[0] or "").strip()
+        name = (query.get("name", [""])[0] or "").strip()
+        allowed: set[str] = set()
+        try:
+            ex = _repo_root() / "examples"
+            if ex.is_dir():
+                for d in ex.iterdir():
+                    c = d / "config.yaml"
+                    if c.is_file():
+                        allowed.add(str(c.resolve()))
+        except Exception:
+            pass
+        for base in (Path.cwd(), self.out_dir):
+            cd = base / "configs"
+            if cd.is_dir():
+                for c in list(cd.glob("*.yaml")) + list(cd.glob("*.yml")):
+                    allowed.add(str(c.resolve()))
+        target = None
+        if want:
+            rp = str(Path(want).expanduser().resolve())
+            if rp in allowed:
+                target = rp
+        elif name:
+            for a in allowed:
+                if Path(a).stem == _slugify(name, fallback=name):
+                    target = a
+                    break
+        if not target:
+            self._not_found("config not found")
+            return
+        try:
+            self._json({"config": yaml.safe_load(Path(target).read_text(encoding="utf-8")) or {}, "path": target})
+        except Exception:
+            self._not_found("could not read config")
+
+    def _api_redteam_design(self) -> None:
+        """AI-design a red-team config (grounded in the catalog/sources/profiles)."""
+        from promptpolygraph.redteam.design import design_redteam
+
+        body = self._read_body()
+        desc = str(body.get("description") or "").strip()
+        if not desc:
+            self._json({"error": "description required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        provider = (body.get("provider") or "anthropic").strip().lower()
+        model = body.get("model") or None
+        base_url = body.get("base_url") or None
+        mock = _want_mock(bool(body.get("mock")))
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(model, provider=provider, base_url=base_url)
+            except Exception:
+                client, mock = None, True
+        try:
+            result = asyncio.run(design_redteam(client, desc, mock=mock))
+        except Exception as exc:
+            self._json({"error": "design failed", "detail": str(exc)}, status=500)
+            return
+        result["provider"] = "mock" if mock else provider
+        self._json(result)
+
+    def _api_redteam_profile(self) -> None:
+        """Build a runnable custom RedTeamProfile from a designed spec and stash it
+        under a short ref the SSE stream can run via ?profile_ref=."""
+        from promptpolygraph.models import new_id
+        from promptpolygraph.redteam.design import profile_from_design
+
+        body = self._read_body()
+        spec = body.get("spec") or body.get("config")
+        if not isinstance(spec, dict):
+            self._json({"error": "spec object required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        provider = (body.get("provider") or "anthropic").strip().lower()
+        model = body.get("model") or None
+        base_url = body.get("base_url") or None
+        try:
+            profile = profile_from_design(spec, provider=provider, model=model, base_url=base_url)
+        except Exception as exc:
+            self._json({"error": "bad spec", "detail": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+        ref = new_id()[:10]
+        CUSTOM_PROFILES[ref] = profile.model_dump()
+        if len(CUSTOM_PROFILES) > 200:  # bound memory
+            for k in list(CUSTOM_PROFILES)[:-200]:
+                CUSTOM_PROFILES.pop(k, None)
+        self._json({"ref": ref, "name": profile.name, "turns": profile.turns,
+                    "judge_kind": profile.judge_kind,
+                    "attackers": [{"strategy": a.strategy, "mode": a.mode, "converter": a.converter,
+                                   "intensity": a.intensity} for a in profile.attackers]})
+
     # ---- studio: prompt-corpus generation + export ---------------------
     def _corpus_dir(self) -> Path:
         d = self.out_dir / "corpus"
@@ -1034,8 +1304,10 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 client, mock = None, True
 
-        cfg = CorpusConfig(mode=mode, count=_int(body.get("count")),
-                           per_category=_int(body.get("per_category")),
+        count, per_cat = _int(body.get("count")), _int(body.get("per_category"))
+        if not count and not per_cat:
+            per_cat = _DEFAULT_PER_CATEGORY  # blank => a real default, not zero
+        cfg = CorpusConfig(mode=mode, count=count, per_category=per_cat,
                            categories=cats, difficulty=difficulty, seed=_int(body.get("seed")))
         try:
             cases = build_corpus(cfg, resolve=lambda p: p, client=client, mock=mock, domain=domain)
@@ -1060,6 +1332,120 @@ class _Handler(BaseHTTPRequestHandler):
             "provider": "mock" if mock else provider,
             "preview": [{"prompt": c.prompt, "category": c.category} for c in cases[:40]],
         })
+
+    def _api_corpus_generate_stream(self, query: dict[str, list[str]]) -> None:
+        """Generate a corpus and stream progress as SSE: plan -> batch/prompt … ->
+        result. Lets the Studio show generation steps + prompts appearing live."""
+        from promptpolygraph.config import CorpusConfig
+        from promptpolygraph.corpus import build_corpus
+
+        def q1(k: str, d: str = "") -> str:
+            return (query.get(k, [d])[0] or d)
+
+        def qint(k: str) -> int | None:
+            v = q1(k)
+            try:
+                return int(v) if v not in ("", None) else None
+            except (TypeError, ValueError):
+                return None
+
+        mode = q1("mode", "varied").strip() or "varied"
+        domain = q1("domain").strip() or None
+        provider = (q1("provider", "anthropic").strip().lower()) or "anthropic"
+        model = q1("model") or None
+        base_url = q1("base_url") or None
+        difficulty = q1("difficulty", "standard").strip() or "standard"
+        cats = [c.strip() for c in q1("categories").split(",") if c.strip()]
+        mock = q1("mock", "1").strip().lower() not in ("0", "false", "no", "")
+        mock = _want_mock(mock)
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(model, provider=provider, base_url=base_url)
+            except Exception:
+                client, mock = None, True
+        count, per_cat = qint("count"), qint("per_category")
+        if not count and not per_cat:
+            per_cat = _DEFAULT_PER_CATEGORY  # blank => a real default, not zero
+        cfg = CorpusConfig(mode=mode, count=count, per_category=per_cat,
+                           categories=cats, difficulty=difficulty, seed=qint("seed"))
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+        except Exception:
+            return
+
+        evq: queue.Queue[Any] = queue.Queue(maxsize=4096)
+        _SENTINEL = object()
+
+        def _frame(stage: str, data: dict) -> bytes:
+            return f"event: {stage}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode("utf-8")
+
+        def _prog(stage: str, info: dict) -> None:
+            try:
+                evq.put((stage, info), timeout=5.0)
+            except Exception:
+                pass
+
+        def _worker() -> None:
+            try:
+                cases = build_corpus(cfg, resolve=lambda p: p, client=client, mock=mock,
+                                     domain=domain, progress=_prog)
+                slug = _slugify(domain or mode, fallback="corpus")
+                out = self._corpus_dir() / slug
+                out.mkdir(parents=True, exist_ok=True)
+                by_cat: dict[str, list[dict]] = {}
+                for c in cases:
+                    by_cat.setdefault(c.category, []).append(c.model_dump(mode="json"))
+                for cat, rows in by_cat.items():
+                    (out / f"{cat}.json").write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+                evq.put(("result", {
+                    "path": str(out), "count": len(cases),
+                    "categories": {k: len(v) for k, v in by_cat.items()},
+                    "mode": mode, "provider": "mock" if mock else provider,
+                    "preview": [{"prompt": c.prompt, "category": c.category} for c in cases[:40]],
+                }), timeout=5.0)
+            except Exception as exc:
+                try:
+                    evq.put(("error", {"error": str(exc)}), timeout=2.0)
+                except Exception:
+                    pass
+            finally:
+                try:
+                    evq.put(_SENTINEL, timeout=2.0)
+                except Exception:
+                    pass
+
+        worker = threading.Thread(target=_worker, daemon=True)
+        worker.start()
+        try:
+            self.wfile.write(b": corpus stream open\n\n")
+            self.wfile.flush()
+            while True:
+                try:
+                    item = evq.get(timeout=30.0)
+                except queue.Empty:
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
+                    if not worker.is_alive() and evq.empty():
+                        break
+                    continue
+                if item is _SENTINEL:
+                    break
+                stage, data = item
+                self.wfile.write(_frame(stage, data))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
+            pass
+        except Exception:
+            pass
 
     def _api_corpus_dir_export(self, query: dict[str, list[str]]) -> None:
         """Download a generated corpus dir as json | jsonl | csv. Bounded to
