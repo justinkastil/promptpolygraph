@@ -9,30 +9,28 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 ## [0.6.0] - 2026-06-11
 
 ### Added
-- **Root-cause drill-down in the Arena.** Click an attacker to see the multi-turn
-  timeline (which turn a control flipped from held to broken) alongside the
-  root cause.
-- **Code-grounded root-cause ladder (opt-in).** Point `redteam.code_path` at a
-  local checkout and the model traces a breach to **real `file:line` rungs** of
-  the target's own source — colored where the guardrail is missing (red), its
-  backstop (yellow) — shown side-by-side with the code, with a suggested-fix
-  diff. Reuses the forensic code-reading; the displayed source is re-read from
-  disk. With no clone it shows the honest finding (named control to harden +
-  OWASP/ATLAS + mitigation + a CTA) — **never a synthesized "defense pipeline."**
-- **IP-egress protections for the code dive.** Defaults to a **local model**
-  (source never leaves the machine); a non-local provider is refused when
-  air-gap is on (`POLYGRAPH_AIR_GAP=1`) and otherwise requires explicit consent.
-  Source excerpts are **secret-scrubbed** before any model sees them, and
-  indexing honors `.gitignore` / `.polygraphignore` on top of the vendor-dir skip.
-- **Replay.** Arena runs are persisted; a Live/Replay toggle lets you re-load and
-  re-watch a past run (`/api/redteam/runs`, `/api/redteam/runs/{id}`,
-  `/api/redteam/runs/{id}/events`) and drill into it.
-- **Arena overhaul** — information-dense attacker lanes (technique/source,
-  provider, mode), a live scoreboard (ASR + OWASP coverage grid), a findings
-  table, and a cleaner, professional surface.
-
-### Changed
-- The Arena drops the decorative header treatment in favor of a substantive layout.
+- Arena drill-down: click an attacker for the per-turn timeline (probe/response/
+  verdict per turn) and the root cause.
+- Code-grounded root-cause ladder (opt-in via `redteam.code_path`): a model pass
+  over a local checkout cites `file:line` rungs of the target source, colored by
+  stage state (broken/weak/held), with a suggested-fix diff; source windows are
+  re-read from disk. With no `code_path` it returns a finding summary (control,
+  OWASP/ATLAS, mitigation) instead of a ladder.
+- Code-dive egress controls: defaults to a local model; a non-local provider is
+  refused when `POLYGRAPH_AIR_GAP=1` and otherwise requires `consent` in the
+  request. Excerpts are secret-scrubbed before send; indexing honors
+  `.gitignore` / `.polygraphignore` in addition to the vendor-dir skip.
+- Replay: Arena runs are persisted to `out_dir/redteam/<id>/`; Live/Replay
+  toggle. Endpoints: `GET /api/redteam/runs`, `/api/redteam/runs/{id}`,
+  `/api/redteam/runs/{id}/events`; `POST /api/redteam/trace`.
+- Arena lanes show technique/source, provider, and mode; scoreboard shows ASR +
+  an OWASP coverage grid; a findings table. OSS source quick-add chips and a
+  Trace-in-code `code_path` field.
+- Studio (renamed from Personas, with Prompts | Personas sub-tabs): prompt-corpus
+  generator — `POST /api/corpus/generate` (mode/domain/difficulty/count/
+  per_category/categories/seed; pluggable provider+model; mock), preview, export
+  via `GET /api/corpus/export` (json/jsonl/csv, path-guarded), and "use in new
+  run" (corpus path override on `/api/run`).
 
 ## [0.5.1] - 2026-06-11
 
