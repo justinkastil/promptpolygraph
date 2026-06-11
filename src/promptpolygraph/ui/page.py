@@ -219,6 +219,22 @@ _HEAD = (
   .builder-sec > .bs-title { display: flex; align-items: baseline; gap: 8px; font-size: var(--label-size); font-weight: 700; letter-spacing: var(--label-spacing); text-transform: uppercase; color: var(--text); margin-bottom: 12px; }
   .builder-sec > .bs-title::before { content: ""; width: 3px; align-self: stretch; min-height: 12px; border-radius: 2px; background: var(--accent); opacity: .7; }
   .builder-sec > .bs-title .bs-note { font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); font-size: 11.5px; }
+  /* per-type target-adapter field groups + the advanced raw-JSON disclosure */
+  .adapter-fields { overflow: visible; }
+  .adapter-adv { margin: 4px 0 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); overflow: visible; }
+  .adapter-adv > summary { cursor: pointer; padding: 8px 11px; font-size: 11.5px; font-weight: 600; color: var(--muted); list-style: none; user-select: none; }
+  .adapter-adv > summary::-webkit-details-marker { display: none; }
+  .adapter-adv > summary::before { content: "\25B8"; display: inline-block; margin-right: 7px; transition: transform .14s; color: var(--muted-2, #6a7280); }
+  .adapter-adv[open] > summary::before { transform: rotate(90deg); }
+  .adapter-adv[open] > summary { border-bottom: 1px solid var(--border); }
+  .adapter-adv > .field, .adapter-adv > .form-grid { padding-left: 11px; padding-right: 11px; }
+
+  /* let form containers show tooltips instead of clipping them. A `.tip-host`
+     panel (form panels only — never scrolling-table panels) drops its overflow
+     clip; the field/grid/section chain is overflow:visible so an upward bubble
+     escapes cleanly. */
+  .panel.tip-host { overflow: visible; }
+  .builder-sec, .form-grid, .field, .checks, .catadd { overflow: visible; }
 
   /* helper microcopy under a field; ".opt" is an inline "optional" qualifier on a label */
   .field-hint { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.45; margin-top: 2px; letter-spacing: 0; text-transform: none; font-weight: 400; }
@@ -1536,7 +1552,7 @@ function renderNewRun(configs, pfiles) {
     + '<div class="nr-path' + (newRunPath === "build" ? " active" : "") + '" id="nrp-build" onclick="setNewRunPath(\'build\')">Build a config</div>'
     + '</div>';
 
-  const form = '<div class="panel"><h2>New run</h2>'
+  const form = '<div class="panel tip-host"><h2>New run</h2>'
     + paths
     + '<div id="nr-pick-pane"' + (newRunPath === "pick" ? "" : ' style="display:none"') + '>' + pickForm + '</div>'
     + '<div id="nr-build-pane"' + (newRunPath === "build" ? "" : ' style="display:none"') + '>' + buildForm + '</div>'
@@ -1745,7 +1761,7 @@ function renderPromptStudio() {
   const diffOpts = CORPUS_DIFFS.map(m =>
     '<option value="' + m + '"' + (m === "standard" ? " selected" : "") + '>' + m + '</option>').join("");
 
-  const gen = '<div class="panel"><h2>Generate a prompt corpus</h2>'
+  const gen = '<div class="panel tip-host"><h2>Generate a prompt corpus</h2>'
     // what to generate
     + '<div class="builder-sec" style="border-top:0;padding-top:14px"><div class="bs-title">Prompts</div>'
     + '<div class="form-grid" style="padding:0 0 4px">'
@@ -2166,20 +2182,87 @@ function builderFormHtml() {
       + '<input type="text" id="bld-domain" placeholder="e.g. a budgeting assistant for freelancers">'
       + '<span class="field-hint">Plain-language description; grounds generated prompts.</span></div>'
     + '</div></div>'
-    // adapter
-    + '<div class="builder-sec"><div class="bs-title">Adapter</div><div class="form-grid" style="padding:0 0 4px">'
+    // adapter — the TARGET (system under test). Type-aware fields, not raw JSON.
+    + '<div class="builder-sec"><div class="bs-title">Target adapter'
+      + '<span class="bs-note">point the harness at the system under test</span></div>'
+    + '<div class="form-grid" style="padding:0 0 8px">'
     + '<div class="field"><label>Type'
-      + tip("How the harness reaches the system under test. demo = built-in echo target · llm = a provider/model · http = a chat endpoint (set base_url in Options) · callable = your own Python function (a custom adapter must be wired, or Test connection reports \'not wired\').")
-      + '</label><select id="bld-adapter">' + opts(BUILD_ADAPTERS, "demo") + '</select>'
-      + '<span class="field-hint">How the run reaches the system under test.</span></div>'
-    + '<div class="field" style="grid-column:span 2"><label>Options <span class="opt">JSON, optional</span>'
-      + tip("Adapter-specific settings as JSON — e.g. a base_url for an http adapter, or a module:function name for a callable adapter.")
-      + '</label>'
-      + '<textarea id="bld-adapter-opts" placeholder=\'{ "base_url": "/v1/chat" }\'></textarea>'
-      + '<span class="field-hint">Adapter-specific settings, e.g. an endpoint URL.</span></div>'
+      + tip("How the harness reaches the system under test. demo = built-in offline sample · llm = a provider/model · http = your own JSON/REST endpoint · callable = an importable Python function in this environment.")
+      + '</label><select id="bld-adapter" onchange="onAdapterTypeChange()">' + opts(BUILD_ADAPTERS, "demo") + '</select>'
+      + '<span class="field-hint">The kind of target the run reaches.</span></div>'
+    + '<div class="field"><label>Name <span class="opt">optional</span></label>'
+      + '<input type="text" id="bld-adapter-name" placeholder="e.g. staging-api">'
+      + '<span class="field-hint">A label for this target in the report.</span></div>'
     + '</div>'
-    + '<div style="padding:2px 0 4px"><button class="btn" id="bld-adapter-test" type="button" onclick="testBuilderAdapter()">Test connection</button>'
-      + '<span class="field-hint" style="display:inline;margin-left:8px">Sends one trivial query to verify the adapter is reachable before you run.</span>'
+    // ── demo ───────────────────────────────────────────────────────────
+    + '<div class="adapter-fields" id="adf-demo">'
+      + '<div class="field-hint" style="padding:2px 0 6px">A built-in offline sample target &mdash; no setup. Good for trying the harness end-to-end.</div>'
+    + '</div>'
+    // ── http ───────────────────────────────────────────────────────────
+    + '<div class="adapter-fields" id="adf-http" style="display:none">'
+      + '<div class="form-grid" style="padding:0 0 4px">'
+      + '<div class="field" style="grid-column:1 / -1"><label>URL <span class="opt">required</span>'
+        + tip("The endpoint the harness POSTs/GETs each case to. Use ${VAR} to interpolate an environment variable (e.g. an API host).")
+        + '</label><input type="text" id="bld-http-url" placeholder="your-host/v1/chat">'
+        + '<span class="field-hint">Where the target lives. <b>${VAR}</b> pulls from the environment.</span></div>'
+      + '<div class="field"><label>Method</label><select id="bld-http-method">' + opts(["POST", "GET"], "POST") + '</select>'
+        + '<span class="field-hint">HTTP verb for the request.</span></div>'
+      + '<div class="field"><label>Response path'
+        + tip("A JMESPath into the JSON response that yields the answer text. Defaults to text. Examples: choices[0].message.content · data.reply")
+        + '</label><input type="text" id="bld-http-respath" placeholder="text">'
+        + '<span class="field-hint">Where the answer is in the JSON reply (default <b>text</b>).</span></div>'
+      + '</div>'
+      + '<div class="field" style="padding:0 0 4px"><label>Headers <span class="opt">JSON, optional</span>'
+        + tip("Request headers as a JSON object. ${VAR} interpolates an environment variable, e.g. an auth token.")
+        + '</label><textarea id="bld-http-headers" placeholder=\'{ "Authorization": "Bearer ${API_TOKEN}", "Content-Type": "application/json" }\'></textarea>'
+        + '<span class="field-hint">Sent with every request. <b>${VAR}</b> reads the environment.</span></div>'
+      + '<div class="field" style="padding:0 0 4px"><label>Request body template <span class="opt">JSON</span>'
+        + tip("The JSON body sent each request. The literal {{prompt}} anywhere inside is replaced with the case prompt ({{category}} and {{id}} also work). Leave blank to send a simple prompt field.")
+        + '</label><textarea id="bld-http-body" placeholder=\'{ "messages": [ { "role": "user", "content": "{{prompt}}" } ] }\'></textarea>'
+        + '<span class="field-hint">The request payload. <b>{{prompt}}</b> is replaced with each case prompt (also <b>{{category}}</b>, <b>{{id}}</b>).</span></div>'
+    + '</div>'
+    // ── llm ────────────────────────────────────────────────────────────
+    + '<div class="adapter-fields" id="adf-llm" style="display:none">'
+      + '<div class="form-grid" style="padding:0 0 4px">'
+      + '<div class="field"><label>Provider</label><select class="field" id="bld-ad-provider"><option>loading&hellip;</option></select></div>'
+      + '<div class="field"><label>Model</label><select class="field" id="bld-ad-model"><option>&mdash;</option></select>'
+        + '<input type="text" id="bld-ad-model-custom" placeholder="custom model name" style="display:none;margin-top:4px"></div>'
+      + '<div class="field"><label>Max tokens</label><input type="number" id="bld-llm-maxtok" min="1" placeholder="512">'
+        + '<span class="field-hint">Cap on the target&#39;s reply length.</span></div>'
+      + '<div class="field"><label>Temperature</label><input type="number" id="bld-llm-temp" min="0" max="2" step="0.1" placeholder="0">'
+        + '<span class="field-hint">Sampling randomness (<b>0</b> = deterministic).</span></div>'
+      + '</div>'
+      + '<div id="bld-ad-provider-notice"></div>'
+      + '<div class="field" style="padding:0 0 4px"><label>System prompt <span class="opt">optional</span></label>'
+        + '<textarea id="bld-llm-system" placeholder="You are the assistant under test."></textarea>'
+        + '<span class="field-hint">Prepended to every case as the target&#39;s system message.</span></div>'
+      + '<details class="adapter-adv"><summary>Advanced</summary>'
+        + '<div class="form-grid" style="padding:8px 0 4px">'
+        + '<div class="field"><label>Base URL <span class="opt">optional</span>'
+          + tip("Override the API base URL — e.g. a local OpenAI-compatible server.")
+          + '</label><input type="text" id="bld-llm-baseurl" placeholder="http://localhost:11434/v1"></div>'
+        + '<div class="field"><label>API key env var <span class="opt">optional</span>'
+          + tip("Name of the environment variable holding the API key (e.g. OPENAI_API_KEY). The key value never leaves the environment.")
+          + '</label><input type="text" id="bld-llm-keyenv" placeholder="OPENAI_API_KEY"></div>'
+        + '</div></details>'
+    + '</div>'
+    // ── callable ───────────────────────────────────────────────────────
+    + '<div class="adapter-fields" id="adf-callable" style="display:none">'
+      + '<div class="field" style="padding:0 0 4px"><label>Import <span class="opt">module:function</span>'
+        + tip("An importable Python function (prompt|case) -> response, available in the environment running the harness. Written as module.path:function_name.")
+        + '</label><input type="text" id="bld-call-import" placeholder="my_pkg.targets:answer">'
+        + '<span class="field-hint">An importable Python function <b>(prompt|case) -&gt; response</b>, available in the environment running the harness. Written as <b>module:function</b>.</span></div>'
+    + '</div>'
+    // ── advanced raw JSON (power users) ────────────────────────────────
+    + '<details class="adapter-adv" id="adf-rawwrap"><summary>Advanced (raw JSON options)</summary>'
+      + '<div class="field" style="padding:8px 0 4px"><label>Options <span class="opt">JSON</span>'
+        + tip("Raw adapter options as JSON. When non-empty this OVERRIDES the fields above on Save / Test / Launch — for settings the form does not expose.")
+        + '</label>'
+        + '<textarea id="bld-adapter-opts" placeholder=\'{ "timeout": 90 }\'></textarea>'
+        + '<span class="field-hint">When non-empty, this is sent verbatim and <b>overrides the fields above</b>.</span></div>'
+    + '</details>'
+    + '<div style="padding:8px 0 4px"><button class="btn" id="bld-adapter-test" type="button" onclick="testBuilderAdapter()">Test connection</button>'
+      + '<span class="field-hint" style="display:inline;margin-left:8px">Sends one trivial query to verify the target is reachable before you run.</span>'
       + '<div class="conn-result" id="bld-adapter-conn"></div></div>'
     + '</div>'
     // corpus
@@ -2254,15 +2337,94 @@ function getBuilderCats() {
     .map(el => (el.value || "").trim()).filter(Boolean);
 }
 
+// ---- type-aware target adapter -----------------------------------------
+let _adapterProvidersReady = false;
+
+// Show the field group for the selected type; lazily wire the llm provider
+// selects the first time the llm group is revealed.
+function onAdapterTypeChange() {
+  const sel = document.getElementById("bld-adapter");
+  const type = sel ? sel.value : "demo";
+  ["demo", "http", "llm", "callable"].forEach(t => {
+    const el = document.getElementById("adf-" + t);
+    if (el) el.style.display = (t === type) ? "" : "none";
+  });
+  if (type === "llm" && !_adapterProvidersReady && document.getElementById("bld-ad-provider")) {
+    _adapterProvidersReady = true;
+    initProviderSelects({
+      providerSel: "bld-ad-provider", modelSel: "bld-ad-model", customInput: "bld-ad-model-custom",
+      notice: "bld-ad-provider-notice", preferLocal: false,
+    });
+  }
+}
+
+// Parse a small JSON field; returns {} on blank, throws on malformed (caller
+// surfaces the message). Used for http headers / body / the raw-options box.
+function _parseJsonField(id) {
+  const raw = (document.getElementById(id) && document.getElementById(id).value || "").trim();
+  if (!raw) return undefined;
+  return JSON.parse(raw);
+}
+
+// Build the adapter {type, name?, options:{…}} spec from the per-type fields.
+// If the Advanced raw-JSON box is non-empty it wins (verbatim override).
+// Throws Error(message) for malformed JSON so callers can show it inline.
+function buildAdapterSpec() {
+  const type = (document.getElementById("bld-adapter") || {}).value || "demo";
+  const name = (document.getElementById("bld-adapter-name") || {}).value || "";
+  let options = {};
+  const rawBox = (document.getElementById("bld-adapter-opts") || {}).value || "";
+  if (rawBox.trim()) {
+    try { options = JSON.parse(rawBox); }
+    catch (e) { throw new Error("Advanced options is not valid JSON: " + e.message); }
+    if (!options || typeof options !== "object") throw new Error("Advanced options must be a JSON object.");
+  } else if (type === "http") {
+    const url = ((document.getElementById("bld-http-url") || {}).value || "").trim();
+    if (url) options.url = url;
+    const method = (document.getElementById("bld-http-method") || {}).value;
+    if (method && method !== "POST") options.method = method;
+    let headers, body;
+    try { headers = _parseJsonField("bld-http-headers"); }
+    catch (e) { throw new Error("Headers is not valid JSON: " + e.message); }
+    if (headers && Object.keys(headers).length) options.headers = headers;
+    try { body = _parseJsonField("bld-http-body"); }
+    catch (e) { throw new Error("Request body template is not valid JSON: " + e.message); }
+    if (body !== undefined) options.body_template = body;
+    const rp = ((document.getElementById("bld-http-respath") || {}).value || "").trim();
+    if (rp) options.response_path = rp;
+  } else if (type === "llm") {
+    const provider = resolveProvider("bld-ad-provider");
+    if (provider) options.provider = provider;
+    const model = resolveModel("bld-ad-model", "bld-ad-model-custom");
+    if (model) options.model = model;
+    const sysv = ((document.getElementById("bld-llm-system") || {}).value || "").trim();
+    if (sysv) options.system = sysv;
+    const mt = ((document.getElementById("bld-llm-maxtok") || {}).value || "").trim();
+    if (mt) options.max_tokens = Number(mt);
+    const tp = ((document.getElementById("bld-llm-temp") || {}).value || "").trim();
+    if (tp !== "") options.temperature = Number(tp);
+    const bu = ((document.getElementById("bld-llm-baseurl") || {}).value || "").trim();
+    if (bu) options.base_url = bu;
+    const ke = ((document.getElementById("bld-llm-keyenv") || {}).value || "").trim();
+    if (ke) options.api_key_env = ke;
+  } else if (type === "callable") {
+    const imp = ((document.getElementById("bld-call-import") || {}).value || "").trim();
+    if (imp) options.import = imp;
+  }
+  const spec = { type: type, options: options };
+  if (name.trim()) spec.name = name.trim();
+  return spec;
+}
+
 // assemble the builder form into a Config-shaped object.
 function assembleConfig() {
-  let adapterOpts = {};
-  const rawOpts = (document.getElementById("bld-adapter-opts").value || "").trim();
-  if (rawOpts) { try { adapterOpts = JSON.parse(rawOpts); } catch (e) { adapterOpts = {}; } }
+  let adapter;
+  try { adapter = buildAdapterSpec(); }
+  catch (e) { adapter = { type: (document.getElementById("bld-adapter") || {}).value || "demo", options: {} }; }
   const cfg = {
     name: (document.getElementById("bld-name").value || "").trim() || "polygraph-run",
     domain: (document.getElementById("bld-domain").value || "").trim() || null,
-    adapter: { type: document.getElementById("bld-adapter").value, options: adapterOpts },
+    adapter: adapter,
     corpus: {
       mode: document.getElementById("bld-mode").value,
       per_category: Number(document.getElementById("bld-percat").value || 8),
@@ -2289,14 +2451,9 @@ function assembleConfig() {
 
 // Test the adapter currently described in the builder form, before saving.
 function testBuilderAdapter() {
-  let adapterOpts = {};
-  const rawOpts = (document.getElementById("bld-adapter-opts").value || "").trim();
-  if (rawOpts) {
-    try { adapterOpts = JSON.parse(rawOpts); }
-    catch (e) { renderConnResult("bld-adapter-conn", "bad", "Not connected — Options is not valid JSON: " + esc(e.message)); return; }
-  }
-  const spec = { type: document.getElementById("bld-adapter").value, options: adapterOpts };
-  if (adapterOpts && typeof adapterOpts === "object" && adapterOpts.name) spec.name = adapterOpts.name;
+  let spec;
+  try { spec = buildAdapterSpec(); }
+  catch (e) { renderConnResult("bld-adapter-conn", "bad", "Not connected — " + esc(e.message)); return; }
   runAdapterTest("bld-adapter-conn", spec);
 }
 
@@ -2308,11 +2465,52 @@ function loadConfigIntoBuilder(cfg) {
   set("bld-name", cfg.name || "");
   set("bld-domain", cfg.domain || "");
   const ad = cfg.adapter || {};
-  set("bld-adapter", BUILD_ADAPTERS.indexOf(ad.type) >= 0 ? ad.type : "demo");
-  const opts = ad.options || ad.opts;
-  if (opts && typeof opts === "object" && Object.keys(opts).length) {
-    set("bld-adapter-opts", JSON.stringify(opts, null, 2));
-  } else { set("bld-adapter-opts", ""); }
+  const adType = BUILD_ADAPTERS.indexOf(ad.type) >= 0 ? ad.type : "demo";
+  set("bld-adapter", adType);
+  set("bld-adapter-name", ad.name || "");
+  const opts = (ad.options || ad.opts || {});
+  // Spread known options across the type-aware fields; stash any leftover keys
+  // (the form does not expose) into the Advanced raw-JSON box so they survive.
+  const known = { demo: [], http: ["url", "method", "headers", "body_template", "response_path"],
+    llm: ["provider", "model", "system", "max_tokens", "temperature", "base_url", "api_key_env"],
+    callable: ["import", "target", "ref"] }[adType] || [];
+  const leftover = {};
+  Object.keys(opts).forEach(k => { if (known.indexOf(k) < 0) leftover[k] = opts[k]; });
+  const jstr = v => (v && typeof v === "object") ? JSON.stringify(v, null, 2) : (v != null ? String(v) : "");
+  // clear all per-type fields first
+  ["bld-http-url", "bld-http-respath", "bld-http-headers", "bld-http-body",
+   "bld-llm-system", "bld-llm-maxtok", "bld-llm-temp", "bld-llm-baseurl", "bld-llm-keyenv",
+   "bld-call-import"].forEach(id => { const e = document.getElementById(id); if (e) e.value = ""; });
+  if (adType === "http") {
+    set("bld-http-url", opts.url || "");
+    set("bld-http-method", (opts.method || "POST").toUpperCase() === "GET" ? "GET" : "POST");
+    if (opts.headers != null) set("bld-http-headers", jstr(opts.headers));
+    if (opts.body_template != null) set("bld-http-body", jstr(opts.body_template));
+    set("bld-http-respath", opts.response_path || "");
+  } else if (adType === "llm") {
+    if (opts.system != null) set("bld-llm-system", String(opts.system));
+    if (opts.max_tokens != null) set("bld-llm-maxtok", String(opts.max_tokens));
+    if (opts.temperature != null) set("bld-llm-temp", String(opts.temperature));
+    if (opts.base_url != null) set("bld-llm-baseurl", String(opts.base_url));
+    if (opts.api_key_env != null) set("bld-llm-keyenv", String(opts.api_key_env));
+  } else if (adType === "callable") {
+    set("bld-call-import", opts.import || opts.target || opts.ref || "");
+  }
+  set("bld-adapter-opts", Object.keys(leftover).length ? JSON.stringify(leftover, null, 2) : "");
+  onAdapterTypeChange();
+  // llm provider/model fields are async; fill after the selects populate
+  if (adType === "llm") {
+    setTimeout(() => {
+      const pv = document.getElementById("bld-ad-provider");
+      if (pv && opts.provider) { pv.value = opts.provider; fillModelSelect({ providerSel: "bld-ad-provider", modelSel: "bld-ad-model", customInput: "bld-ad-model-custom" }); }
+      const ms = document.getElementById("bld-ad-model");
+      if (ms && opts.model) {
+        const has = Array.from(ms.options).some(o => o.value === opts.model);
+        if (has) ms.value = opts.model;
+        else { ms.value = CUSTOM_OPT; const c = document.getElementById("bld-ad-model-custom"); if (c) { c.style.display = ""; c.value = opts.model; } }
+      }
+    }, 80);
+  }
   const co = cfg.corpus || {};
   set("bld-mode", BUILD_CORPUS_MODES.indexOf(co.mode) >= 0 ? co.mode : "varied");
   if (co.per_category != null) set("bld-percat", co.per_category);

@@ -66,16 +66,22 @@ THEME_CSS: str = r"""
 
   /* ── shared top header / nav ─────────────────────────────────────────── */
   header.top {
-    display: flex; align-items: baseline; gap: 14px;
-    padding: 13px 22px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 11px 22px; border-bottom: 1px solid var(--border);
     background: var(--panel); position: sticky; top: 0; z-index: 30;
   }
-  header.top h1 { font-size: 16px; font-weight: 700; margin: 0; letter-spacing: .3px; }
-  header.top .sub { color: var(--muted); font-size: 12px; }
-  header.top .spacer { flex: 1; }
-  header.top .crumb { color: var(--muted); font-size: 13px; cursor: pointer; transition: color .14s; }
+  header.top h1 { font-size: 16px; font-weight: 700; margin: 0; letter-spacing: .3px; white-space: nowrap; }
+  header.top .sub { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  header.top .spacer { flex: 1 1 16px; min-width: 0; }
+  header.top .crumb { color: var(--muted); font-size: 13px; cursor: pointer; transition: color .14s; white-space: nowrap; }
   header.top .crumb:hover { color: var(--text); }
-  header.top .navtabs { display: flex; gap: 2px; margin-left: 4px; }
+  /* right-aligned cluster: crumb + Designer button + status pill, real gaps,
+     never overlapping. Shrinks/wraps before it can collide with the nav. */
+  header.top .top-right {
+    display: flex; align-items: center; gap: 12px; margin-left: auto;
+    flex-wrap: wrap; justify-content: flex-end; min-width: 0;
+  }
+  header.top .navtabs { display: flex; gap: 2px; margin-left: 4px; flex-wrap: wrap; }
   header.top .navtab {
     padding: 6px 13px; cursor: pointer; color: var(--muted); border-radius: var(--radius-sm);
     font-weight: 600; font-size: 13px; text-decoration: none; transition: background .14s, color .14s;
@@ -161,26 +167,50 @@ THEME_CSS: str = r"""
   }
   .tip:hover, .tip:focus-visible { color: var(--text); border-color: var(--accent); outline: none; }
   .tip:focus-visible { box-shadow: var(--focus-ring); }
+  /* When a tip is hovered/focused, lift its whole positioning chain out of any
+     overflow:hidden/auto ancestor clipping so the bubble is never cut off.
+     `isolation:isolate` is harmless and keeps the high z-index honest. */
+  .tip:hover, .tip:focus-within, .tip:focus-visible { z-index: 200; }
+  .tip-host { overflow: visible !important; }
+  /* the bubble — opens UPWARD by default; .tip-below opens downward (header). */
   .tip::after {
     content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%;
     transform: translateX(-50%) translateY(4px);
-    width: max-content; max-width: 280px; padding: 8px 10px;
+    width: max-content; max-width: 260px; padding: 8px 11px;
     background: #0a0c11; color: var(--text); border: 1px solid var(--border);
     border-radius: var(--radius-sm); font: 400 11.5px/1.5 var(--sans); text-align: left;
-    white-space: normal; word-break: normal; box-shadow: 0 8px 24px rgba(0,0,0,.5);
-    opacity: 0; pointer-events: none; transition: opacity .14s, transform .14s; z-index: 60;
+    white-space: normal; word-break: normal; overflow-wrap: anywhere;
+    box-shadow: 0 10px 28px rgba(0,0,0,.55);
+    opacity: 0; pointer-events: none; transition: opacity .14s, transform .14s; z-index: 1000;
   }
+  /* the arrow */
   .tip::before {
     content: ""; position: absolute; bottom: calc(100% + 3px); left: 50%;
     transform: translateX(-50%) translateY(4px);
     border: 5px solid transparent; border-top-color: var(--border);
-    opacity: 0; pointer-events: none; transition: opacity .14s, transform .14s; z-index: 61;
+    opacity: 0; pointer-events: none; transition: opacity .14s, transform .14s; z-index: 1001;
   }
   .tip:hover::after, .tip:focus-visible::after,
-  .tip:hover::before, .tip:focus-visible::before { opacity: 1; transform: translateX(-50%) translateY(0); }
-  /* edge-aware variants so a tip near the right edge isn't clipped */
+  .tip:hover::before, .tip:focus-visible::before { opacity: 1; }
+  .tip:hover::after, .tip:focus-visible::after { transform: translateX(-50%) translateY(0); }
+  .tip:hover::before, .tip:focus-visible::before { transform: translateX(-50%) translateY(0); }
+  /* edge-aware: pin to the right so a tip near the right edge can't run off. */
   .tip.tip-left::after { left: auto; right: -4px; transform: translateX(0) translateY(4px); }
   .tip.tip-left:hover::after, .tip.tip-left:focus-visible::after { transform: translateX(0) translateY(0); }
+  /* open downward (use near the top edge / sticky header) */
+  .tip.tip-below::after {
+    bottom: auto; top: calc(100% + 8px); transform: translateX(-50%) translateY(-4px);
+  }
+  .tip.tip-below.tip-left::after { left: auto; right: -4px; transform: translateX(0) translateY(-4px); }
+  .tip.tip-below::before {
+    bottom: auto; top: calc(100% + 3px);
+    border-top-color: transparent; border-bottom-color: var(--border);
+    transform: translateX(-50%) translateY(-4px);
+  }
+  .tip.tip-below:hover::after, .tip.tip-below:focus-visible::after,
+  .tip.tip-below.tip-left:hover::after, .tip.tip-below.tip-left:focus-visible::after { transform: translateX(0) translateY(0); }
+  .tip.tip-below:not(.tip-left):hover::after, .tip.tip-below:not(.tip-left):focus-visible::after { transform: translateX(-50%) translateY(0); }
+  .tip.tip-below:hover::before, .tip.tip-below:focus-visible::before { transform: translateX(-50%) translateY(0); }
 
   /* ── shared "Test connection" result line ────────────────────────────── */
   .conn-result { font-size: 12.5px; line-height: 1.5; margin-top: 8px; display: block; }
@@ -354,7 +384,7 @@ def header_html(active: str, *, links: bool) -> str:
     # "Mock-only (offline)" otherwise. The title= lists each provider + reason
     # as an accessible fallback; the same text fills the CSS tooltip bubble.
     status_pill = (
-        '<span class="status-pill tip" id="status-pill" tabindex="0" role="status" '
+        '<span class="status-pill tip tip-left tip-below" id="status-pill" tabindex="0" role="status" '
         'aria-live="polite" data-tip="Checking which model backends are wired…" '
         'title="Checking which model backends are wired…">'
         '<span class="sdot" aria-hidden="true"></span>'
@@ -374,9 +404,11 @@ def header_html(active: str, *, links: bool) -> str:
         '<span class="sub">control plane</span>'
         + nav
         + '<span class="spacer"></span>'
+        + '<span class="top-right">'
         + crumb
-        + status_pill
         + designer_btn
+        + status_pill
+        + "</span>"
         + "</header>"
     )
 
