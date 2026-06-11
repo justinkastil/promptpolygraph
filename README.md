@@ -40,11 +40,14 @@ See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 ## Install
 
 ```bash
-pip install -e ".[dev]"        # core + test deps
-pip install -e ".[dev,llm]"    # + OpenAI-compatible adapter
+pip install -e ".[dev]"            # core + test deps
+pip install -e ".[dev,llm]"        # + OpenAI-compatible adapter
+pip install -e ".[dev,redteam]"    # + OSS-grounded red-team sources (garak, PyRIT, DeepTeam, datasets)
 ```
 
-Requires Python 3.10+.
+Requires Python 3.10+. The red-team engine and Arena work with no extras (the
+built-in `catalog` probe source needs no dependencies); the `[redteam]` extra
+only lights up the external OSS sources.
 
 ## Quickstart
 
@@ -230,12 +233,59 @@ pharmacovigilance; a protocol-focused corpus and rubric):
 polygraph all --config examples/clinical_trials/config.yaml --mock --format md,html
 ```
 
+## Red-team & Arena
+
+An authorized adversarial red team for a system you own — a roster of attacker
+agents pressurizes the target, a breach judge rules each exchange, and findings
+roll up into a severity-ranked vulnerability report mapped to the **OWASP Top-10
+for LLM Apps** and **MITRE ATLAS**.
+
+```bash
+# Offline demo against the built-in target (zero tokens, deterministic):
+polygraph redteam --profile all_frontier --mock --format md,html,json
+
+# Ground the attack in OSS tooling + datasets, judge with a safety classifier:
+polygraph redteam --profile deep \
+  --sources catalog,garak,pyrit,deepteam,dataset:advbench \
+  --guard --format md,html,json
+
+polygraph redteam profiles      # list the preconfigured teams
+```
+
+- **Preconfigured teams** — `all_frontier` (default; every strategy on a
+  frontier model, each agent a distinct persona + temperature), `multi_frontier`
+  (mixed vendors), `mixed` (local open + frontier), `local_swarm` (100% offline),
+  `pressure`, `quick`, and `deep` (adaptive smart multi-turn).
+- **OSS-grounded, not blank-slate** — attackers seed + mutate from a catalog of
+  known techniques. `--sources` folds in optional **garak**, **PyRIT**,
+  **DeepTeam**, and on-demand **datasets** (AdvBench / HarmBench / JailbreakBench);
+  each runs through the same target → judge loop. Install the `[redteam]` extra.
+- **Smart multi-turn** — PAIR iterative refinement, Crescendo escalation, and TAP
+  candidate trees, per-attacker `mode`.
+- **Converters** — base64 / rot13 / leetspeak / payload-split / roleplay-wrap /
+  many-shot transforms, per-attacker `converter`.
+- **Judges** — an LLM reviewer (default) or `--guard` for a Llama-Guard-style
+  safety classifier on a local model.
+- **Live Arena** — watch the run in real time in the dashboard (`/redteam`, SSE)
+  or the service (`/ws/redteam`, WebSocket): attackers on the rails, target in
+  the centre, green/red breach accretion, drill-down to each mitigation.
+
+The report leads with the **attack success rate (ASR)**, an OWASP coverage table
+(tested vs breached), and OWASP/ATLAS tags on every finding. See
+[`docs/REDTEAM_LOCAL.md`](docs/REDTEAM_LOCAL.md) for running attacker/judge
+models locally (Ollama / HuggingFace, Mac Studio / NVIDIA DGX Spark / cloud).
+
 ## Architecture
 
 One local process: `Corpus → Runner (async pool, timeout/retry/resume) → Adapter → target → Response →
 SQLite + cache → Analyze (assertions + LLM ensemble) → Gate → Audit (persona + forensic) → Report`. No work
 queue, no database server. The store and dispatch sit behind interfaces, so a service/worker deployment can
 wrap the same engine without touching it.
+
+The red-team engine reuses the same adapter + report spine:
+`Profile (attacker roster) → [LLM attackers ⨯ multi-turn modes] + [OSS sources] → Adapter → target →
+Breach judge (LLM reviewer | Llama-Guard) → Vulnerability report (ASR + OWASP/ATLAS)`, with a live event
+stream (`emit`) that the CLI logs and the dashboard/service render as the Arena.
 
 ## Service mode (multi-user, scalable)
 
