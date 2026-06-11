@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ branding.title }}</title>
+<style>
+:root {
+  --fg: #1c1c1e; --muted: #6b6b70; --bg: #ffffff; --panel: #f6f6f8;
+  --border: #d9d9de; --pass: #1b7f37; --fail: #b01b1b; --accent: {{ branding.accent }};
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0 0 4rem; color: var(--fg); background: var(--bg);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.wrap { max-width: 960px; margin: 0 auto; padding: 2rem 1.25rem; }
+h1 { font-size: 1.9rem; margin: 0 0 .25rem; color: var(--accent); }
+h2 { font-size: 1.4rem; margin: 2.25rem 0 .75rem; padding-bottom: .3rem; border-bottom: 2px solid var(--accent); }
+h3 { font-size: 1.15rem; margin: 1.5rem 0 .5rem; }
+h4 { font-size: 1rem; margin: 0; }
+img.logo { max-height: 48px; margin-bottom: .5rem; }
+.muted { color: var(--muted); }
+.cover dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; margin: 1rem 0; }
+.cover dt { font-weight: 600; color: var(--muted); }
+.cover dd { margin: 0; }
+.verdict { font-size: 1.25rem; font-weight: 700; margin: 1rem 0; padding: .75rem 1rem; border-radius: 8px; background: var(--panel); border-left: 4px solid var(--accent); }
+.verdict.pass { color: var(--pass); }
+.verdict.fail { color: var(--fail); }
+.badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .75rem; font-weight: 700; letter-spacing: .03em; }
+.badge.pass { background: #e3f4e8; color: var(--pass); }
+.badge.fail { background: #fae3e3; color: var(--fail); }
+table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; font-size: .92rem; }
+th, td { border: 1px solid var(--border); padding: .4rem .55rem; text-align: left; }
+th { background: var(--panel); }
+tbody tr:nth-child(even) { background: #fbfbfc; }
+details { border: 1px solid var(--border); border-radius: 8px; margin: .5rem 0; background: var(--panel); }
+details > summary { cursor: pointer; padding: .6rem .8rem; font-weight: 600; list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details[open] > summary { border-bottom: 1px solid var(--border); }
+.case-body { padding: .25rem .8rem .8rem; }
+.case-body dl { display: grid; grid-template-columns: max-content 1fr; gap: .1rem .8rem; margin: .5rem 0; }
+.case-body dt { font-weight: 600; color: var(--muted); }
+.case-body dd { margin: 0; }
+pre { background: #1c1c1e; color: #f0f0f2; padding: .75rem; border-radius: 6px; overflow-x: auto; font-family: var(--mono); font-size: .85rem; white-space: pre-wrap; word-break: break-word; }
+ul { margin: .35rem 0 .75rem 1.25rem; padding: 0; }
+ol { margin: .35rem 0 .75rem 1.25rem; padding: 0; }
+.assert.pass::before { content: "\2713 "; color: var(--pass); font-weight: 700; }
+.assert.fail::before { content: "\2717 "; color: var(--fail); font-weight: 700; }
+code { font-family: var(--mono); background: #ececed; padding: .05rem .3rem; border-radius: 4px; font-size: .85em; }
+.delta-up { color: var(--pass); }
+.delta-down { color: var(--fail); }
+.footer dl { display: grid; grid-template-columns: max-content 1fr; gap: .1rem 1rem; }
+.footer dt { font-weight: 600; color: var(--muted); }
+.note { color: var(--muted); font-style: italic; }
+.persona { border: 1px solid var(--border); border-radius: 8px; padding: .25rem 1rem 1rem; margin: .75rem 0; background: var(--panel); }
+.narrative { background: var(--panel); border-radius: 8px; padding: .75rem 1rem; }
+</style></head>
+<body><div class="wrap">
+
+{%- macro fmt(v) -%}{% if v is none %}&mdash;{% else %}{{ v }}{% endif %}{%- endmacro -%}
+
+{# ── Cover ─────────────────────────────────────────────────────────── #}
+<section class="cover">
+{% if branding.logo %}<img class="logo" src="{{ branding.logo }}" alt="logo">{% endif %}
+<h1>{{ branding.title }}</h1>
+<dl>
+  <dt>Run ID</dt><dd><code>{{ cover.run_id }}</code></dd>
+  <dt>Adapter</dt><dd>{{ fmt(cover.adapter) }}</dd>
+  <dt>Model</dt><dd>{{ fmt(cover.model) }}</dd>
+  <dt>Mode</dt><dd>{{ fmt(cover.mode) }}</dd>
+  <dt>Created</dt><dd>{{ fmt(cover.created_at) }}</dd>
+  <dt>Completed</dt><dd>{{ fmt(cover.completed_at) }}</dd>
+  <dt>Cases executed</dt><dd>{{ cover.cases_executed }} / {{ cover.cases_total }}</dd>
+  <dt>Cases analyzed</dt><dd>{{ cover.cases_analyzed }}</dd>
+  <dt>Threshold</dt><dd>{{ fmt(cover.threshold) }}</dd>
+</dl>
+<div class="verdict {{ 'pass' if cover.overall_pass else 'fail' }}">
+  Overall verdict: {{ cover.verdict }} &mdash; {{ cover.categories_passing }}/{{ cover.categories_total }} categories passing
+</div>
+</section>
+
+{# ── Category scores ───────────────────────────────────────────────── #}
+<section>
+<h2>Category scores</h2>
+<table><thead><tr>
+  <th>Category</th><th>Count</th>
+  {% for d in dimensions %}<th>{{ d }}</th>{% endfor %}
+  <th>Pass</th>
+  {% if has_baseline %}<th>&Delta; vs baseline</th>{% endif %}
+</tr></thead><tbody>
+{% for cat in categories %}
+  <tr>
+    <td>{{ cat.name }}</td>
+    <td>{{ cat.count }}</td>
+    {% for ds in cat.dim_scores %}<td>{{ fmt(ds.value) }}</td>{% endfor %}
+    <td><span class="badge {{ 'pass' if cat.pass else 'fail' }}">{{ 'PASS' if cat.pass else 'FAIL' }}</span></td>
+    {% if has_baseline %}
+    <td>{% if cat.deltas %}{% for d in cat.deltas %}{{ d.dimension }} <span class="{{ 'delta-up' if d.raw >= 0 else 'delta-down' }}">{{ d.delta }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% else %}&mdash;{% endif %}</td>
+    {% endif %}
+  </tr>
+{% endfor %}
+</tbody></table>
+</section>
+
+{# ── Per-category detail ───────────────────────────────────────────── #}
+<section>
+<h2>Per-category detail</h2>
+{% for cat in categories %}
+  <h3>{{ cat.name }}</h3>
+  {% for c in cat.cases %}
+  <details>
+    <summary><span class="badge {{ 'pass' if c.pass else 'fail' }}">{{ c.verdict }}</span> &nbsp; <code>{{ c.id }}</code></summary>
+    <div class="case-body">
+      <dl>
+        <dt>Prompt</dt><dd>{{ c.prompt }}</dd>
+        {% if c.expected_behavior %}<dt>Expected behavior</dt><dd>{{ c.expected_behavior }}</dd>{% endif %}
+      </dl>
+      {% if c.red_flags %}
+      <p><strong>Red flags:</strong></p>
+      <ul>{% for rf in c.red_flags %}<li>{{ rf }}</li>{% endfor %}</ul>
+      {% endif %}
+      <p><strong>Response:</strong></p>
+      <pre>{{ c.response }}{% if c.response_error %}
+[error: {{ c.response_error }}]{% endif %}</pre>
+      {% if c.dim_scores %}
+      <p><strong>Scores:</strong>
+        {% for ds in c.dim_scores %}{{ ds.dimension }}={{ ds.value if ds.value is not none else 'n/a' }}{% if not loop.last %} &middot; {% endif %}{% endfor %}
+      </p>
+      {% endif %}
+      {% if c.assertions %}
+      <p><strong>Assertions:</strong></p>
+      <ul>{% for a in c.assertions %}<li class="assert {{ 'pass' if a.passed else 'fail' }}"><code>{{ a.kind }}</code> {{ a.description }} {{ a.detail }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if c.failure_reason or c.notes %}
+      <dl>
+        {% if c.failure_reason %}<dt>Failure reason</dt><dd>{{ c.failure_reason }}</dd>{% endif %}
+        {% if c.notes %}<dt>Notes</dt><dd>{{ c.notes }}</dd>{% endif %}
+      </dl>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+{% endfor %}
+</section>
+
+{# ── Persona panel ─────────────────────────────────────────────────── #}
+<section>
+<h2>Persona panel</h2>
+{% if not personas and not persona_comparison %}
+  <p class="note">No persona reactions available for this run.</p>
+{% else %}
+  {% for p in personas %}
+  <div class="persona">
+    <h3>{{ p.persona }}</h3>
+    {% if p.summary %}<p>{{ p.summary }}</p>{% endif %}
+    {% if p.biggest_frustrations %}
+    <p><strong>Biggest frustrations:</strong></p>
+    <ul>{% for f in p.biggest_frustrations %}<li>{{ f }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if p.what_would_win_me %}<p><strong>What would win me:</strong> {{ p.what_would_win_me }}</p>{% endif %}
+    {% if p.reactions %}
+    <table><thead><tr><th>Case</th><th>Category</th><th>Trust</th><th>Useful</th><th>Clarity</th><th>Return?</th><th>Verdict</th></tr></thead><tbody>
+    {% for r in p.reactions %}
+      <tr><td><code>{{ fmt(r.case_id) }}</code></td><td>{{ fmt(r.category) }}</td><td>{{ fmt(r.trust) }}</td><td>{{ fmt(r.usefulness) }}</td><td>{{ fmt(r.clarity) }}</td><td>{{ fmt(r.would_return) }}</td><td>{{ fmt(r.verdict) }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if persona_comparison %}
+  <h3>Rubric vs persona divergence</h3>
+  <dl>
+    {% if persona_comparison.divergences %}<dt>Divergences</dt><dd>{{ persona_comparison.divergences }}</dd>{% endif %}
+    {% if persona_comparison.rubric_fidelity_verdict %}<dt>Rubric fidelity verdict</dt><dd>{{ persona_comparison.rubric_fidelity_verdict }}</dd>{% endif %}
+    {% if persona_comparison.chasing_tail_risks %}<dt>Chasing-tail risks</dt><dd>{{ persona_comparison.chasing_tail_risks }}</dd>{% endif %}
+    {% if persona_comparison.human_value_blindspots %}<dt>Human-value blindspots</dt><dd>{{ persona_comparison.human_value_blindspots }}</dd>{% endif %}
+    {% if persona_comparison.reconciled_priorities %}<dt>Reconciled priorities</dt><dd>{{ persona_comparison.reconciled_priorities }}</dd>{% endif %}
+    {% if persona_comparison.final_path %}<dt>Final path</dt><dd>{{ persona_comparison.final_path }}</dd>{% endif %}
+  </dl>
+  {% endif %}
+{% endif %}
+</section>
+
+{# ── Forensic synthesis ────────────────────────────────────────────── #}
+<section>
+<h2>Forensic synthesis</h2>
+{% if not forensic %}
+  <p class="note">No forensic synthesis available for this run.</p>
+{% else %}
+  {% if forensic.patterns %}
+  <h3>Cross-category patterns</h3>
+  <ul>
+  {% for p in forensic.patterns %}
+    <li>{{ p.pattern }}{% if p.affected_categories %} <span class="muted">({{ p.affected_categories | join(', ') }})</span>{% endif %}{% if p.shared_root_cause %} &mdash; {{ p.shared_root_cause }}{% endif %}</li>
+  {% endfor %}
+  </ul>
+  {% endif %}
+  {% if forensic.prioritized_changes %}
+  <h3>Prioritized changes</h3>
+  <ol>
+  {% for ch in forensic.prioritized_changes %}
+    <li><strong>{{ ch.change }}</strong>{% if ch.unlocks_categories %} <span class="muted">[unlocks: {{ ch.unlocks_categories | join(', ') }}]</span>{% endif %}{% if ch.rationale %} &mdash; {{ ch.rationale }}{% endif %}{% if ch.effort or ch.confidence %} <span class="muted">(effort: {{ fmt(ch.effort) }}, confidence: {{ fmt(ch.confidence) }})</span>{% endif %}</li>
+  {% endfor %}
+  </ol>
+  {% endif %}
+  {% if forensic.closest_to_pass %}
+  <p><strong>Closest to pass:</strong> {{ forensic.closest_to_pass | join(', ') }}</p>
+  {% endif %}
+  {% if forensic.narrative %}
+  <h3>Narrative</h3>
+  <div class="narrative">{{ forensic.narrative }}</div>
+  {% endif %}
+{% endif %}
+</section>
+
+{# ── A/B comparison ────────────────────────────────────────────────── #}
+{% if pairwise %}
+<section>
+<h2>A/B comparison</h2>
+<p><strong>{{ pairwise.run_a }}</strong> wins: {{ pairwise.wins_a }} &middot;
+   <strong>{{ pairwise.run_b }}</strong> wins: {{ pairwise.wins_b }} &middot;
+   ties: {{ pairwise.ties }}</p>
+{% if pairwise.by_category %}
+<table><thead><tr><th>Category</th><th>{{ pairwise.run_a }}</th><th>{{ pairwise.run_b }}</th><th>tie</th></tr></thead><tbody>
+{% for r in pairwise.by_category %}<tr><td>{{ r.category }}</td><td>{{ r.a }}</td><td>{{ r.b }}</td><td>{{ r.tie }}</td></tr>{% endfor %}
+</tbody></table>
+{% endif %}
+{% if pairwise.cases %}
+<table><thead><tr><th>Case</th><th>Winner</th><th>{{ pairwise.run_a }} mean</th><th>{{ pairwise.run_b }} mean</th></tr></thead><tbody>
+{% for c in pairwise.cases %}<tr><td><code>{{ c.case_id }}</code></td><td>{{ c.winner }}</td><td>{{ fmt(c.a_mean) }}</td><td>{{ fmt(c.b_mean) }}</td></tr>{% endfor %}
+</tbody></table>
+{% endif %}
+</section>
+{% endif %}
+
+{# ── Cost & latency footer ─────────────────────────────────────────── #}
+<section class="footer">
+<h2>Cost &amp; latency</h2>
+<dl>
+  <dt>Tokens in</dt><dd>{{ "{:,}".format(cost.tokens_in) }}</dd>
+  <dt>Tokens out</dt><dd>{{ "{:,}".format(cost.tokens_out) }}</dd>
+  <dt>Cost (USD)</dt><dd>{% if cost.usd %}${{ cost.usd }}{% else %}&mdash;{% endif %}</dd>
+  <dt>Latency p50</dt><dd>{{ fmt(latency.p50_ms) }} ms</dd>
+  <dt>Latency p95</dt><dd>{{ fmt(latency.p95_ms) }} ms</dd>
+  <dt>Latency mean</dt><dd>{{ fmt(latency.mean_ms) }} ms</dd>
+  <dt>Assertion pass rate</dt><dd>{{ fmt(assertion_pass_rate) }}%</dd>
+  <dt>Judge agreement (mean)</dt><dd>{{ fmt(agreement) }}</dd>
+</dl>
+</section>
+
+</div></body></html>

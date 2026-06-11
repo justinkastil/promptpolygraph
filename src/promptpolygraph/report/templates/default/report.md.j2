@@ -1,0 +1,112 @@
+{%- macro fmt(v) -%}{% if v is none %}—{% else %}{{ v }}{% endif %}{%- endmacro -%}
+# {{ branding.title }}
+
+**Run ID:** `{{ cover.run_id }}`
+**Adapter:** {{ fmt(cover.adapter) }}
+**Model:** {{ fmt(cover.model) }}
+**Mode:** {{ fmt(cover.mode) }}
+**Created:** {{ fmt(cover.created_at) }}
+**Completed:** {{ fmt(cover.completed_at) }}
+**Cases executed:** {{ cover.cases_executed }} / {{ cover.cases_total }}
+**Cases analyzed:** {{ cover.cases_analyzed }}
+**Threshold:** {{ fmt(cover.threshold) }}
+
+## Overall verdict: **{{ cover.verdict }}** — {{ cover.categories_passing }}/{{ cover.categories_total }} categories passing
+
+## Category scores
+
+| Category | Count |{% for d in dimensions %} {{ d }} |{% endfor %} Pass |{% if has_baseline %} Δ vs baseline |{% endif %}
+| --- | --- |{% for d in dimensions %} --- |{% endfor %} --- |{% if has_baseline %} --- |{% endif %}
+{% for cat in categories %}| {{ cat.name }} | {{ cat.count }} |{% for ds in cat.dim_scores %} {{ fmt(ds.value) }} |{% endfor %} {{ '✓' if cat.pass else '✗' }} |{% if has_baseline %} {% if cat.deltas %}{% for d in cat.deltas %}{{ d.dimension }} {{ d.delta }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %} |{% endif %}
+{% endfor %}
+## Per-category detail
+{% for cat in categories %}
+### {{ cat.name }}
+{% for c in cat.cases %}
+#### Case `{{ c.id }}` — {{ c.verdict }}
+
+**Prompt:** {{ c.prompt }}
+{% if c.expected_behavior %}
+**Expected behavior:** {{ c.expected_behavior }}
+{% endif %}{% if c.red_flags %}
+**Red flags:**
+{% for rf in c.red_flags %}- {{ rf }}
+{% endfor %}{% endif %}
+**Response:**
+
+```
+{{ c.response }}{% if c.response_error %}
+[error: {{ c.response_error }}]{% endif %}
+
+```
+{% if c.dim_scores %}
+**Scores:** {% for ds in c.dim_scores %}{{ ds.dimension }}={{ ds.value if ds.value is not none else 'n/a' }}{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}{% if c.assertions %}
+**Assertions:**
+{% for a in c.assertions %}- {{ '✓' if a.passed else '✗' }} `{{ a.kind }}` {{ a.description }} {{ a.detail }}
+{% endfor %}{% endif %}{% if c.failure_reason %}
+**Failure reason:** {{ c.failure_reason }}
+{% endif %}{% if c.notes %}
+**Notes:** {{ c.notes }}
+{% endif %}{% endfor %}{% endfor %}
+## Persona panel
+{% if not personas and not persona_comparison %}
+_No persona reactions available for this run._
+{% else %}{% for p in personas %}
+### {{ p.persona }}
+{% if p.summary %}
+{{ p.summary }}
+{% endif %}{% if p.biggest_frustrations %}
+**Biggest frustrations:**
+{% for f in p.biggest_frustrations %}- {{ f }}
+{% endfor %}{% endif %}{% if p.what_would_win_me %}
+**What would win me:** {{ p.what_would_win_me }}
+{% endif %}{% endfor %}{% if persona_comparison %}
+### Rubric vs persona divergence
+{% if persona_comparison.divergences %}
+**Divergences:** {{ persona_comparison.divergences }}
+{% endif %}{% if persona_comparison.rubric_fidelity_verdict %}
+**Rubric fidelity verdict:** {{ persona_comparison.rubric_fidelity_verdict }}
+{% endif %}{% if persona_comparison.reconciled_priorities %}
+**Reconciled priorities:** {{ persona_comparison.reconciled_priorities }}
+{% endif %}{% if persona_comparison.final_path %}
+**Final path:** {{ persona_comparison.final_path }}
+{% endif %}{% endif %}{% endif %}
+## Forensic synthesis
+{% if not forensic %}
+_No forensic synthesis available for this run._
+{% else %}{% if forensic.patterns %}
+### Cross-category patterns
+{% for p in forensic.patterns %}- {{ p.pattern }}{% if p.affected_categories %} ({{ p.affected_categories | join(', ') }}){% endif %}{% if p.shared_root_cause %} — {{ p.shared_root_cause }}{% endif %}
+{% endfor %}{% endif %}{% if forensic.prioritized_changes %}
+### Prioritized changes
+{% for ch in forensic.prioritized_changes %}{{ loop.index }}. **{{ ch.change }}**{% if ch.unlocks_categories %} [unlocks: {{ ch.unlocks_categories | join(', ') }}]{% endif %}{% if ch.rationale %} — {{ ch.rationale }}{% endif %}
+{% endfor %}{% endif %}{% if forensic.closest_to_pass %}
+**Closest to pass:** {{ forensic.closest_to_pass | join(', ') }}
+{% endif %}{% if forensic.narrative %}
+### Narrative
+
+{{ forensic.narrative }}
+{% endif %}{% endif %}
+{% if pairwise %}## A/B comparison
+
+**{{ pairwise.run_a }}** wins: {{ pairwise.wins_a }} · **{{ pairwise.run_b }}** wins: {{ pairwise.wins_b }} · ties: {{ pairwise.ties }}
+{% if pairwise.by_category %}
+| Category | {{ pairwise.run_a }} | {{ pairwise.run_b }} | tie |
+| --- | --- | --- | --- |
+{% for r in pairwise.by_category %}| {{ r.category }} | {{ r.a }} | {{ r.b }} | {{ r.tie }} |
+{% endfor %}{% endif %}{% if pairwise.cases %}
+| Case | Winner | {{ pairwise.run_a }} mean | {{ pairwise.run_b }} mean |
+| --- | --- | --- | --- |
+{% for c in pairwise.cases %}| `{{ c.case_id }}` | {{ c.winner }} | {{ fmt(c.a_mean) }} | {{ fmt(c.b_mean) }} |
+{% endfor %}{% endif %}
+{% endif %}## Cost & latency
+
+- **Tokens in:** {{ "{:,}".format(cost.tokens_in) }}
+- **Tokens out:** {{ "{:,}".format(cost.tokens_out) }}
+- **Cost (USD):** {% if cost.usd %}${{ cost.usd }}{% else %}—{% endif %}
+- **Latency p50:** {{ fmt(latency.p50_ms) }} ms
+- **Latency p95:** {{ fmt(latency.p95_ms) }} ms
+- **Latency mean:** {{ fmt(latency.mean_ms) }} ms
+- **Assertion pass rate:** {{ fmt(assertion_pass_rate) }}%
+- **Judge agreement (mean):** {{ fmt(agreement) }}
