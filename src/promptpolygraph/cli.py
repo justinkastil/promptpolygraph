@@ -281,6 +281,8 @@ def cmd_report(cfg: Config, run_id: str, formats: list[str], baseline_id: str | 
         meta, cases, responses, scores, summary,
         rubric=rubric, audit=audit, baseline_diff=baseline_diff,
         formats=formats, out_dir=str(rd),
+        template=cfg.report.template, template_dir=cfg.resolve(cfg.report.template_dir),
+        branding=cfg.report.branding,
     )
     for fmt, p in paths.items():
         print(f"  {fmt}: {p}")
@@ -320,6 +322,59 @@ def cmd_personas(cfg: Config, args) -> None:
 
         out.write_text(yaml.safe_dump([p.model_dump() for p in panel], sort_keys=False))
         print(f"generated {len(panel)} personas -> {out}")
+
+
+def cmd_dashboard(cfg: Config, args) -> None:
+    from .ui import serve_dashboard
+
+    serve_dashboard(
+        out_dir=cfg.out_dir,
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_open,
+    )
+
+
+def cmd_export(cfg: Config, args) -> None:
+    """Export the prompts/corpus of a run (or any corpus dir) as a reusable dataset."""
+    import csv
+
+    if args.run:
+        cases = _store(cfg).get_cases(args.run)
+        src = f"run {args.run[:8]}"
+    elif args.corpus:
+        from . import corpus as C
+
+        cases = C.load_corpus(cfg.resolve(args.corpus) or args.corpus)
+        src = f"corpus {args.corpus}"
+    else:
+        raise SystemExit("export requires --run <id> or --corpus <path>")
+
+    out = Path(args.out).expanduser()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fmt = args.format
+
+    if args.prompts_only:
+        rows: list[Any] = [{"prompt": c.prompt, "category": c.category} for c in cases]
+    else:
+        rows = [c.model_dump(mode="json", exclude={"id"}) for c in cases]
+
+    if fmt == "json":
+        out.write_text(json.dumps(rows, indent=2, ensure_ascii=False))
+    elif fmt == "jsonl":
+        out.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
+    elif fmt == "csv":
+        cols = ["prompt", "category", "subcategory", "expected_shape", "expected_behavior"]
+        with open(out, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
+            w.writeheader()
+            for c in cases:
+                w.writerow({"prompt": c.prompt, "category": c.category,
+                            "subcategory": c.subcategory or "", "expected_shape": c.expected_shape or "",
+                            "expected_behavior": c.expected_behavior or ""})
+    else:
+        raise SystemExit(f"unknown format: {fmt}")
+    print(f"exported {len(cases)} prompts from {src} -> {out} ({fmt})")
 
 
 def cmd_elicit(cfg: Config, args) -> None:
@@ -474,6 +529,19 @@ def build_parser() -> argparse.ArgumentParser:
     pgen.add_argument("--domain", required=True)
     pgen.add_argument("--out")
 
+    pd = sub.add_parser("dashboard", parents=[common], help="launch a local web UI to browse runs (no deps)")
+    pd.add_argument("--host", default="127.0.0.1")
+    pd.add_argument("--port", type=int, default=8765)
+    pd.add_argument("--no-open", dest="no_open", action="store_true", help="don't open a browser")
+
+    px = sub.add_parser("export", parents=[common], help="export a run's / corpus's prompts as a reusable dataset")
+    px.add_argument("--run", help="export the prompts of a stored run id")
+    px.add_argument("--corpus", help="export the prompts of a corpus dir/file")
+    px.add_argument("--out", required=True, help="output file")
+    px.add_argument("--format", default="json", choices=["json", "jsonl", "csv"])
+    px.add_argument("--prompts-only", dest="prompts_only", action="store_true",
+                    help="export just prompt + category (a clean prompt corpus)")
+
     pe = sub.add_parser("elicit", parents=[common], help="bootstrap an expert-validated golden probe set")
     esub = pe.add_subparsers(dest="elicit_cmd", required=True)
     ei = esub.add_parser("init", parents=[common], help="write a domain brief template")
@@ -525,6 +593,10 @@ def main(argv: list[str] | None = None) -> int:
         cmd_compare(cfg, args.run_a, args.run_b)
     elif args.cmd == "personas":
         cmd_personas(cfg, args)
+    elif args.cmd == "dashboard":
+        cmd_dashboard(cfg, args)
+    elif args.cmd == "export":
+        cmd_export(cfg, args)
     elif args.cmd == "elicit":
         cmd_elicit(cfg, args)
     elif args.cmd == "tune":

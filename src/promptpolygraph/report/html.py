@@ -14,6 +14,8 @@ from html import escape as _esc
 from typing import Any, Optional
 
 from ..models import Case, Response, Rubric, RunMeta, Score
+from ._env import render_template
+from .context import build_context
 from .markdown import _fmt_delta, _fmt_num, _verdict_rank
 
 
@@ -380,27 +382,33 @@ def render_html(
     audit: dict | None = None,
     baseline_diff: dict | None = None,
     pairwise: dict | None = None,
+    template: str = "default",
+    template_dir: str | None = None,
+    branding: dict | None = None,
 ) -> str:
-    """Render the full review as a single self-contained HTML document."""
-    _ = rubric  # rubric metadata already folded into the summary
-    body = "".join(
-        [
-            _cover(run_meta, summary, cases, scores),
-            _category_table(summary, baseline_diff),
-            _per_category_sections(cases, responses, scores, summary),
-            _persona_panel(audit),
-            _forensic_synthesis(audit),
-            _ab_section(pairwise),
-            _cost_latency_footer(summary),
-        ]
+    """Render the full review as a single self-contained HTML document.
+
+    The document is rendered from a Jinja2 template with inline CSS (no external
+    assets) and HTML autoescaping. `template` selects a built-in set ('default'
+    or 'minimal'); `template_dir`, if given, overrides the built-ins. `branding`
+    may supply `title`, `accent` (hex), and `logo`. Calling with only the
+    original arguments is fully backward-compatible.
+    """
+    context = build_context(
+        run_meta,
+        cases,
+        responses,
+        scores,
+        summary,
+        rubric=rubric,
+        audit=audit,
+        baseline_diff=baseline_diff,
+        pairwise=pairwise,
+        branding=branding,
     )
-    title = _esc(f"Polygraph Review — {run_meta.name}")
-    return (
-        "<!DOCTYPE html>\n"
-        '<html lang="en"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{title}</title>"
-        f"<style>{_CSS}</style></head>"
-        f'<body><div class="wrap">{body}</div>'
-        f"<script>{_SCRIPT}</script></body></html>\n"
+    return render_template(
+        "report.html.j2",
+        context,
+        template=template,
+        template_dir=template_dir,
     )

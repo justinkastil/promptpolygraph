@@ -46,6 +46,13 @@ class AnalyzeConfig(BaseModel):
     temperature: float = 0.0
 
 
+class ReportConfig(BaseModel):
+    template: str = "default"  # built-in template set: default | minimal
+    template_dir: str | None = None  # a custom template directory (overrides built-in)
+    formats: list[str] = Field(default_factory=lambda: ["md", "html"])
+    branding: dict[str, Any] = Field(default_factory=dict)  # title, accent (hex), logo
+
+
 class AuditConfig(BaseModel):
     enabled: bool = True
     personas: list[str] = Field(default_factory=list)  # explicit persona ids
@@ -63,6 +70,7 @@ class Config(BaseModel):
     run: RunConfig = Field(default_factory=RunConfig)
     analyze: AnalyzeConfig = Field(default_factory=AnalyzeConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
+    report: ReportConfig = Field(default_factory=ReportConfig)
     personas_path: str | None = None  # a personas.yaml for this run
     out_dir: str = "polygraph_out"
     model: str | None = None  # default model for judges/audit/generation
