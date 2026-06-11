@@ -8,7 +8,12 @@ is escaped client-side via esc() before it touches the DOM.
 
 from __future__ import annotations
 
-from promptpolygraph.ui.chrome import THEME_CSS, header_html
+from promptpolygraph.ui.chrome import (
+    DESIGNER_DOCK_JS,
+    THEME_CSS,
+    designer_dock_html,
+    header_html,
+)
 
 # The dashboard is assembled from the shared chrome (theme tokens + header bar)
 # plus its own page-specific CSS and the SPA script. Splitting it this way keeps
@@ -177,6 +182,32 @@ _HEAD = (
   .cg-live .empty { padding: 14px 12px; }
   .selpath { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 16px 10px; }
   .selpath .tag-mono { color: var(--accent); }
+
+  /* ── New-run path toggle (pick existing vs build) ─────────────────────── */
+  .nr-paths { display: flex; gap: 4px; margin: 0 16px 10px; border-bottom: 1px solid var(--border); }
+  .nr-path { padding: 8px 16px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; }
+  .nr-path.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  /* ── config builder: custom-category chip editor ─────────────────────── */
+  .catchips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; }
+  .catchip {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 12.5px;
+  }
+  .catchip input.catname {
+    background: transparent; border: 0; color: var(--text); font: 12.5px var(--sans);
+    min-width: 70px; width: auto; padding: 0; outline: none;
+  }
+  .catchip .catx {
+    cursor: pointer; color: var(--muted); border: 0; background: transparent; font-size: 13px;
+    line-height: 1; padding: 0 2px;
+  }
+  .catchip .catx:hover { color: var(--fail); }
+  .catadd { display: inline-flex; gap: 6px; align-items: center; }
+  .catadd input { background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 6px 9px; font-size: 13px; min-width: 140px; }
+  .builder-sec { border-top: 1px solid var(--border); padding: 10px 16px 4px; }
+  .builder-sec > .bs-title { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -184,9 +215,14 @@ _HEAD = (
 )
 
 # The dashboard body: shared header (in-page switchers, links=False) + the SPA.
-_BODY = r"""
+# The shared AI Designer dock (context "Run config") is appended after the app
+# container; it is a fixed-position element so its position in the DOM is moot.
+_BODY = (
+    r"""
 <div class="wrap" id="app"><div class="empty">Loading…</div></div>
-
+"""
+    + designer_dock_html(context_label="Run config")
+    + r"""
 <script>
 "use strict";
 
@@ -1343,6 +1379,7 @@ async function showNewRun() {
 }
 
 function renderNewRun(configs, pfiles) {
+  _builderProvidersReady = false;  // DOM is rebuilt; provider selects re-init on demand
   const cfgOpts = configs.length
     ? configs.map(c => '<option value="' + esc(c.path) + '">' + esc(c.name) + '</option>').join("")
     : '<option value="">(no configs found — a default config will be used)</option>';
@@ -1363,9 +1400,12 @@ function renderNewRun(configs, pfiles) {
       + '<span class="hint">This generated corpus will run as a fixed set; Mode/Count/Categories above are ignored.</span></div>'
     : '';
 
-  const form =
-    '<div class="panel"><h2>New run</h2>'
-    + '<div class="form-grid">'
+  const cfgEditBtn = configs.length
+    ? '<button class="btn" onclick="loadConfigForEdit(document.getElementById(\'nr-config\').value)">Edit in builder</button>'
+    : '';
+
+  const pickForm =
+    '<div class="form-grid">'
     + '<div class="field"><label>Config</label><select id="nr-config">' + cfgOpts + '</select></div>'
     + '<div class="field"><label>Mode</label><select id="nr-mode">'
       + ['','fixed','varied','adversarial','hybrid'].map(m => '<option value="' + m + '">' + (m || "(config default)") + '</option>').join("")
@@ -1384,15 +1424,37 @@ function renderNewRun(configs, pfiles) {
     + '</div>'
     + corpusSel
     + '<div class="launchbar"><button class="btn primary" id="nr-launch" onclick="launchRun()">Launch run</button>'
+    + cfgEditBtn
     + '<span class="hint">Runs in-process against this dashboard\'s store; progress appears below.</span></div>'
-    + '<div id="nr-progress"></div>'
+    + '<div id="nr-progress"></div>';
+
+  // "Build a config" pane — a real config builder (PART B).
+  const buildForm = builderFormHtml()
+    + '<div class="launchbar">'
+    + '<button class="btn primary" id="bld-save" onclick="saveBuilderConfig(false)">Save config</button>'
+    + '<button class="btn primary" id="bld-launch" onclick="saveBuilderConfig(true)">Save &amp; launch</button>'
+    + '<span class="hint">Saved configs appear in the picker; Inject from the AI Designer fills this form.</span></div>'
+    + '<div id="bld-result"></div>'
+    + '<div id="nr-progress"></div>';
+
+  const paths = '<div class="nr-paths">'
+    + '<div class="nr-path' + (newRunPath === "pick" ? " active" : "") + '" id="nrp-pick" onclick="setNewRunPath(\'pick\')">Pick an existing config</div>'
+    + '<div class="nr-path' + (newRunPath === "build" ? " active" : "") + '" id="nrp-build" onclick="setNewRunPath(\'build\')">Build a config</div>'
+    + '</div>';
+
+  const form = '<div class="panel"><h2>New run</h2>'
+    + paths
+    + '<div id="nr-pick-pane"' + (newRunPath === "pick" ? "" : ' style="display:none"') + '>' + pickForm + '</div>'
+    + '<div id="nr-build-pane"' + (newRunPath === "build" ? "" : ' style="display:none"') + '>' + buildForm + '</div>'
     + '</div>';
 
   const studioLink = '<div class="muted" style="padding:0 2px 8px">Need a prompt corpus or persona panel? Build one in the '
     + '<a href="#" onclick="showStudio();return false;">Studio</a> '
     + '(<a href="#" onclick="showStudio(\'prompts\');return false;">Prompts</a> · '
-    + '<a href="#" onclick="showStudio(\'personas\');return false;">Persona studio</a>).</div>';
+    + '<a href="#" onclick="showStudio(\'personas\');return false;">Persona studio</a>). '
+    + 'Or click <b>✦ Designer</b> in the header to draft a config from a description.</div>';
   app.innerHTML = form + studioLink;
+  if (newRunPath === "build") ensureBuilderProviders();
 }
 
 async function launchRun() {
@@ -1894,12 +1956,280 @@ function usePersonaFile(path) {
   showNewRun();
 }
 
+// ---- New run: pick-existing vs build a config ---------------------------
+let newRunPath = "pick";   // "pick" | "build"
+
+function setNewRunPath(p) {
+  newRunPath = p;
+  document.querySelectorAll(".nr-path").forEach(el => el.classList.remove("active"));
+  const el = document.getElementById("nrp-" + p);
+  if (el) el.classList.add("active");
+  const pick = document.getElementById("nr-pick-pane");
+  const build = document.getElementById("nr-build-pane");
+  if (pick) pick.style.display = (p === "pick") ? "" : "none";
+  if (build) build.style.display = (p === "build") ? "" : "none";
+  if (p === "build") ensureBuilderProviders();
+}
+
+// ---- config builder -----------------------------------------------------
+const BUILD_ADAPTERS = ["demo", "llm", "http", "callable"];
+const BUILD_CORPUS_MODES = ["varied", "adversarial", "hybrid", "fixed"];
+const BUILD_DIFFS = ["mild", "standard", "aggressive"];
+const BUILD_GATES = ["strict", "weighted"];
+const BUILD_RT_PROFILES = ["all_frontier", "deep", "multi_frontier", "mixed", "local_swarm", "pressure", "quick", "jailbreak", "injection"];
+const BUILD_FORMATS = ["md", "html", "json", "docx", "pdf"];
+let _builderProvidersReady = false;
+let _builderLaunchAfterSave = false;
+
+function ensureBuilderProviders() {
+  if (_builderProvidersReady) return;
+  if (!document.getElementById("bld-provider")) return;
+  _builderProvidersReady = true;
+  initProviderSelects({
+    providerSel: "bld-provider", modelSel: "bld-model", customInput: "bld-model-custom",
+    notice: "bld-provider-notice", preferLocal: false,
+  });
+}
+
+function builderFormHtml() {
+  const opts = (arr, sel) => arr.map(v =>
+    '<option value="' + esc(v) + '"' + (v === sel ? " selected" : "") + '>' + esc(v) + '</option>').join("");
+  const fmtChecks = BUILD_FORMATS.map(f =>
+    '<label><input type="checkbox" class="bld-fmt" value="' + esc(f) + '"'
+    + (f === "md" || f === "html" ? " checked" : "") + '> ' + esc(f) + '</label>').join("");
+  return ''
+    + '<div class="form-grid">'
+    + '<div class="field"><label>Name</label><input type="text" id="bld-name" placeholder="my-eval"></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Domain (system under test)</label>'
+      + '<input type="text" id="bld-domain" placeholder="e.g. a budgeting assistant for freelancers"></div>'
+    + '</div>'
+    // adapter
+    + '<div class="builder-sec"><div class="bs-title">Adapter</div><div class="form-grid" style="padding:0 0 6px">'
+    + '<div class="field"><label>Type</label><select id="bld-adapter">' + opts(BUILD_ADAPTERS, "demo") + '</select></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Options (JSON, optional)</label>'
+      + '<textarea id="bld-adapter-opts" placeholder=\'{ "base_url": "/v1/chat" }\'></textarea></div>'
+    + '</div></div>'
+    // corpus
+    + '<div class="builder-sec"><div class="bs-title">Corpus</div><div class="form-grid" style="padding:0 0 6px">'
+    + '<div class="field"><label>Mode</label><select id="bld-mode">' + opts(BUILD_CORPUS_MODES, "varied") + '</select></div>'
+    + '<div class="field"><label>Per category</label><input type="number" id="bld-percat" min="1" value="8"></div>'
+    + '<div class="field"><label>Difficulty</label><select id="bld-diff">' + opts(BUILD_DIFFS, "standard") + '</select></div>'
+    + '</div>'
+    + '<div class="field" style="padding:0 0 6px"><label>Categories</label>'
+      + '<div class="catchips" id="bld-catchips"></div>'
+      + '<div class="catadd" style="margin-top:8px"><input type="text" id="bld-catnew" placeholder="add a category…" '
+      + 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();addBuilderCat();}">'
+      + '<button class="btn" onclick="addBuilderCat()">+ Add category</button></div></div>'
+    + '</div>'
+    // analyze + audit
+    + '<div class="builder-sec"><div class="bs-title">Analyze &amp; audit</div><div class="form-grid" style="padding:0 0 6px">'
+    + '<div class="field"><label>Judges</label><select id="bld-judges">' + opts(["1","2","3"], "1") + '</select></div>'
+    + '<div class="field"><label>Gate mode</label><select id="bld-gate">' + opts(BUILD_GATES, "weighted") + '</select></div>'
+    + '<div class="field"><label>Persona pool</label><input type="number" id="bld-personapool" min="0" value="5"></div>'
+    + '</div>'
+    + '<div class="checks" style="padding:2px 0 4px"><label><input type="checkbox" id="bld-forensic" checked> Forensic audit</label></div>'
+    + '</div>'
+    // report + redteam + llm
+    + '<div class="builder-sec"><div class="bs-title">Report, red team &amp; backend</div><div class="form-grid" style="padding:0 0 6px">'
+    + '<div class="field"><label>Red-team profile</label><select id="bld-rtprofile">' + opts(BUILD_RT_PROFILES, "all_frontier") + '</select></div>'
+    + '<div class="field"><label>Provider</label><select class="field" id="bld-provider"><option>loading…</option></select></div>'
+    + '<div class="field"><label>Model</label><select class="field" id="bld-model"><option>—</option></select>'
+      + '<input type="text" id="bld-model-custom" placeholder="custom model name" style="display:none;margin-top:4px"></div>'
+    + '</div>'
+    + '<div id="bld-provider-notice"></div>'
+    + '<div class="field" style="padding:2px 0 4px"><label>Report formats</label><div class="checks">' + fmtChecks + '</div></div>'
+    + '<div class="checks" style="padding:2px 0 4px"><label><input type="checkbox" id="bld-mock" checked> Mock (offline) when launching</label></div>'
+    + '</div>';
+}
+
+// custom-category chip editor — each chip is an editable name + remove button.
+function addBuilderCat(name) {
+  const host = document.getElementById("bld-catchips");
+  if (!host) return;
+  const val = (typeof name === "string") ? name : ((document.getElementById("bld-catnew") || {}).value || "").trim();
+  if (typeof name !== "string") {
+    if (!val) return;
+    const inp = document.getElementById("bld-catnew");
+    if (inp) inp.value = "";
+  }
+  const chip = document.createElement("span");
+  chip.className = "catchip";
+  chip.innerHTML = '<input class="catname" type="text" value="' + esc(val) + '">'
+    + '<button class="catx" title="remove" onclick="this.parentNode.remove()">&times;</button>';
+  host.appendChild(chip);
+}
+function setBuilderCats(cats) {
+  const host = document.getElementById("bld-catchips");
+  if (!host) return;
+  host.innerHTML = "";
+  (cats || []).forEach(c => addBuilderCat(String(c)));
+}
+function getBuilderCats() {
+  return Array.from(document.querySelectorAll("#bld-catchips .catname"))
+    .map(el => (el.value || "").trim()).filter(Boolean);
+}
+
+// assemble the builder form into a Config-shaped object.
+function assembleConfig() {
+  let adapterOpts = {};
+  const rawOpts = (document.getElementById("bld-adapter-opts").value || "").trim();
+  if (rawOpts) { try { adapterOpts = JSON.parse(rawOpts); } catch (e) { adapterOpts = {}; } }
+  const cfg = {
+    name: (document.getElementById("bld-name").value || "").trim() || "polygraph-run",
+    domain: (document.getElementById("bld-domain").value || "").trim() || null,
+    adapter: { type: document.getElementById("bld-adapter").value, options: adapterOpts },
+    corpus: {
+      mode: document.getElementById("bld-mode").value,
+      per_category: Number(document.getElementById("bld-percat").value || 8),
+      categories: getBuilderCats(),
+      difficulty: document.getElementById("bld-diff").value,
+    },
+    analyze: {
+      judges: Number(document.getElementById("bld-judges").value || 1),
+      gate_mode: document.getElementById("bld-gate").value,
+    },
+    audit: {
+      forensic: document.getElementById("bld-forensic").checked,
+      persona_pool: Number(document.getElementById("bld-personapool").value || 0) || null,
+    },
+    report: { formats: Array.from(document.querySelectorAll(".bld-fmt:checked")).map(el => el.value) },
+    redteam: { profile: document.getElementById("bld-rtprofile").value },
+    llm: { provider: resolveProvider("bld-provider") || "anthropic" },
+    mock: document.getElementById("bld-mock").checked,
+  };
+  const model = resolveModel("bld-model", "bld-model-custom");
+  if (model) { cfg.model = model; cfg.llm.model = model; }
+  return cfg;
+}
+
+// populate the builder form FROM a config (Save→Load round-trip, or Inject).
+function loadConfigIntoBuilder(cfg) {
+  cfg = cfg || {};
+  ensureBuilderProviders();
+  const set = (id, v) => { const el = document.getElementById(id); if (el != null && v != null) el.value = v; };
+  set("bld-name", cfg.name || "");
+  set("bld-domain", cfg.domain || "");
+  const ad = cfg.adapter || {};
+  set("bld-adapter", BUILD_ADAPTERS.indexOf(ad.type) >= 0 ? ad.type : "demo");
+  const opts = ad.options || ad.opts;
+  if (opts && typeof opts === "object" && Object.keys(opts).length) {
+    set("bld-adapter-opts", JSON.stringify(opts, null, 2));
+  } else { set("bld-adapter-opts", ""); }
+  const co = cfg.corpus || {};
+  set("bld-mode", BUILD_CORPUS_MODES.indexOf(co.mode) >= 0 ? co.mode : "varied");
+  if (co.per_category != null) set("bld-percat", co.per_category);
+  set("bld-diff", BUILD_DIFFS.indexOf(co.difficulty) >= 0 ? co.difficulty : "standard");
+  setBuilderCats(co.categories || []);
+  const an = cfg.analyze || {};
+  set("bld-judges", String(Math.max(1, Math.min(3, Number(an.judges || 1)))));
+  set("bld-gate", BUILD_GATES.indexOf(an.gate_mode) >= 0 ? an.gate_mode : "weighted");
+  const au = cfg.audit || {};
+  const fchk = document.getElementById("bld-forensic"); if (fchk) fchk.checked = (au.forensic !== false);
+  if (au.persona_pool != null) set("bld-personapool", au.persona_pool);
+  const rt = cfg.redteam || {};
+  set("bld-rtprofile", BUILD_RT_PROFILES.indexOf(rt.profile) >= 0 ? rt.profile : "all_frontier");
+  const fmts = (cfg.report && cfg.report.formats) || ["md", "html"];
+  document.querySelectorAll(".bld-fmt").forEach(el => { el.checked = fmts.indexOf(el.value) >= 0; });
+  // provider/model are async (selects may still be loading) — best-effort
+  const llm = cfg.llm || {};
+  setTimeout(() => {
+    const pv = document.getElementById("bld-provider");
+    if (pv && llm.provider) { pv.value = llm.provider; fillModelSelect({ providerSel: "bld-provider", modelSel: "bld-model", customInput: "bld-model-custom" }); }
+    const mv = cfg.model || llm.model;
+    const ms = document.getElementById("bld-model");
+    if (ms && mv) {
+      const has = Array.from(ms.options).some(o => o.value === mv);
+      if (has) ms.value = mv;
+      else { ms.value = CUSTOM_OPT; const c = document.getElementById("bld-model-custom"); if (c) { c.style.display = ""; c.value = mv; } }
+    }
+  }, 60);
+}
+
+async function saveBuilderConfig(thenLaunch) {
+  const out = document.getElementById("bld-result");
+  const cfg = assembleConfig();
+  if (out) out.innerHTML = '<div class="muted" style="padding:6px 0">Saving…</div>';
+  let resp;
+  try {
+    resp = await postJSON("/api/configs", { name: cfg.name, config: cfg });
+  } catch (e) {
+    if (out) out.innerHTML = '<div class="err">Could not save config: ' + esc(e.message) + '</div>';
+    return null;
+  }
+  if (out) out.innerHTML = '<div class="mv-up" style="padding:6px 0;font-weight:700">Saved '
+    + esc(resp.name) + ' <span class="tag-mono">' + esc(resp.path) + '</span></div>';
+  if (thenLaunch) launchBuiltConfig(resp.path, cfg.mock);
+  return resp;
+}
+
+function launchBuiltConfig(cfgPath, mock) {
+  const btn = document.getElementById("bld-launch");
+  if (btn) { btn.classList.add("disabled-btn"); btn.textContent = "Launching…"; }
+  const body = { config_path: cfgPath, overrides: { mock: !!mock } };
+  postJSON("/api/run", body).then(resp => {
+    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Save & launch"; }
+    if (!resp || !resp.run_id) {
+      const out = document.getElementById("bld-result");
+      if (out) out.innerHTML += '<div class="err">Could not start run: ' + esc((resp && resp.error) || "unknown") + '</div>';
+      return;
+    }
+    pollLaunch(resp.run_id);
+  }).catch(e => {
+    if (btn) { btn.classList.remove("disabled-btn"); btn.textContent = "Save & launch"; }
+    const out = document.getElementById("bld-result");
+    if (out) out.innerHTML += '<div class="err">Could not start run: ' + esc(e.message) + '</div>';
+  });
+}
+
+// Load an existing config into the builder for editing (from the picker).
+async function loadConfigForEdit(pathOrName) {
+  if (!pathOrName) return;
+  setNewRunPath("build");
+  let resp;
+  try {
+    resp = await getJSON("/api/config?path=" + encodeURIComponent(pathOrName));
+  } catch (e) {
+    const out = document.getElementById("bld-result");
+    if (out) out.innerHTML = '<div class="err">Could not load config: ' + esc(e.message) + '</div>';
+    return;
+  }
+  if (resp && resp.config) loadConfigIntoBuilder(resp.config);
+}
+
+// ---- dashboard AI Designer wiring (context: Run config) -----------------
+window.__dkDesignUrl = "/api/config/design";
+window.__dkRenderPreview = function(res) {
+  const cfg = res.config || {};
+  const co = cfg.corpus || {}, an = cfg.analyze || {}, au = cfg.audit || {}, rt = cfg.redteam || {};
+  const ad = cfg.adapter || {};
+  let secs = "";
+  secs += dkSection("Name", esc(cfg.name || "—"), true);
+  if (cfg.domain) secs += dkSection("Domain", esc(cfg.domain));
+  secs += dkSection("Adapter", esc(ad.type || "demo"), true);
+  secs += dkSection("Corpus", esc(co.mode || "varied") + ' · per-category ' + esc(co.per_category != null ? co.per_category : "—") + ' · ' + esc(co.difficulty || "standard"));
+  if (co.categories && co.categories.length) secs += dkSection("Categories (" + co.categories.length + ")", dkChips(co.categories));
+  secs += dkSection("Analyze", esc(an.judges != null ? an.judges : 1) + ' judge(s) · gate ' + esc(an.gate_mode || "weighted"));
+  secs += dkSection("Audit", (au.forensic ? "forensic on" : "forensic off") + ' · persona pool ' + esc(au.persona_pool != null ? au.persona_pool : "—"));
+  secs += dkSection("Report", dkChips((cfg.report && cfg.report.formats) || []));
+  secs += dkSection("Red team", esc(rt.profile || "all_frontier"), true);
+  return dkPreviewShell("Designed run config", res.provider, secs, res.notes);
+};
+window.__dkInject = function(cfg) {
+  setNewRunPath("build");
+  loadConfigIntoBuilder(cfg);
+  closeDesigner();
+};
+
 // ---- boot ---------------------------------------------------------------
+"""
+    + DESIGNER_DOCK_JS
+    + r"""
 showRuns();
 </script>
 </body>
 </html>
 """
+)
 
 # Assemble the full self-contained dashboard document: shared <head> (theme),
 # shared header bar (in-page view switchers — this page is the dashboard), then

@@ -30,7 +30,12 @@ from __future__ import annotations
 
 import json
 
-from promptpolygraph.ui.chrome import THEME_CSS, header_html
+from promptpolygraph.ui.chrome import (
+    DESIGNER_DOCK_JS,
+    THEME_CSS,
+    designer_dock_html,
+    header_html,
+)
 
 __all__ = ["render_arena_page"]
 
@@ -58,6 +63,9 @@ def render_arena_page(*, stream_url: str, transport: str = "sse") -> str:
     # The Arena is a separate page, so the dashboard tabs link back to "/" and
     # "Red Team" is the active surface (links=True).
     html = html.replace("__ARENA_HEADER__", header_html("redteam", links=True))
+    # The shared AI Designer dock (context "Red team") + its shared open/close JS.
+    html = html.replace("__ARENA_DOCK__", designer_dock_html(context_label="Red team"))
+    html = html.replace("__DESIGNER_DOCK_JS__", DESIGNER_DOCK_JS)
     return html.replace("__ARENA_CONFIG__", cfg)
 
 
@@ -366,6 +374,7 @@ __THEME_CSS__
 </head>
 <body>
 __ARENA_HEADER__
+__ARENA_DOCK__
 
 <div class="controls">
   <div class="seg-toggle" role="tablist" aria-label="run source">
@@ -393,6 +402,10 @@ __ARENA_HEADER__
     <label class="check"><input type="checkbox" id="f-mock" checked /> mock (offline)</label>
     <button class="btn primary" id="btn-connect" onclick="connect()">Connect</button>
     <button class="btn danger" id="btn-stop" onclick="stopLive()" disabled>Stop</button>
+    <span class="tag" id="custom-roster" style="display:none;border-color:var(--accent2);color:#cdc2ff">
+      <b id="custom-roster-label">custom roster</b>
+      <span id="custom-roster-clear" title="clear back to the selected built-in profile"
+            style="cursor:pointer;margin-left:4px">&#10005;</span></span>
   </div>
 
   <div class="mode-group" id="group-replay">
@@ -571,6 +584,7 @@ var vulns = {};
 var runId = null;
 var view = "live";
 var ended = false;
+var customRosterRef = null;   // active AI-designed roster ref (?profile_ref=)
 var savedEvents = null;  // replay event log for re-animation
 var replayTimer = null;
 
@@ -1084,6 +1098,9 @@ function buildStreamUrl() {
   params.push("mock=" + ($("f-mock").checked ? "1" : "0"));
   var src = ($("f-sources").value || "").trim();
   if (src) params.push("sources=" + encodeURIComponent(src));
+  // An AI-designed roster (built via /api/redteam/profile) runs via profile_ref;
+  // the stream honors it in addition to the built-in profile/sources/mock.
+  if (customRosterRef) params.push("profile_ref=" + encodeURIComponent(customRosterRef));
   return path + "?" + params.join("&");
 }
 function setLiveButtons(connected) {
@@ -1216,6 +1233,101 @@ function playReplay() {
     if (ev && ev.type) dispatch(ev.type, ev);
   }, 120);
 }
+
+// ── AI Designer wiring (context: Red team) ───────────────────────────────
+// postJSON helper the shared dock JS expects (the dashboard has its own; the
+// Arena defines a minimal one here). Parses JSON even on non-2xx so {error}
+// surfaces. Relative URL only — no external origin.
+function postJSON(url, body) {
+  return fetch(url, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {})
+  }).then(function(r) {
+    return r.json().catch(function(){ return null; }).then(function(data) {
+      if (!r.ok) {
+        var msg = (data && (data.detail || data.error)) || ("HTTP " + r.status);
+        throw new Error(msg);
+      }
+      return data;
+    });
+  });
+}
+
+window.__dkDesignUrl = "/api/redteam/design";
+
+// Render the designed roster as a structured preview (strategy lanes + their
+// mode/converter/intensity, sources, turns, guard) — labelled fields, not chat.
+window.__dkRenderPreview = function(res) {
+  var cfg = res.config || {};
+  var secs = "";
+  secs += dkSection("Base profile", esc(cfg.base_profile || "deep"), true);
+  secs += dkSection("Multi-turn", esc(cfg.turns != null ? cfg.turns : "—") + " turn(s) · guard "
+    + (cfg.guard ? "on (Llama-Guard-style judge)" : "off"));
+  secs += dkSection("Sources", dkChips(cfg.sources || []));
+  var lanes = (cfg.strategies || []).map(function(s) {
+    var meta = [];
+    if (s.mode) meta.push("mode " + s.mode);
+    if (s.converter) meta.push("converter " + s.converter);
+    if (s.intensity) meta.push(s.intensity);
+    return '<div class="dk-lane"><div class="dk-lane-h">' + esc(prettyStrat(s.strategy)) + '</div>'
+      + (meta.length ? '<div class="dk-lane-m">' + esc(meta.join(" · ")) + '</div>' : '') + '</div>';
+  }).join("") || '<span class="muted">no strategy lanes</span>';
+  secs += '<div class="dk-section"><div class="dk-k">Strategy lanes ('
+    + ((cfg.strategies || []).length) + ')</div><div class="dk-v">' + lanes + '</div></div>';
+  return dkPreviewShell("Designed red team", res.provider, secs, res.notes);
+};
+
+// Inject: set the Live controls from the design AND build a runnable custom
+// roster via /api/redteam/profile, stashing the ref so Connect runs it.
+window.__dkInject = function(cfg) {
+  setView("live");
+  // 1) reflect the design in the visible Live controls
+  var prof = $("f-profile");
+  if (prof && cfg.base_profile) {
+    var has = false;
+    for (var i = 0; i < prof.options.length; i++) { if (prof.options[i].value === cfg.base_profile) { has = true; break; } }
+    if (!has) { var o = el("option", null, cfg.base_profile); o.value = cfg.base_profile; prof.appendChild(o); }
+    prof.value = cfg.base_profile;
+  }
+  var srcEl = $("f-sources");
+  if (srcEl && cfg.sources) srcEl.value = (cfg.sources || []).join(", ");
+  // turns/guard have no dedicated Live inputs — they ride in the custom roster
+  // we build next, so the designed depth + judge actually run.
+  _dkStatus("Building runnable roster…", "busy");
+  var provider = resolveProvider("dk-provider") || "anthropic";
+  var model = resolveModel("dk-model", "dk-model-custom") || null;
+  var body = { spec: cfg, provider: provider };
+  if (model) body.model = model;
+  postJSON("/api/redteam/profile", body).then(function(resp) {
+    if (!resp || !resp.ref) { _dkStatus((resp && resp.error) || "could not build roster", "err"); return; }
+    customRosterRef = resp.ref;
+    var n = (resp.attackers || []).length;
+    showCustomRoster(n);
+    _dkStatus("Custom roster ready (" + n + " lane(s)). Connect to run it.", "");
+    closeDesigner();
+  }).catch(function(e) {
+    _dkStatus("Could not build roster: " + (e && e.message ? e.message : String(e)), "err");
+  });
+};
+
+function showCustomRoster(nLanes) {
+  var chip = $("custom-roster");
+  var lbl = $("custom-roster-label");
+  if (lbl) lbl.textContent = "custom roster (" + (nLanes || 0) + " lane" + (nLanes === 1 ? "" : "s") + ")";
+  if (chip) chip.style.display = "";
+}
+function clearCustomRoster() {
+  customRosterRef = null;
+  var chip = $("custom-roster");
+  if (chip) chip.style.display = "none";
+}
+(function bindCustomRosterClear() {
+  var x = $("custom-roster-clear");
+  if (x) x.addEventListener("click", function(e){ e.stopPropagation(); clearCustomRoster(); });
+})();
+
+// shared dock open/close/Esc + Design→preview→Inject/Refine skeleton
+__DESIGNER_DOCK_JS__
 
 // ── boot ────────────────────────────────────────────────────────────────
 (function start() {
