@@ -6,6 +6,34 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-11
+
+### Added
+- **Root-cause drill-down in the Arena.** Click an attacker to see the multi-turn
+  timeline (which turn a control flipped from held to broken) alongside the
+  root cause.
+- **Code-grounded root-cause ladder (opt-in).** Point `redteam.code_path` at a
+  local checkout and the model traces a breach to **real `file:line` rungs** of
+  the target's own source — colored where the guardrail is missing (red), its
+  backstop (yellow) — shown side-by-side with the code, with a suggested-fix
+  diff. Reuses the forensic code-reading; the displayed source is re-read from
+  disk. With no clone it shows the honest finding (named control to harden +
+  OWASP/ATLAS + mitigation + a CTA) — **never a synthesized "defense pipeline."**
+- **IP-egress protections for the code dive.** Defaults to a **local model**
+  (source never leaves the machine); a non-local provider is refused when
+  air-gap is on (`POLYGRAPH_AIR_GAP=1`) and otherwise requires explicit consent.
+  Source excerpts are **secret-scrubbed** before any model sees them, and
+  indexing honors `.gitignore` / `.polygraphignore` on top of the vendor-dir skip.
+- **Replay.** Arena runs are persisted; a Live/Replay toggle lets you re-load and
+  re-watch a past run (`/api/redteam/runs`, `/api/redteam/runs/{id}`,
+  `/api/redteam/runs/{id}/events`) and drill into it.
+- **Arena overhaul** — information-dense attacker lanes (technique/source,
+  provider, mode), a live scoreboard (ASR + OWASP coverage grid), a findings
+  table, and a cleaner, professional surface.
+
+### Changed
+- The Arena drops the decorative header treatment in favor of a substantive layout.
+
 ## [0.5.1] - 2026-06-11
 
 ### Added

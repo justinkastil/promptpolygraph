@@ -1,25 +1,29 @@
-"""The Red-Team Arena — a live, single-page visualization of an authorized
-red-team run against a target you own.
+"""The Red-Team Arena — a single-page console for an authorized red-team run
+against a target you control.
 
 This module exposes a single function, :func:`render_arena_page`, which returns
 a fully self-contained HTML document (inline CSS + vanilla JS, inline SVG — no
-CDN, no external assets). The page opens a live stream (Server-Sent Events by
-default, or a WebSocket) and dramatizes the run:
+CDN, no external assets, no web fonts). The page:
 
-* attacker agents split across a left and right rail, each streaming its
-  "thinking" before it fires a probe;
-* a target node in the center that pulses on every response;
-* probe arcs that fly rail -> center on each attack;
-* a defended (green) pile and a breached (red) pile, blocks heated by severity;
-* a live breach counter + severity gauge;
-* a severity-ranked vulnerability + mitigation panel; and
-* a click-through drawer with the full probe, response, and judge rationale.
+* drives a **Live** run over Server-Sent Events (default) or a WebSocket, or
+  loads a saved run in **Replay** mode from the relative ``/api/redteam/*``
+  endpoints;
+* shows one lane per attacker agent (strategy, technique/source, provider/model,
+  intensity, escalation mode, per-turn status and accumulating working text);
+* shows the central probe -> response -> verdict with the evidence quote and a
+  live scoreboard (ASR, attacks/breaches/defended, severity tallies, OWASP grid);
+* lets you drill into any attacker to see the full multi-turn timeline beside
+  an on-demand, code-grounded root-cause analysis.
 
-The same page is reused by the hosted service with ``transport="ws"``.
+The honesty rule for the drill-down: the colored root-cause **ladder** renders
+only for a code-grounded trace (``mode === "code"`` — real ``file:line`` rungs).
+When there is no code (``mode === "abstract"``) the page shows the honest
+summary (control to harden, mitigation, OWASP/ATLAS, evidence, and the CTA to
+point ``code_path`` at a checkout) and never draws a fabricated pipeline.
 
-Nothing in this module imports the red-team engine or any heavy dependency — it
-is pure string templating so it stays trivially safe to call from a request
-handler.
+Nothing here imports the red-team engine — it is pure string templating, safe to
+call from a request handler. The same page is reused by the hosted service with
+``transport="ws"``.
 """
 
 from __future__ import annotations
@@ -61,255 +65,414 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <title>Red-Team Arena — PromptPolygraph</title>
 <style>
   :root {
-    --bg: #07080d;
-    --bg2: #0c0e16;
-    --panel: #11141f;
-    --panel-2: #161a28;
-    --line: #232838;
-    --text: #e8ecf6;
-    --muted: #8a93a8;
-    --accent: #6ee7ff;
-    --accent2: #b07cff;
-    --green: #2fe08a;
-    --green-deep: #0e7a4a;
-    --red: #ff5470;
-    --red-deep: #8a1733;
-    --amber: #ffcf5c;
-    --sev-none: #2fe08a;
-    --sev-low: #9be36a;
-    --sev-medium: #ffcf5c;
-    --sev-high: #ff9248;
-    --sev-critical: #ff3860;
-    --shadow: 0 8px 30px rgba(0,0,0,.55);
+    --bg: #0a0c12;
+    --bg2: #0e111a;
+    --panel: #121622;
+    --panel-2: #181d2c;
+    --panel-3: #1d2436;
+    --line: #262d40;
+    --line-2: #313a52;
+    --text: #e9edf6;
+    --muted: #8b94aa;
+    --muted-2: #636c82;
+    --accent: #5cc8ff;
+    --accent2: #9b8cff;
+    --green: #34d399;
+    --green-deep: #0f6b48;
+    --red: #f4607e;
+    --red-deep: #7c1730;
+    --amber: #f5c451;
+    --sev-none: #34d399;
+    --sev-low: #8fd66a;
+    --sev-medium: #f5c451;
+    --sev-high: #f59442;
+    --sev-critical: #f4476a;
+    --shadow: 0 10px 34px rgba(0,0,0,.5);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
     background:
-      radial-gradient(1200px 700px at 50% -10%, rgba(110,231,255,.08), transparent 60%),
-      radial-gradient(900px 600px at 10% 110%, rgba(176,124,255,.07), transparent 55%),
+      radial-gradient(1100px 640px at 78% -8%, rgba(92,200,255,.06), transparent 60%),
+      radial-gradient(900px 560px at 6% 108%, rgba(155,140,255,.05), transparent 55%),
       var(--bg);
     color: var(--text);
-    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font: 14px/1.5 var(--sans);
     -webkit-font-smoothing: antialiased;
   }
+  a { color: var(--accent); }
+  .nums { font-variant-numeric: tabular-nums; }
+
+  /* ── header ─────────────────────────────────────────────────────────── */
   header.top {
-    display: flex; align-items: center; gap: 14px;
-    padding: 12px 20px; border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, rgba(20,24,38,.9), rgba(12,14,22,.6));
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 22px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(20,24,38,.92), rgba(12,14,22,.7));
     backdrop-filter: blur(6px);
     position: sticky; top: 0; z-index: 30;
   }
-  header.top h1 { font-size: 17px; margin: 0; letter-spacing: .3px; font-weight: 700; }
-  header.top h1 .spark { color: var(--accent); }
-  header.top .sub { color: var(--muted); font-size: 12px; }
+  header.top .brand { display: flex; flex-direction: column; gap: 1px; }
+  header.top h1 { font-size: 16px; margin: 0; letter-spacing: .2px; font-weight: 700; }
+  header.top .tag { color: var(--muted); font-size: 11.5px; }
   header.top a.home {
     color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 600;
-    padding: 5px 11px; border-radius: 7px; border: 1px solid var(--line);
+    padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line);
   }
   header.top a.home:hover { color: var(--text); background: var(--panel-2); }
   header.top .spacer { flex: 1; }
   .pill {
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line);
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
     background: var(--panel); font-size: 12px; color: var(--muted);
   }
-  .pill b { color: var(--text); font-variant-numeric: tabular-nums; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-  .dot.live { background: var(--green); box-shadow: 0 0 0 0 rgba(47,224,138,.6); animation: ping 1.6s infinite; }
+  .pill b { color: var(--text); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2); }
+  .dot.live { background: var(--green); box-shadow: 0 0 0 0 rgba(52,211,153,.6); animation: ping 1.7s infinite; }
   .dot.done { background: var(--accent); animation: none; }
   .dot.err { background: var(--red); animation: none; }
-  @keyframes ping { 0%{box-shadow:0 0 0 0 rgba(47,224,138,.5)} 70%{box-shadow:0 0 0 8px rgba(47,224,138,0)} 100%{box-shadow:0 0 0 0 rgba(47,224,138,0)} }
+  @keyframes ping { 0%{box-shadow:0 0 0 0 rgba(52,211,153,.5)} 70%{box-shadow:0 0 0 7px rgba(52,211,153,0)} 100%{box-shadow:0 0 0 0 rgba(52,211,153,0)} }
 
-  .gauges { display: flex; gap: 10px; align-items: center; }
-  .gauge { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-  .gauge .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
-  .gauge .val { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
-  .gauge.breach .val { color: var(--red); }
-  .gauge.def .val { color: var(--green); }
-  .sevbar { width: 150px; height: 9px; border-radius: 999px; overflow: hidden; background: var(--panel-2); display: flex; border: 1px solid var(--line); }
+  /* ── control bar ────────────────────────────────────────────────────── */
+  .controls {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+    padding: 11px 22px; border-bottom: 1px solid var(--line);
+    background: var(--bg2);
+  }
+  .seg-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg-toggle button {
+    appearance: none; border: 0; background: var(--panel); color: var(--muted);
+    font: 600 12.5px/1 var(--sans); padding: 8px 15px; cursor: pointer; letter-spacing: .3px;
+  }
+  .seg-toggle button + button { border-left: 1px solid var(--line); }
+  .seg-toggle button.on { background: var(--panel-3); color: var(--text); }
+  .seg-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .ctl { display: inline-flex; align-items: center; gap: 7px; }
+  .ctl label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .field, select.field {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 10px; font: 13px/1 var(--sans); min-width: 120px;
+  }
+  .field:focus, select.field:focus { outline: none; border-color: var(--accent); }
+  .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+  .check input { accent-color: var(--accent); }
+  .btn {
+    appearance: none; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel-2); color: var(--text); font: 600 13px/1 var(--sans);
+    padding: 8px 14px; cursor: pointer;
+  }
+  .btn:hover { background: var(--panel-3); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn.primary { background: linear-gradient(180deg, #1c4a6e, #143a59); border-color: #2a6791; color: #eaf6ff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { border-color: var(--red-deep); color: #ffd7df; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; }
+  .controls .spacer { flex: 1; }
+  .mode-group { display: none; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .mode-group.on { display: inline-flex; }
+
+  /* ── scoreboard ─────────────────────────────────────────────────────── */
+  .scoreboard {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 1px; background: var(--line); border-bottom: 1px solid var(--line);
+  }
+  .stat { background: var(--bg2); padding: 11px 16px; display: flex; flex-direction: column; gap: 3px; }
+  .stat .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .stat .val { font-size: 23px; font-weight: 800; line-height: 1; }
+  .stat.asr .val { color: var(--accent); }
+  .stat.breach .val { color: var(--red); }
+  .stat.def .val { color: var(--green); }
+  .stat.sev { gap: 6px; }
+  .sevbar { height: 9px; border-radius: 999px; overflow: hidden; background: var(--panel-2); display: flex; border: 1px solid var(--line); }
   .sevbar > span { height: 100%; transition: width .4s ease; }
+  .stat.owasp { grid-column: span 2; }
+  .owgrid { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+  .owchip {
+    font: 700 10px/1 var(--mono); padding: 4px 6px; border-radius: 5px;
+    border: 1px solid var(--line); color: var(--muted); background: var(--panel);
+  }
+  .owchip.hit { color: #fff; background: rgba(244,71,106,.2); border-color: var(--red); }
 
+  /* ── stage ──────────────────────────────────────────────────────────── */
   .stage {
-    display: grid;
-    grid-template-columns: minmax(220px, 1fr) minmax(420px, 1.6fr) minmax(220px, 1fr);
-    gap: 14px; padding: 16px 18px; align-items: start;
+    display: grid; grid-template-columns: minmax(260px, 1fr) minmax(380px, 1.5fr);
+    gap: 16px; padding: 16px 20px; align-items: start;
   }
-  @media (max-width: 1100px) { .stage { grid-template-columns: 1fr; } }
+  @media (max-width: 1040px) { .stage { grid-template-columns: 1fr; } }
 
-  .rail { display: flex; flex-direction: column; gap: 12px; }
-  .rail h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 2px 4px; }
-
-  .agent {
-    border: 1px solid var(--line); border-radius: 14px; padding: 11px 12px;
-    background: linear-gradient(180deg, var(--panel), var(--bg2));
-    position: relative; overflow: hidden; transition: border-color .2s, box-shadow .2s, transform .2s;
+  .col { display: flex; flex-direction: column; gap: 14px; }
+  .colhead {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 2px;
   }
-  .agent::before {
+  .colhead .c { color: var(--muted-2); }
+
+  /* attacker lanes */
+  .lanes { display: flex; flex-direction: column; gap: 10px; }
+  .lane {
+    border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px;
+    background: var(--panel); position: relative; overflow: hidden; cursor: pointer;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+  }
+  .lane:hover { border-color: var(--line-2); background: var(--panel-2); }
+  .lane:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .lane::before {
     content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-    background: linear-gradient(180deg, var(--accent), var(--accent2)); opacity: .5;
+    background: var(--line-2);
   }
-  .agent.firing { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(110,231,255,.3), var(--shadow); transform: translateY(-1px); }
-  .agent.breached::before { background: linear-gradient(180deg, var(--red), var(--red-deep)); opacity: 1; }
-  .agent.defended::before { background: linear-gradient(180deg, var(--green), var(--green-deep)); opacity: 1; }
-  .agent .ahead { display: flex; align-items: center; gap: 8px; }
-  .agent .strat { font-weight: 700; font-size: 13px; letter-spacing: .2px; }
-  .agent .badge {
-    margin-left: auto; font-size: 10px; color: var(--muted); border: 1px solid var(--line);
-    padding: 2px 7px; border-radius: 999px; background: var(--panel-2); white-space: nowrap;
+  .lane.firing { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(92,200,255,.25); }
+  .lane.breached::before { background: var(--red); }
+  .lane.defended::before { background: var(--green); }
+  .lane.src::before { background: var(--accent2); }
+  .lane .lh { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .lane .strat { font-weight: 700; font-size: 13px; letter-spacing: .2px; }
+  .lane .tech {
+    font: 700 10px/1 var(--mono); padding: 3px 7px; border-radius: 999px;
+    background: rgba(155,140,255,.14); border: 1px solid var(--line-2); color: #cdc2ff;
   }
-  .agent .turnchip { font-size: 10px; color: var(--accent); font-variant-numeric: tabular-nums; }
-  .agent .think {
-    margin-top: 8px; min-height: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11.5px; color: var(--accent); white-space: pre-wrap; word-break: break-word;
-    max-height: 64px; overflow: hidden; opacity: .92;
+  .lane .verdictchip {
+    margin-left: auto; font-size: 10px; font-weight: 800; letter-spacing: .4px;
+    padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap;
   }
-  .agent .think .caret { display: inline-block; width: 7px; background: var(--accent); animation: blink 1s steps(1) infinite; }
+  .verdictchip.breach { color: #fff; background: rgba(244,71,106,.18); border-color: var(--red); }
+  .verdictchip.def { color: #fff; background: rgba(52,211,153,.16); border-color: var(--green); }
+  .lane .meta {
+    margin-top: 7px; display: flex; flex-wrap: wrap; gap: 5px; font-size: 11px; color: var(--muted);
+  }
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px;
+    padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+    background: var(--panel-2); white-space: nowrap;
+  }
+  .tag b { color: var(--text); font-weight: 600; }
+  .lane .think {
+    margin-top: 8px; min-height: 0; font-family: var(--mono);
+    font-size: 11px; color: var(--accent); white-space: pre-wrap; word-break: break-word;
+    max-height: 0; overflow: hidden; opacity: 0; transition: max-height .2s, opacity .2s;
+    border-left: 2px solid var(--line); padding-left: 8px;
+  }
+  .lane.firing .think, .lane .think.show { max-height: 70px; overflow: auto; opacity: .9; }
+  .lane .caret { display: inline-block; width: 7px; background: var(--accent); animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
-  .agent .last { margin-top: 6px; font-size: 11px; color: var(--muted); }
-  .agent .verdictchip {
-    display: inline-block; margin-top: 6px; font-size: 10px; font-weight: 700;
-    padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line);
+
+  /* center feed */
+  .feed { display: flex; flex-direction: column; gap: 12px; }
+  .turncard { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); overflow: hidden; }
+  .turncard .th {
+    display: flex; align-items: center; gap: 9px; padding: 9px 13px; border-bottom: 1px solid var(--line);
+    background: var(--panel-2); font-size: 12px;
   }
-  .verdictchip.breach { color: #fff; background: rgba(255,84,112,.18); border-color: var(--red); }
-  .verdictchip.def { color: #fff; background: rgba(47,224,138,.16); border-color: var(--green); }
-
-  .center { display: flex; flex-direction: column; gap: 14px; }
-  .arena-wrap {
-    position: relative; border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
-    background: radial-gradient(600px 360px at 50% 40%, rgba(110,231,255,.06), transparent 65%), var(--panel);
-    min-height: 340px;
+  .turncard .th .who { font-weight: 700; }
+  .turncard .th .tn { color: var(--muted); }
+  .turncard .th .sev {
+    margin-left: auto; font: 800 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .5px;
+    padding: 4px 8px; border-radius: 999px; color: #0a0c12;
   }
-  svg.arena { display: block; width: 100%; height: 360px; }
-
-  .piles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .pile { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; background: var(--panel); }
-  .pile h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
-  .pile.green h3 { color: var(--green); }
-  .pile.red h3 { color: var(--red); }
-  .pile .blocks { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; min-height: 64px; max-height: 150px; overflow: auto; }
-  .block {
-    width: 20px; height: 20px; border-radius: 5px; cursor: pointer; position: relative;
-    border: 1px solid rgba(255,255,255,.14); transition: transform .12s, box-shadow .12s;
-    animation: drop .45s cubic-bezier(.2,.9,.25,1.2);
+  .turncard .row { padding: 10px 13px; border-top: 1px solid var(--line); }
+  .turncard .row:first-of-type { border-top: 0; }
+  .turncard .row .k { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 4px; }
+  .turncard .row .v { white-space: pre-wrap; word-break: break-word; font-size: 12.5px; }
+  .turncard .row.resp .v { color: #cfe9ff; }
+  .turncard .row.evi { background: rgba(244,71,106,.06); }
+  .turncard .row.evi.def { background: rgba(52,211,153,.05); }
+  .turncard .row.evi blockquote {
+    margin: 0; padding: 6px 10px; border-left: 3px solid var(--red); font-style: italic; color: #ffd7df;
+    font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word;
   }
-  .block:hover { transform: scale(1.22); box-shadow: 0 0 0 2px rgba(255,255,255,.35); z-index: 2; }
-  @keyframes drop { 0% { transform: translateY(-26px) scale(.4); opacity: 0; } 100% { transform: translateY(0) scale(1); opacity: 1; } }
+  .turncard .row.evi.def blockquote { border-left-color: var(--green); color: #c7f5e3; }
 
-  .panel { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; background: var(--panel); }
-  .panel h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
-  .vuln { border: 1px solid var(--line); border-radius: 11px; padding: 9px 11px; margin-bottom: 8px; background: var(--panel-2); }
-  .vuln .vh { display: flex; align-items: center; gap: 8px; }
-  .vuln .sev { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; padding: 2px 8px; border-radius: 999px; color: #07080d; }
-  .vuln .vc { font-weight: 700; font-size: 13px; }
-  .vuln .cnt { margin-left: auto; font-size: 11px; color: var(--muted); }
-  .vuln .mit { margin-top: 6px; font-size: 12px; color: var(--text); }
-  .vuln .mit b { color: var(--green); }
-  .muted { color: var(--muted); }
-  .empty { color: var(--muted); padding: 8px 2px; font-size: 12.5px; }
+  /* findings table */
+  .panel { border: 1px solid var(--line); border-radius: 14px; padding: 13px 15px; background: var(--panel); }
+  .panel h3 { margin: 0 0 11px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  table.findings { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.findings th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  table.findings td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.findings tr:last-child td { border-bottom: 0; }
+  table.findings .sevpill { font: 800 10px/1 var(--mono); text-transform: uppercase; padding: 3px 7px; border-radius: 999px; color: #0a0c12; }
+  table.findings code { font-family: var(--mono); color: var(--muted); font-size: 11px; }
+  .empty { color: var(--muted); padding: 10px 2px; font-size: 12.5px; }
+  .loading { color: var(--accent); padding: 10px 2px; font-size: 12.5px; }
 
-  /* drawer */
-  .scrim { position: fixed; inset: 0; background: rgba(3,4,8,.6); backdrop-filter: blur(3px); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 40; }
+  /* ── drawer ─────────────────────────────────────────────────────────── */
+  .scrim { position: fixed; inset: 0; background: rgba(3,4,8,.62); backdrop-filter: blur(3px); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 40; }
   .scrim.open { opacity: 1; pointer-events: auto; }
   .drawer {
-    position: fixed; top: 0; right: 0; height: 100%; width: min(560px, 94vw);
-    background: linear-gradient(180deg, var(--panel), var(--bg2)); border-left: 1px solid var(--line);
+    position: fixed; top: 0; right: 0; height: 100%; width: min(960px, 96vw);
+    background: var(--bg2); border-left: 1px solid var(--line);
     transform: translateX(102%); transition: transform .26s cubic-bezier(.2,.8,.2,1);
     z-index: 41; box-shadow: var(--shadow); display: flex; flex-direction: column;
   }
   .drawer.open { transform: translateX(0); }
-  .drawer .dh { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-  .drawer .dh .x { margin-left: auto; cursor: pointer; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 3px 9px; }
+  .drawer .dh { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .drawer .dh strong { font-size: 15px; }
+  .drawer .dh .x { margin-left: auto; cursor: pointer; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 5px 11px; }
   .drawer .dh .x:hover { color: var(--text); background: var(--panel-2); }
-  .drawer .body { padding: 14px 16px; overflow: auto; }
-  .drawer .seg { margin-bottom: 14px; }
-  .drawer .seg .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 5px; }
-  .drawer pre {
-    margin: 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; color: var(--text);
+  .drawer .split { display: grid; grid-template-columns: 1fr 1fr; gap: 0; flex: 1; overflow: hidden; }
+  @media (max-width: 820px) { .drawer .split { grid-template-columns: 1fr; overflow: auto; } }
+  .drawer .pane { overflow: auto; padding: 14px 18px; }
+  .drawer .pane.left { border-right: 1px solid var(--line); }
+  .drawer .paneh { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 10px; }
+
+  /* timeline */
+  .tl { display: flex; flex-direction: column; gap: 10px; }
+  .tlturn { border: 1px solid var(--line); border-radius: 11px; background: var(--panel); overflow: hidden; }
+  .tlturn.breach { border-color: var(--red); box-shadow: 0 0 0 1px rgba(244,71,106,.2); }
+  .tlturn .tlh { display: flex; align-items: center; gap: 8px; padding: 7px 11px; background: var(--panel-2); font-size: 11.5px; }
+  .tlturn .tlh .n { font-weight: 800; color: var(--accent); }
+  .tlturn .tlh .vb { margin-left: auto; font: 800 10px/1 var(--mono); text-transform: uppercase; padding: 3px 7px; border-radius: 999px; }
+  .tlturn .tlh .vb.breach { color: #fff; background: rgba(244,71,106,.2); border: 1px solid var(--red); }
+  .tlturn .tlh .vb.def { color: #fff; background: rgba(52,211,153,.16); border: 1px solid var(--green); }
+  .tlturn .seg { padding: 8px 11px; border-top: 1px solid var(--line); }
+  .tlturn .seg .k { font-size: 9.5px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); margin-bottom: 3px; }
+  .tlturn .seg .v { white-space: pre-wrap; word-break: break-word; font-size: 12px; font-family: var(--mono); }
+  .tlturn .seg.resp .v { color: #cfe9ff; }
+
+  /* root cause / trace */
+  .trace-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .ladder { display: flex; flex-direction: column; gap: 10px; }
+  .rung { border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: var(--panel); }
+  .rung .rh { display: flex; align-items: center; gap: 9px; padding: 8px 11px; }
+  .rung .state {
+    width: 11px; height: 11px; border-radius: 3px; flex: 0 0 auto; border: 1px solid rgba(255,255,255,.18);
   }
-  .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); margin-right: 6px; }
-  .banner { padding: 9px 14px; border-radius: 10px; font-size: 13px; margin: 0 18px 4px; }
-  .banner.err { background: rgba(255,84,112,.12); border: 1px solid var(--red); color: #ffd5dd; }
-  .banner.done { background: rgba(110,231,255,.1); border: 1px solid var(--accent); color: #cdf6ff; }
+  .rung.broken { border-color: var(--red); }
+  .rung.broken .state { background: var(--red); }
+  .rung.weak .state { background: var(--amber); }
+  .rung.held .state { background: var(--green); }
+  .rung.na .state { background: var(--muted-2); }
+  .rung .rname { font-weight: 700; font-size: 12.5px; }
+  .rung .floc { margin-left: auto; font: 11px/1 var(--mono); color: var(--muted); }
+  .rung .swrap { display: grid; grid-template-columns: 1fr; }
+  .rung .why { padding: 0 11px 8px; font-size: 12px; color: var(--muted); }
+  .rung .why.broken { color: #ffc7d2; }
+  .rung pre.snip {
+    margin: 0; border-top: 1px solid var(--line); background: var(--bg); padding: 9px 11px;
+    font-family: var(--mono); font-size: 11.5px; white-space: pre; overflow: auto; color: var(--text);
+    counter-reset: none;
+  }
+  .rung pre.diff { margin: 0; border-top: 1px solid var(--line); background: #100c12; padding: 9px 11px; font-family: var(--mono); font-size: 11.5px; white-space: pre; overflow: auto; }
+  .rung pre.diff .add { color: #6ee7a8; }
+  .rung pre.diff .del { color: #ff9bb0; }
+  .rung .fixhead { font: 800 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .6px; color: var(--green); padding: 8px 11px 0; }
+  .redbadge { font-size: 11px; color: var(--amber); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 6px; }
+
+  /* honest abstract summary */
+  .honest { border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel); padding: 14px; }
+  .honest .kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; margin-bottom: 10px; }
+  .honest .kv dt { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .honest .kv dd { margin: 0; font-size: 13px; }
+  .honest .kv dd.control { color: var(--amber); font-weight: 700; }
+  .honest .evi blockquote { margin: 4px 0 0; padding: 8px 11px; border-left: 3px solid var(--accent2); font-style: italic; color: #d9d2ff; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
+  .honest .note { margin-top: 12px; padding: 11px 13px; border: 1px dashed var(--line-2); border-radius: 10px; background: var(--panel-2); font-size: 12.5px; color: var(--text); }
+  .honest .note b { color: var(--accent); }
+
+  pre.box { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; color: var(--text); }
+  .miti { border-color: var(--green) !important; }
+  .stdtag { display: inline-block; font: 700 10px/1 var(--mono); padding: 3px 7px; border-radius: 5px; border: 1px solid var(--line); color: var(--muted); margin-right: 6px; }
+
+  .banner { padding: 10px 16px; border-radius: 10px; font-size: 13px; margin: 0 20px 6px; }
+  .banner.err { background: rgba(244,71,106,.12); border: 1px solid var(--red); color: #ffd7df; }
+  .banner.done { background: rgba(92,200,255,.1); border: 1px solid var(--accent); color: #cdeeff; }
+  .confirm { border: 1px solid var(--amber); border-radius: 10px; background: rgba(245,196,81,.08); padding: 12px; margin-bottom: 12px; font-size: 12.5px; }
+  .confirm .row { display: flex; gap: 8px; margin-top: 9px; }
+  .warn403 { border: 1px solid var(--red); border-radius: 10px; background: rgba(244,71,106,.08); padding: 12px; margin-bottom: 12px; font-size: 12.5px; color: #ffd7df; }
 </style>
 </head>
 <body>
 <header class="top">
-  <h1><span class="spark">&#9889;</span> Red-Team Arena</h1>
-  <span class="sub">authorized adversarial testing</span>
+  <div class="brand">
+    <h1>Red-Team Arena</h1>
+    <span class="tag">Authorized red-team of a target you control</span>
+  </div>
   <a class="home" href="/">&#8592; Dashboard</a>
   <span class="spacer"></span>
-  <div class="gauges">
-    <div class="gauge def"><span class="lbl">Defended</span><span class="val" id="g-def">0</span></div>
-    <div class="gauge breach"><span class="lbl">Breaches</span><span class="val" id="g-breach">0</span></div>
-    <div class="gauge"><span class="lbl">Severity</span>
-      <div class="sevbar" id="sevbar" title="breaches by severity"></div>
-    </div>
-  </div>
-  <span class="pill"><span class="dot" id="status-dot"></span><b id="status-text">connecting</b></span>
+  <span class="pill"><span class="dot" id="status-dot"></span><b id="status-text">idle</b></span>
 </header>
+
+<div class="controls">
+  <div class="seg-toggle" role="tablist" aria-label="run source">
+    <button id="tab-live" class="on" role="tab" aria-selected="true" onclick="setView('live')">Live</button>
+    <button id="tab-replay" role="tab" aria-selected="false" onclick="setView('replay')">Replay</button>
+  </div>
+
+  <div class="mode-group on" id="group-live">
+    <span class="ctl"><label for="f-profile">Profile</label>
+      <select class="field" id="f-profile">
+        <option value="quick">quick</option>
+        <option value="all_frontier">all_frontier</option>
+        <option value="jailbreak">jailbreak</option>
+        <option value="injection">injection</option>
+      </select></span>
+    <span class="ctl"><label for="f-sources">Sources</label>
+      <input class="field" id="f-sources" placeholder="comma-separated, optional" /></span>
+    <label class="check"><input type="checkbox" id="f-mock" checked /> mock (offline)</label>
+    <button class="btn primary" id="btn-connect" onclick="connect()">Connect</button>
+    <button class="btn danger" id="btn-stop" onclick="stopLive()" disabled>Stop</button>
+  </div>
+
+  <div class="mode-group" id="group-replay">
+    <span class="ctl"><label for="f-run">Run</label>
+      <select class="field" id="f-run" onchange="loadReplay(this.value)"><option value="">— select a saved run —</option></select></span>
+    <button class="btn" id="btn-refresh" onclick="loadRunList()">Refresh</button>
+    <button class="btn" id="btn-play" onclick="playReplay()" disabled>Re-animate</button>
+  </div>
+
+  <span class="spacer"></span>
+  <span class="pill" id="run-pill" style="display:none">run <b id="run-id" class="nums">—</b></span>
+</div>
+
+<div class="scoreboard">
+  <div class="stat asr"><span class="lbl">ASR</span><span class="val nums" id="s-asr">—</span></div>
+  <div class="stat"><span class="lbl">Attacks</span><span class="val nums" id="s-attacks">0</span></div>
+  <div class="stat breach"><span class="lbl">Breaches</span><span class="val nums" id="s-breach">0</span></div>
+  <div class="stat def"><span class="lbl">Defended</span><span class="val nums" id="s-def">0</span></div>
+  <div class="stat sev"><span class="lbl">Severity</span><div class="sevbar" id="sevbar" title="breaches by severity"></div></div>
+  <div class="stat owasp"><span class="lbl">OWASP coverage</span><div class="owgrid" id="owgrid"></div></div>
+</div>
 
 <div id="banner-slot"></div>
 
 <div class="stage">
-  <div class="rail" id="rail-left"><h2>Attackers</h2></div>
-
-  <div class="center">
-    <div class="arena-wrap">
-      <svg class="arena" id="arena" viewBox="0 0 600 360" preserveAspectRatio="xMidYMid meet" aria-label="red-team arena">
-        <defs>
-          <radialGradient id="targetGrad" cx="50%" cy="45%" r="60%">
-            <stop offset="0%" stop-color="#9bf0ff"/>
-            <stop offset="55%" stop-color="#3aa6c8"/>
-            <stop offset="100%" stop-color="#123445"/>
-          </radialGradient>
-          <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation="6" result="b"/>
-            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        <!-- defensive rings -->
-        <circle id="ring1" cx="300" cy="180" r="92" fill="none" stroke="#2a3346" stroke-width="1.2" stroke-dasharray="4 7"/>
-        <circle id="ring2" cx="300" cy="180" r="64" fill="none" stroke="#34405a" stroke-width="1.4" stroke-dasharray="3 6"/>
-        <g id="arc-layer"></g>
-        <g id="target">
-          <circle id="target-core" cx="300" cy="180" r="42" fill="url(#targetGrad)" filter="url(#glow)"/>
-          <text x="300" y="176" text-anchor="middle" fill="#04222e" font-size="13" font-weight="800">TARGET</text>
-          <text id="target-name" x="300" y="192" text-anchor="middle" fill="#063244" font-size="9" font-weight="600">demo</text>
-        </g>
-      </svg>
-    </div>
-
-    <div class="piles">
-      <div class="pile green"><h3>Defended &#8226; <span id="pile-def-n">0</span></h3><div class="blocks" id="pile-def"></div></div>
-      <div class="pile red"><h3>Breached &#8226; <span id="pile-breach-n">0</span></h3><div class="blocks" id="pile-breach"></div></div>
-    </div>
-
-    <div class="panel">
-      <h3>Vulnerabilities &amp; mitigations</h3>
-      <div id="vulns"><div class="empty">No vulnerabilities surfaced yet. Probes in flight&#8230;</div></div>
-    </div>
+  <div class="col">
+    <div class="colhead">Attackers <span class="c" id="lane-count"></span></div>
+    <div class="lanes" id="lanes"><div class="empty">No agents yet. Connect a live run or pick a replay.</div></div>
   </div>
 
-  <div class="rail" id="rail-right"><h2>Attackers</h2></div>
+  <div class="col">
+    <div class="colhead">Probe &#8594; response &#8594; verdict</div>
+    <div class="feed" id="feed"><div class="empty">Live probes and verdicts will stream here.</div></div>
+    <div class="panel">
+      <h3>Findings</h3>
+      <div id="findings"><div class="empty">No vulnerability classes surfaced yet.</div></div>
+    </div>
+  </div>
 </div>
 
 <div class="scrim" id="scrim" onclick="closeDrawer()"></div>
-<aside class="drawer" id="drawer" role="dialog" aria-modal="true">
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="attacker drill-down">
   <div class="dh">
-    <strong id="dr-title">Probe</strong>
-    <span id="dr-sev" class="vuln" style="padding:2px 8px;border:none;background:transparent"></span>
+    <strong id="dr-title">Attacker</strong>
     <span class="x" onclick="closeDrawer()">close &#10005;</span>
   </div>
-  <div class="body" id="dr-body"></div>
+  <div class="split">
+    <div class="pane left">
+      <p class="paneh">Multi-turn timeline</p>
+      <div class="tl" id="dr-timeline"><div class="empty">No turns recorded.</div></div>
+    </div>
+    <div class="pane right">
+      <p class="paneh">Root cause</p>
+      <div id="dr-trace"></div>
+    </div>
+  </div>
 </aside>
 
 <script>
 "use strict";
 var CONFIG = __ARENA_CONFIG__;
 
-// ---- safe helpers ---------------------------------------------------------
+// ── safe helpers ────────────────────────────────────────────────────────
 function esc(s) {
   s = (s == null) ? "" : String(s);
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -322,184 +485,264 @@ function el(tag, cls, txt) {
   if (txt != null) e.textContent = txt;
   return e;
 }
-
+function getCss(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim() || "#888"; }
 var SEV = ["none", "low", "medium", "high", "critical"];
 var SEV_RANK = { none: 0, low: 1, medium: 2, high: 3, critical: 4 };
-var SEV_COLOR = {
-  none: getCss("--sev-none"), low: getCss("--sev-low"), medium: getCss("--sev-medium"),
-  high: getCss("--sev-high"), critical: getCss("--sev-critical")
-};
-function getCss(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim() || "#888"; }
-function sevColor(s) { return SEV_COLOR[s] || SEV_COLOR.medium; }
-
-// ---- state ----------------------------------------------------------------
-var agents = {};       // attacker_id -> { card, think, strat, breaches, side }
-var attempts = {};     // key -> { prompt, response, verdict, strat, attacker_id, turn, block }
-var lastProbe = {};    // attacker_id -> { text, turn }
-var counts = { def: 0, breach: 0 };
-var sevCounts = { none: 0, low: 0, medium: 0, high: 0, critical: 0 };
-var leftCount = 0, rightCount = 0;
-var ended = false;
-
-function attemptKey(aid, turn) { return aid + "#" + (turn == null ? "?" : turn); }
-
-// ---- agent cards ----------------------------------------------------------
-function ensureAgent(aid, strat, meta) {
-  if (agents[aid]) return agents[aid];
-  var side = (Object.keys(agents).length % 2 === 0) ? "left" : "right";
-  var rail = (side === "left") ? $("rail-left") : $("rail-right");
-  if (side === "left") leftCount++; else rightCount++;
-
-  var card = el("div", "agent");
-  card.id = "agent-" + aid;
-  var head = el("div", "ahead");
-  head.appendChild(el("span", "strat", prettyStrat(strat)));
-  var badge = el("span", "badge", backendLabel(meta));
-  head.appendChild(badge);
-  card.appendChild(head);
-  var sub = el("div", "last");
-  sub.innerHTML = '<span class="turnchip" id="turn-' + esc(aid) + '"></span> '
-    + '<span class="tag">' + esc((meta && meta.intensity) || "standard") + '</span>';
-  card.appendChild(sub);
-  var think = el("div", "think");
-  think.textContent = "";
-  card.appendChild(think);
-  rail.appendChild(card);
-
-  return (agents[aid] = { card: card, think: think, strat: strat, breaches: 0, side: side });
+function sevColor(s) {
+  var m = { none: "--sev-none", low: "--sev-low", medium: "--sev-medium", high: "--sev-high", critical: "--sev-critical" };
+  return getCss(m[s] || "--sev-medium");
 }
 function prettyStrat(s) { return String(s || "agent").replace(/_/g, " "); }
-function backendLabel(meta) {
-  if (!meta) return "agent";
-  var p = meta.provider || "?";
-  var m = meta.model ? (" / " + meta.model) : "";
-  return p + m;
+function backendLabel(m) {
+  if (!m) return "";
+  var p = m.provider || "";
+  var mo = m.model ? (" / " + m.model) : "";
+  return (p + mo).trim();
 }
+var OWASP_LLM = ["LLM01","LLM02","LLM03","LLM04","LLM05","LLM06","LLM07","LLM08","LLM09","LLM10"];
 
-// ---- thinking stream (typewriter) -----------------------------------------
-function onThinking(ev) {
-  var a = ensureAgent(ev.attacker_id, ev.strategy, null);
-  a.card.classList.add("firing");
-  if (a._freshThink !== ev.turn) { a.think.textContent = ""; a._freshThink = ev.turn; }
-  a.think.textContent += (ev.delta || "");
-  a.think.innerHTML = esc(a.think.textContent) + '<span class="caret">&nbsp;</span>';
-  var tc = $("turn-" + ev.attacker_id);
-  if (tc && ev.turn) tc.textContent = "turn " + ev.turn;
-}
+// ── state ───────────────────────────────────────────────────────────────
+// attackers[aid] = { strategy, provider, model, mode, intensity, persona, technique,
+//                    source, isSource, breached, turns: { turn -> {turn,prompt,response,verdict,root_cause} } }
+var attackers = {};
+var laneEls = {};        // aid -> lane DOM node
+var counts = { attacks: 0, breaches: 0, defended: 0 };
+var sevCounts = { none: 0, low: 0, medium: 0, high: 0, critical: 0 };
+var owaspBreached = {};
+var vulns = {};
+var runId = null;
+var view = "live";
+var ended = false;
+var savedEvents = null;  // replay event log for re-animation
+var replayTimer = null;
 
-// ---- attack: fly an arc from the rail to the center -----------------------
-function onAttack(ev) {
-  var a = ensureAgent(ev.attacker_id, ev.strategy, null);
-  a.card.classList.add("firing");
-  a.think.innerHTML = esc(ev.text || a.think.textContent || "");
-  lastProbe[ev.attacker_id] = { text: ev.text || "", turn: ev.turn };
-  flyArc(a.side);
-}
-function flyArc(side) {
-  var layer = $("arc-layer");
-  if (!layer) return;
-  var x0 = side === "left" ? 20 : 580;
-  var y0 = 60 + Math.random() * 240;
-  var cx = side === "left" ? 150 : 450, cy = 30 + Math.random() * 60;
-  var d = "M " + x0 + " " + y0 + " Q " + cx + " " + cy + " 300 180";
-  var color = side === "left" ? getCss("--accent") : getCss("--accent2");
-  var len = 600;
-  // insertAdjacentHTML inside the <g> parses in SVG-namespace context, so we
-  // never need to spell out the namespace URI as a literal in this file.
-  var html = '<path d="' + d + '" fill="none" stroke="' + color
-    + '" stroke-width="2" stroke-linecap="round" opacity="0.9"'
-    + ' stroke-dasharray="' + len + '" stroke-dashoffset="' + len + '"></path>';
-  layer.insertAdjacentHTML("beforeend", html);
-  var path = layer.lastElementChild;
-  if (!path) return;
-  var t0 = null, dur = 620;
-  function step(ts) {
-    if (t0 == null) t0 = ts;
-    var k = Math.min(1, (ts - t0) / dur);
-    path.setAttribute("stroke-dashoffset", String(len * (1 - k)));
-    path.setAttribute("opacity", String(0.95 * (1 - k * 0.4)));
-    if (k < 1) requestAnimationFrame(step);
-    else { path.setAttribute("opacity", "0"); setTimeout(function(){ if (path.parentNode) path.parentNode.removeChild(path); }, 200); }
+function ensureAttacker(aid, strat, meta) {
+  meta = meta || {};
+  var a = attackers[aid];
+  if (!a) {
+    a = attackers[aid] = {
+      strategy: strat || meta.strategy || "agent",
+      provider: meta.provider, model: meta.model, mode: meta.mode,
+      intensity: meta.intensity, persona: meta.persona, converter: meta.converter,
+      technique: meta.technique, source: meta.source,
+      isSource: (strat === "source") || /^src:/.test(String(aid)),
+      breached: false, turns: {}
+    };
+  } else {
+    if (strat && a.strategy === "agent") a.strategy = strat;
+    ["provider","model","mode","intensity","persona","technique","source","converter"].forEach(function(k){
+      if (meta[k] != null && a[k] == null) a[k] = meta[k];
+    });
   }
-  requestAnimationFrame(step);
+  renderLane(aid);
+  return a;
+}
+function getTurn(a, turn) {
+  var t = (turn == null) ? 1 : turn;
+  if (!a.turns[t]) a.turns[t] = { turn: t };
+  return a.turns[t];
 }
 
-// ---- response: pulse the target -------------------------------------------
-function onResponse(ev) {
-  var key = attemptKey(ev.attacker_id, ev.turn);
-  var rec = attempts[key] || (attempts[key] = {});
-  rec.response = ev.text || "";
-  rec.attacker_id = ev.attacker_id; rec.strat = ev.strategy; rec.turn = ev.turn;
-  var p = lastProbe[ev.attacker_id];
-  if (p) rec.prompt = p.text;
-  pulseTarget();
-  var a = agents[ev.attacker_id];
-  if (a) a.card.classList.remove("firing");
+// ── attacker lanes ──────────────────────────────────────────────────────
+function renderLane(aid) {
+  var a = attackers[aid];
+  if (!a) return;
+  var lane = laneEls[aid];
+  if (!lane) {
+    if ($("lanes").querySelector(".empty")) $("lanes").innerHTML = "";
+    lane = el("div", "lane");
+    lane.id = "lane-" + aid;
+    lane.tabIndex = 0;
+    lane.setAttribute("role", "button");
+    lane.addEventListener("click", function(){ openDrawer(aid); });
+    lane.addEventListener("keydown", function(e){ if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDrawer(aid); } });
+    $("lanes").appendChild(lane);
+    laneEls[aid] = lane;
+    $("lane-count").textContent = "· " + Object.keys(laneEls).length;
+  }
+  lane.classList.toggle("src", !!a.isSource);
+  lane.classList.toggle("breached", a.breached);
+  lane.classList.toggle("defended", !a.breached && Object.keys(a.turns).length > 0 && hasVerdict(a));
+
+  var techTxt = a.technique || a.source || (a.isSource ? "source" : "");
+  var turnsArr = turnList(a);
+  var lastV = lastVerdict(a);
+  var html = '<div class="lh">'
+    + '<span class="strat">' + esc(prettyStrat(a.strategy)) + '</span>'
+    + (techTxt ? '<span class="tech">' + esc(techTxt) + '</span>' : '');
+  if (lastV) {
+    var br = !!lastV.breached, sv = lastV.severity || (br ? "medium" : "none");
+    html += '<span class="verdictchip ' + (br ? "breach" : "def") + '">' + (br ? ("BREACH · " + esc(sv)) : "defended") + '</span>';
+  }
+  html += '</div><div class="meta">';
+  var bl = backendLabel(a);
+  if (bl) html += '<span class="tag"><b>' + esc(bl) + '</b></span>';
+  if (a.intensity) html += '<span class="tag">intensity <b>' + esc(a.intensity) + '</b></span>';
+  if (a.mode) html += '<span class="tag">mode <b>' + esc(a.mode) + '</b></span>';
+  if (turnsArr.length) html += '<span class="tag">turns <b>' + turnsArr.length + '</b></span>';
+  html += '</div>';
+  html += '<div class="think" id="think-' + esc(aid) + '"></div>';
+  lane.innerHTML = html;
 }
-function pulseTarget() {
-  var core = $("target-core");
-  if (!core) return;
-  core.setAttribute("r", "52");
-  core.style.transition = "none";
-  requestAnimationFrame(function() {
-    core.style.transition = "all .5s cubic-bezier(.2,.8,.2,1)";
-    core.setAttribute("r", "42");
+function hasVerdict(a) { return turnList(a).some(function(t){ return t.verdict; }); }
+function turnList(a) {
+  return Object.keys(a.turns).map(function(k){ return a.turns[k]; })
+    .sort(function(x,y){ return (x.turn||0) - (y.turn||0); });
+}
+function lastVerdict(a) {
+  var tl = turnList(a).filter(function(t){ return t.verdict; });
+  return tl.length ? tl[tl.length-1].verdict : null;
+}
+
+// ── live event handlers ─────────────────────────────────────────────────
+function onProfile(ev) {
+  var d = ev.data || {};
+  (d.attackers || []).forEach(function(a) {
+    ensureAttacker(a.id, a.strategy, {
+      provider: a.provider, model: a.model, intensity: a.intensity,
+      persona: a.persona, mode: a.mode, converter: a.converter
+    });
   });
 }
-
-// ---- verdict: drop a block onto a pile -------------------------------------
+function onSpawn(ev) {
+  var d = ev.data || {};
+  ensureAttacker(ev.attacker_id, ev.strategy, {
+    provider: d.provider, model: d.model, intensity: d.intensity,
+    mode: d.mode, converter: d.converter, source: d.source
+  });
+}
+function onThinking(ev) {
+  var a = ensureAttacker(ev.attacker_id, ev.strategy, null);
+  var lane = laneEls[ev.attacker_id];
+  if (lane) lane.classList.add("firing");
+  var t = getTurn(a, ev.turn);
+  if (t._think == null) t._think = "";
+  t._think += (ev.delta || "");
+  var box = $("think-" + ev.attacker_id);
+  if (box) { box.innerHTML = esc(t._think) + '<span class="caret">&nbsp;</span>'; }
+}
+function onAttack(ev) {
+  var d = ev.data || {};
+  var a = ensureAttacker(ev.attacker_id, ev.strategy, { technique: d.technique, source: d.source });
+  var lane = laneEls[ev.attacker_id];
+  if (lane) lane.classList.add("firing");
+  var t = getTurn(a, ev.turn);
+  t.prompt = ev.text || "";
+  renderLane(ev.attacker_id);
+  pushFeed(ev.attacker_id, t.turn);
+}
+function onResponse(ev) {
+  var a = ensureAttacker(ev.attacker_id, ev.strategy, null);
+  var t = getTurn(a, ev.turn);
+  t.response = ev.text || "";
+  if (ev.data && ev.data.error) t.error = ev.data.error;
+  var lane = laneEls[ev.attacker_id];
+  if (lane) lane.classList.remove("firing");
+  refreshFeed(ev.attacker_id, t.turn);
+}
 function onVerdict(ev) {
+  var a = ensureAttacker(ev.attacker_id, ev.strategy, null);
+  var t = getTurn(a, ev.turn);
   var v = ev.verdict || {};
-  var key = attemptKey(ev.attacker_id, ev.turn);
-  var rec = attempts[key] || (attempts[key] = {});
-  rec.verdict = v; rec.attacker_id = ev.attacker_id; rec.strat = ev.strategy; rec.turn = ev.turn;
-  var p = lastProbe[ev.attacker_id];
-  if (p && rec.prompt == null) rec.prompt = p.text;
-
+  t.verdict = v;
+  if (ev.data && ev.data.root_cause) t.root_cause = ev.data.root_cause;
+  counts.attacks++;
   var breached = !!v.breached;
   var sev = v.severity || (breached ? "medium" : "none");
-  var pileId = breached ? "pile-breach" : "pile-def";
-  var block = el("div", "block");
-  block.style.background = breached ? heatColor(sev) : sevColor("none");
-  block.style.boxShadow = breached ? ("0 0 8px " + sevColor(sev)) : "none";
-  block.title = (breached ? "BREACH" : "defended") + " · " + sev + " · " + prettyStrat(ev.strategy);
-  block.tabIndex = 0;
-  block.addEventListener("click", function() { openDrawer(rec); });
-  block.addEventListener("keydown", function(e){ if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDrawer(rec); } });
-  $(pileId).appendChild(block);
-  rec.block = block;
-
-  if (breached) { counts.breach++; sevCounts[sev] = (sevCounts[sev] || 0) + 1; }
-  else { counts.def++; }
-  $("pile-breach-n").textContent = counts.breach;
-  $("pile-def-n").textContent = counts.def;
-  $("g-breach").textContent = counts.breach;
-  $("g-def").textContent = counts.def;
-  renderSevBar();
-
-  var a = agents[ev.attacker_id];
-  if (a) {
-    a.card.classList.remove("firing");
-    a.card.classList.toggle("breached", breached);
-    a.card.classList.toggle("defended", !breached);
-    var chip = a.card.querySelector(".verdictchip");
-    if (!chip) { chip = el("span", "verdictchip"); a.card.appendChild(chip); }
-    chip.className = "verdictchip " + (breached ? "breach" : "def");
-    chip.textContent = breached ? ("BREACH · " + sev) : "defended";
-  }
+  if (breached) { counts.breaches++; a.breached = true; sevCounts[sev] = (sevCounts[sev]||0)+1; }
+  else { counts.defended++; }
+  renderLane(ev.attacker_id);
+  refreshFeed(ev.attacker_id, t.turn);
+  updateScore();
 }
-function heatColor(sev) {
-  // none -> green, escalating to deep red at critical
-  return sevColor(sev);
+function onVuln(ev) {
+  var d = ev.data || {};
+  if (!d.vuln_class) return;
+  vulns[d.vuln_class] = d;
+  if (d.owasp) String(d.owasp).split(/[,\s]+/).forEach(function(o){ if (o) markOwasp(o); });
+  renderFindings();
+}
+function onSummary(ev) {
+  var d = ev.data || {};
+  if (typeof d.attacks === "number") counts.attacks = d.attacks;
+  if (typeof d.breaches === "number") counts.breaches = d.breaches;
+  if (typeof d.defended === "number") counts.defended = d.defended;
+  if (d.by_severity) Object.keys(d.by_severity).forEach(function(s){ sevCounts[s] = d.by_severity[s]; });
+  (d.owasp_breached || []).forEach(markOwasp);
+  if (typeof d.asr === "number") setAsr(d.asr);
+  updateScore(typeof d.asr === "number" ? d.asr : null);
+  renderFindings();
+}
+function onDone(ev) {
+  ended = true;
+  setStatus("done", "run complete");
+  var d = ev.data || {};
+  if (d.run_id) { runId = d.run_id; showRunId(runId); }
+  banner("done", "Run complete — " + counts.breaches + " breach(es), " + counts.defended + " defended"
+    + (d.vulnerabilities != null ? (", " + d.vulnerabilities + " vulnerability class(es).") : "."));
+  Object.keys(laneEls).forEach(function(k){ laneEls[k].classList.remove("firing"); });
+  setLiveButtons(false);
+  closeStream();
+}
+function onError(ev) {
+  ended = true;
+  setStatus("err", "stream error");
+  var d = ev.data || {};
+  banner("err", "Stream error: " + ((d && d.message) || (ev && ev.text) || "unknown"));
+  setLiveButtons(false);
+  closeStream();
+}
+
+// ── center feed ─────────────────────────────────────────────────────────
+function feedKey(aid, turn) { return aid + "#" + (turn == null ? "?" : turn); }
+function pushFeed(aid, turn) {
+  if ($("feed").querySelector(".empty")) $("feed").innerHTML = "";
+  var key = feedKey(aid, turn);
+  if (!$("tc-" + cssId(key))) {
+    var card = el("div", "turncard");
+    card.id = "tc-" + cssId(key);
+    $("feed").appendChild(card);
+    // keep the feed bounded
+    var cards = $("feed").querySelectorAll(".turncard");
+    if (cards.length > 24) cards[0].remove();
+  }
+  refreshFeed(aid, turn);
+}
+function cssId(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g, "_"); }
+function refreshFeed(aid, turn) {
+  var a = attackers[aid]; if (!a) return;
+  var t = a.turns[turn == null ? 1 : turn]; if (!t) return;
+  var card = $("tc-" + cssId(feedKey(aid, turn)));
+  if (!card) { pushFeed(aid, turn); card = $("tc-" + cssId(feedKey(aid, turn))); if (!card) return; }
+  var v = t.verdict || null;
+  var br = v && !!v.breached, sev = v ? (v.severity || (br ? "medium" : "none")) : null;
+  var html = '<div class="th"><span class="who">' + esc(prettyStrat(a.strategy)) + '</span>'
+    + '<span class="tn">· turn ' + esc(t.turn) + '</span>';
+  if (v) { html += '<span class="sev" style="background:' + sevColor(sev) + '">' + (br ? "breach" : "defended") + ' · ' + esc(sev) + '</span>'; }
+  html += '</div>';
+  if (t.prompt != null) html += '<div class="row"><div class="k">Probe</div><div class="v">' + esc(t.prompt) + '</div></div>';
+  if (t.response != null || t.error) html += '<div class="row resp"><div class="k">Target response</div><div class="v">' + esc(t.error ? ("[error] " + t.error) : t.response) + '</div></div>';
+  if (v && v.evidence) html += '<div class="row evi ' + (br ? "" : "def") + '"><div class="k">Evidence</div><blockquote>' + esc(v.evidence) + '</blockquote></div>';
+  else if (v && v.rationale) html += '<div class="row"><div class="k">Judge rationale</div><div class="v">' + esc(v.rationale) + '</div></div>';
+  card.innerHTML = html;
+}
+
+// ── scoreboard ──────────────────────────────────────────────────────────
+function setAsr(asr) { $("s-asr").textContent = (Math.round(asr * 1000) / 10) + "%"; }
+function updateScore(asr) {
+  $("s-attacks").textContent = counts.attacks;
+  $("s-breach").textContent = counts.breaches;
+  $("s-def").textContent = counts.defended;
+  if (asr == null && counts.attacks > 0) setAsr(counts.breaches / counts.attacks);
+  renderSevBar();
+  renderOwasp();
 }
 function renderSevBar() {
-  var bar = $("sevbar");
-  bar.innerHTML = "";
-  var total = 0; SEV.forEach(function(s){ if (s !== "none") total += (sevCounts[s] || 0); });
-  if (total === 0) { bar.innerHTML = '<span style="width:100%;background:var(--panel-2)"></span>'; return; }
-  ["low", "medium", "high", "critical"].forEach(function(s) {
-    var n = sevCounts[s] || 0;
-    if (!n) return;
+  var bar = $("sevbar"); bar.innerHTML = "";
+  var total = 0; ["low","medium","high","critical"].forEach(function(s){ total += (sevCounts[s]||0); });
+  if (!total) { bar.innerHTML = '<span style="width:100%;background:var(--panel-2)"></span>'; return; }
+  ["low","medium","high","critical"].forEach(function(s){
+    var n = sevCounts[s] || 0; if (!n) return;
     var seg = el("span");
     seg.style.width = (100 * n / total) + "%";
     seg.style.background = sevColor(s);
@@ -507,118 +750,250 @@ function renderSevBar() {
     bar.appendChild(seg);
   });
 }
-
-// ---- vulnerabilities + summary --------------------------------------------
-var vulns = {};
-function onVuln(ev) {
-  var d = ev.data || {};
-  if (!d.vuln_class) return;
-  vulns[d.vuln_class] = d;
-  renderVulns();
+function markOwasp(code) {
+  var m = String(code || "").match(/LLM\d{2}/i);
+  if (m) { owaspBreached[m[0].toUpperCase()] = true; renderOwasp(); }
 }
-function renderVulns() {
-  var box = $("vulns");
+function renderOwasp() {
+  var g = $("owgrid"); g.innerHTML = "";
+  OWASP_LLM.forEach(function(o){
+    var c = el("span", "owchip" + (owaspBreached[o] ? " hit" : ""), o);
+    c.title = owaspBreached[o] ? (o + " — breached") : (o + " — not breached");
+    g.appendChild(c);
+  });
+}
+
+// ── findings table ──────────────────────────────────────────────────────
+function renderFindings() {
+  var box = $("findings");
   var list = Object.keys(vulns).map(function(k){ return vulns[k]; });
-  if (!list.length) { box.innerHTML = '<div class="empty">No vulnerabilities surfaced yet. Probes in flight&#8230;</div>'; return; }
-  list.sort(function(a, b){ return (SEV_RANK[b.severity] || 0) - (SEV_RANK[a.severity] || 0); });
+  if (!list.length) { box.innerHTML = '<div class="empty">No vulnerability classes surfaced yet.</div>'; return; }
+  list.sort(function(a,b){ return (SEV_RANK[b.severity]||0) - (SEV_RANK[a.severity]||0); });
+  var html = '<table class="findings"><thead><tr>'
+    + '<th>Class</th><th>Sev</th><th>Count</th><th>OWASP / ATLAS</th><th>Mitigation</th></tr></thead><tbody>';
+  list.forEach(function(v){
+    var sv = v.severity || "medium";
+    html += '<tr><td><b>' + esc(prettyStrat(v.vuln_class)) + '</b></td>'
+      + '<td><span class="sevpill" style="background:' + sevColor(sv) + '">' + esc(sv) + '</span></td>'
+      + '<td class="nums">' + esc(v.count || 0) + '</td>'
+      + '<td><code>' + esc(v.owasp || "—") + (v.atlas ? (" / " + esc(v.atlas)) : "") + '</code></td>'
+      + '<td>' + esc(v.mitigation || "—") + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  if (runId) html += '<div class="empty">Saved as run <code>' + esc(runId) + '</code>.</div>';
+  box.innerHTML = html;
+}
+
+// ── drill-down drawer ───────────────────────────────────────────────────
+var drawerAid = null;
+function openDrawer(aid) {
+  var a = attackers[aid]; if (!a) return;
+  drawerAid = aid;
+  $("dr-title").textContent = prettyStrat(a.strategy) + (a.breached ? "  ·  BREACHED" : "  ·  defended");
+  renderTimeline(a);
+  renderTracePanel(aid);
+  $("scrim").classList.add("open");
+  $("drawer").classList.add("open");
+}
+function closeDrawer() { $("scrim").classList.remove("open"); $("drawer").classList.remove("open"); drawerAid = null; }
+document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDrawer(); });
+
+function renderTimeline(a) {
+  var box = $("dr-timeline");
+  var turns = turnList(a);
+  if (!turns.length) { box.innerHTML = '<div class="empty">No turns recorded.</div>'; return; }
   box.innerHTML = "";
-  list.forEach(function(v) {
-    var card = el("div", "vuln");
-    var head = el("div", "vh");
-    var sev = el("span", "sev", v.severity || "medium");
-    sev.style.background = sevColor(v.severity || "medium");
-    head.appendChild(sev);
-    head.appendChild(el("span", "vc", prettyStrat(v.vuln_class)));
-    head.appendChild(el("span", "cnt", (v.count || 0) + "×"));
-    card.appendChild(head);
-    if (v.mitigation) {
-      var mit = el("div", "mit");
-      mit.innerHTML = "<b>Mitigation:</b> " + esc(v.mitigation);
-      card.appendChild(mit);
-    }
+  turns.forEach(function(t){
+    var v = t.verdict || null;
+    var br = v && !!v.breached;
+    var card = el("div", "tlturn" + (br ? " breach" : ""));
+    var sv = v ? (v.severity || (br ? "medium" : "none")) : null;
+    var head = '<div class="tlh"><span class="n">turn ' + esc(t.turn) + '</span>';
+    if (v) head += '<span class="vb ' + (br ? "breach" : "def") + '">' + (br ? ("breach · " + esc(sv)) : "defended") + '</span>';
+    head += '</div>';
+    var inner = head;
+    if (t.prompt != null) inner += '<div class="seg"><div class="k">Probe</div><div class="v">' + esc(t.prompt) + '</div></div>';
+    if (t.response != null || t.error) inner += '<div class="seg resp"><div class="k">Response</div><div class="v">' + esc(t.error ? ("[error] " + t.error) : t.response) + '</div></div>';
+    if (v && v.evidence) inner += '<div class="seg"><div class="k">Evidence</div><div class="v">' + esc(v.evidence) + '</div></div>';
+    if (v && v.rationale) inner += '<div class="seg"><div class="k">Judge rationale</div><div class="v">' + esc(v.rationale) + '</div></div>';
+    card.innerHTML = inner;
     box.appendChild(card);
   });
 }
 
-function onSummary(ev) {
-  var d = ev.data || {};
-  if (typeof d.breaches === "number") { $("g-breach").textContent = d.breaches; }
-  if (typeof d.defended === "number") { $("g-def").textContent = d.defended; }
-  var by = d.by_severity || {};
-  Object.keys(by).forEach(function(s){ sevCounts[s] = by[s]; });
-  renderSevBar();
+function renderTracePanel(aid) {
+  var box = $("dr-trace");
+  var canTrace = !!runId;
+  var html = '<div class="trace-ctl">'
+    + '<span class="ctl"><label for="tr-provider">Provider</label>'
+    + '<input class="field" id="tr-provider" value="ollama" style="min-width:96px" /></span>'
+    + '<span class="ctl"><label for="tr-model">Model</label>'
+    + '<input class="field" id="tr-model" placeholder="optional" style="min-width:96px" /></span>'
+    + '<button class="btn primary" id="tr-go"' + (canTrace ? "" : " disabled") + '>Trace in code</button>'
+    + '</div>';
+  if (!canTrace) html += '<div class="empty">Trace becomes available once the run has a <code>run_id</code> (after it completes, or in replay).</div>';
+  else html += '<div class="empty">Defaults to a local model so source never leaves the machine. Click to analyze the breaching attempt for this attacker.</div>';
+  box.innerHTML = html;
+  var go = $("tr-go");
+  if (go) go.addEventListener("click", function(){ runTrace(aid, false); });
 }
 
-function onProfile(ev) {
-  var d = ev.data || {};
-  if (d.target) { var tn = $("target-name"); if (tn) tn.textContent = String(d.target).slice(0, 14); }
-  // Pre-spawn cards so the roster is visible immediately.
-  (d.attackers || []).forEach(function(a) {
-    ensureAgent(a.id, a.strategy, { provider: a.provider, model: a.model, intensity: a.intensity });
+function runTrace(aid, consent) {
+  var box = $("dr-trace");
+  var provider = ($("tr-provider") && $("tr-provider").value || "ollama").trim() || "ollama";
+  var model = ($("tr-model") && $("tr-model").value || "").trim() || null;
+  var savedProvider = provider, savedModel = model;
+  var ctlHtml = box.querySelector(".trace-ctl") ? box.querySelector(".trace-ctl").outerHTML : "";
+  box.innerHTML = ctlHtml + '<div class="loading">Tracing root cause in code…</div>';
+  rebindTrace(aid);
+
+  var body = { run_id: runId, attacker_id: aid, provider: provider };
+  if (model) body.model = model;
+  if (consent) body.consent = true;
+
+  fetch("/api/redteam/trace", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+  }).then(function(r){
+    return r.json().then(function(j){ return { status: r.status, body: j }; });
+  }).then(function(res){
+    var j = res.body || {};
+    if (res.status === 403) { renderAirGap(box, aid, j); return; }
+    if (res.status === 400 && j.needs_consent) { renderConsent(box, aid, j); return; }
+    if (res.status >= 400) { box.innerHTML = ctlHtml + '<div class="warn403">Trace failed: ' + esc(j.error || ("HTTP " + res.status)) + '</div>'; rebindTrace(aid); return; }
+    if (j.mode === "code") renderLadder(box, j);
+    else renderHonest(box, j);
+  }).catch(function(e){
+    box.innerHTML = ctlHtml + '<div class="warn403">Trace request failed: ' + esc(String(e)) + '</div>';
+    rebindTrace(aid);
   });
 }
-
-// ---- drawer ---------------------------------------------------------------
-function openDrawer(rec) {
-  var v = rec.verdict || {};
-  var breached = !!v.breached;
-  var sev = v.severity || (breached ? "medium" : "none");
-  $("dr-title").textContent = (breached ? "BREACH" : "Defended") + "  ·  " + prettyStrat(rec.strat);
-  var sevTag = $("dr-sev");
-  sevTag.textContent = sev + (v.vuln_class && v.vuln_class !== "none" ? ("  ·  " + prettyStrat(v.vuln_class)) : "");
-  sevTag.style.color = sevColor(sev);
-  sevTag.style.fontWeight = "800";
-
-  var body = $("dr-body");
-  body.innerHTML = "";
-  body.appendChild(seg("Attacker", esc((rec.attacker_id || "?")) + "  ·  turn " + esc(rec.turn || 1)));
-  body.appendChild(segPre("Probe", rec.prompt || "(probe not captured)"));
-  body.appendChild(segPre("Target response", rec.response || "(no response)"));
-  if (v.rationale) body.appendChild(segPre("Judge rationale", v.rationale));
-  if (v.evidence) body.appendChild(segPre("Evidence", v.evidence));
-  if (v.suggested_mitigation) {
-    var s = segPre("Suggested mitigation", v.suggested_mitigation);
-    s.querySelector("pre").style.borderColor = getCss("--green");
-    body.appendChild(s);
-  }
-  $("scrim").classList.add("open");
-  $("drawer").classList.add("open");
+function rebindTrace(aid) {
+  var go = $("tr-go");
+  if (go) go.addEventListener("click", function(){ runTrace(aid, false); });
 }
-function seg(label, html) {
-  var d = el("div", "seg");
-  d.appendChild(el("div", "lbl", label));
-  var v = el("div"); v.innerHTML = html; d.appendChild(v);
-  return d;
+function renderConsent(box, aid, j) {
+  var prov = j.provider || "remote";
+  box.innerHTML = '<div class="confirm"><b>Consent required.</b> This uploads source excerpts to '
+    + '<code>' + esc(prov) + '</code> (a non-local provider). Continue?'
+    + '<div class="row"><button class="btn primary" id="cf-yes">Yes, send to ' + esc(prov) + '</button>'
+    + '<button class="btn" id="cf-no">Cancel</button></div></div>';
+  $("cf-yes").addEventListener("click", function(){ runTrace(aid, true); });
+  $("cf-no").addEventListener("click", function(){ renderTracePanel(aid); });
 }
-function segPre(label, text) {
-  var d = el("div", "seg");
-  d.appendChild(el("div", "lbl", label));
-  var pre = el("pre"); pre.textContent = (text == null ? "" : String(text)); d.appendChild(pre);
-  return d;
+function renderAirGap(box, aid, j) {
+  box.innerHTML = '<div class="warn403">Air-gap is on — code dives are restricted to a local model. '
+    + 'Set the provider to a local one (ollama, vllm, lmstudio) and try again.</div>'
+    + '<button class="btn" id="ag-back">Back</button>';
+  $("ag-back").addEventListener("click", function(){ renderTracePanel(aid); });
 }
-function closeDrawer() { $("scrim").classList.remove("open"); $("drawer").classList.remove("open"); }
-document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDrawer(); });
 
-// ---- status + banners -----------------------------------------------------
+// HONESTY RULE: mode==="code" -> colored ladder of REAL file:line rungs.
+function renderLadder(box, j) {
+  var html = "";
+  if (typeof j.redactions === "number") html += '<div class="redbadge">&#9632; ' + esc(j.redactions) + ' secret(s) redacted before send</div>';
+  html += '<div class="ladder">';
+  (j.ladder || []).forEach(function(rung){
+    var st = (rung.state || "na").toLowerCase();
+    var floc = rung.file ? (esc(rung.file) + (rung.lines ? (":" + esc(rung.lines)) : "")) : "";
+    html += '<div class="rung ' + esc(st) + '">'
+      + '<div class="rh"><span class="state"></span><span class="rname">' + esc(rung.name || "stage") + '</span>'
+      + (floc ? '<span class="floc">' + floc + '</span>' : '') + '</div>'
+      + (rung.why ? '<div class="why ' + (st === "broken" ? "broken" : "") + '">' + esc(rung.why) + '</div>' : '');
+    if (rung.snippet) html += '<pre class="snip">' + esc(rung.snippet) + '</pre>';
+    if (st === "broken" && j.fix && (j.fix.diff || j.fix.rationale)) {
+      html += '<div class="fixhead">Suggested fix' + (j.fix.file ? (" · " + esc(j.fix.file) + (j.fix.locus ? (":" + esc(j.fix.locus)) : "")) : "") + '</div>';
+      if (j.fix.diff) html += '<pre class="diff">' + diffHtml(j.fix.diff) + '</pre>';
+      if (j.fix.rationale) html += '<div class="why">' + esc(j.fix.rationale) + '</div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  html += '<div class="honest" style="margin-top:12px"><dl class="kv">';
+  if (j.introduced_at) html += '<dt>Introduced at</dt><dd><code>' + esc(j.introduced_at) + '</code></dd>';
+  if (j.severity) html += '<dt>Severity</dt><dd style="color:' + sevColor(j.severity) + '">' + esc(j.severity) + '</dd>';
+  if (j.owasp || j.atlas) html += '<dt>Mapping</dt><dd><span class="stdtag">OWASP ' + esc(j.owasp || "—") + '</span><span class="stdtag">ATLAS ' + esc(j.atlas || "—") + '</span></dd>';
+  if (j.provider) html += '<dt>Traced via</dt><dd>' + esc(j.provider) + '</dd>';
+  html += '</dl>';
+  if (j.rationale) html += '<div style="margin-bottom:10px">' + esc(j.rationale) + '</div>';
+  if (j.evidence) html += '<div class="evi"><div class="paneh">Evidence</div><blockquote>' + esc(j.evidence) + '</blockquote></div>';
+  if (j.mitigation) html += '<div style="margin-top:10px"><div class="paneh">Mitigation</div><pre class="box miti">' + esc(j.mitigation) + '</pre></div>';
+  html += '</div>';
+  box.innerHTML = html;
+}
+function diffHtml(diff) {
+  return String(diff).split("\n").map(function(ln){
+    if (/^\+/.test(ln) && !/^\+\+\+/.test(ln)) return '<span class="add">' + esc(ln) + '</span>';
+    if (/^-/.test(ln) && !/^---/.test(ln)) return '<span class="del">' + esc(ln) + '</span>';
+    return esc(ln);
+  }).join("\n");
+}
+
+// HONESTY RULE: mode==="abstract" -> NO colored pipeline. Honest summary only.
+function renderHonest(box, j) {
+  var html = '<div class="honest"><dl class="kv">';
+  html += '<dt>Control to harden</dt><dd class="control">' + esc(j.control || "(none — defended)") + '</dd>';
+  if (j.backstop) html += '<dt>Backstop</dt><dd>' + esc(j.backstop) + '</dd>';
+  if (j.severity) html += '<dt>Severity</dt><dd style="color:' + sevColor(j.severity) + '">' + esc(j.severity) + '</dd>';
+  html += '<dt>Mapping</dt><dd><span class="stdtag">OWASP ' + esc(j.owasp || "—") + '</span><span class="stdtag">ATLAS ' + esc(j.atlas || "—") + '</span></dd>';
+  if (j.provider) html += '<dt>Analyzed via</dt><dd>' + esc(j.provider) + '</dd>';
+  html += '</dl>';
+  if (j.rationale) html += '<div style="margin-bottom:10px">' + esc(j.rationale) + '</div>';
+  if (j.evidence) html += '<div class="evi"><div class="paneh">Evidence</div><blockquote>' + esc(j.evidence) + '</blockquote></div>';
+  if (j.mitigation) html += '<div style="margin-top:10px"><div class="paneh">Mitigation</div><pre class="box miti">' + esc(j.mitigation) + '</pre></div>';
+  if (j.note) html += '<div class="note"><b>No code grounding.</b> ' + esc(j.note) + '</div>';
+  html += '</div>';
+  box.innerHTML = html;
+}
+
+// ── status + banners ────────────────────────────────────────────────────
 function setStatus(kind, text) {
-  var dot = $("status-dot");
-  dot.className = "dot" + (kind === "live" ? " live" : kind === "done" ? " done" : kind === "err" ? " err" : "");
+  $("status-dot").className = "dot" + (kind === "live" ? " live" : kind === "done" ? " done" : kind === "err" ? " err" : "");
   $("status-text").textContent = text;
 }
 function banner(kind, text) {
-  var slot = $("banner-slot");
-  slot.innerHTML = "";
-  var b = el("div", "banner " + kind, text);
-  slot.appendChild(b);
+  var slot = $("banner-slot"); slot.innerHTML = "";
+  slot.appendChild(el("div", "banner " + kind, text));
+}
+function clearBanner() { $("banner-slot").innerHTML = ""; }
+function showRunId(id) { if (!id) return; $("run-pill").style.display = ""; $("run-id").textContent = id; }
+
+// ── reset / view switching ──────────────────────────────────────────────
+function resetState() {
+  attackers = {}; laneEls = {}; vulns = {}; owaspBreached = {}; runId = null; ended = false;
+  counts = { attacks: 0, breaches: 0, defended: 0 };
+  sevCounts = { none: 0, low: 0, medium: 0, high: 0, critical: 0 };
+  $("lanes").innerHTML = '<div class="empty">No agents yet. Connect a live run or pick a replay.</div>';
+  $("feed").innerHTML = '<div class="empty">Live probes and verdicts will stream here.</div>';
+  $("findings").innerHTML = '<div class="empty">No vulnerability classes surfaced yet.</div>';
+  $("lane-count").textContent = "";
+  $("s-asr").textContent = "—"; $("s-attacks").textContent = "0"; $("s-breach").textContent = "0"; $("s-def").textContent = "0";
+  $("run-pill").style.display = "none";
+  renderSevBar(); renderOwasp(); clearBanner(); closeDrawer();
+}
+function setView(v) {
+  view = v;
+  $("tab-live").classList.toggle("on", v === "live");
+  $("tab-replay").classList.toggle("on", v === "replay");
+  $("tab-live").setAttribute("aria-selected", v === "live");
+  $("tab-replay").setAttribute("aria-selected", v === "replay");
+  $("group-live").classList.toggle("on", v === "live");
+  $("group-replay").classList.toggle("on", v === "replay");
+  stopLive();
+  if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+  resetState();
+  setStatus("", "idle");
+  if (v === "replay") loadRunList();
 }
 
-// ---- event dispatch -------------------------------------------------------
+// ── live transport ──────────────────────────────────────────────────────
+var es = null, ws = null, reconnects = 0;
+var EVENT_TYPES = ["profile","agent_spawned","thinking","attack","response","verdict","vuln","summary","done","error"];
+function parseData(raw) { try { return JSON.parse(raw); } catch (e) { return {}; } }
 function dispatch(type, payload) {
   try {
     switch (type) {
       case "profile": onProfile(payload); break;
-      case "agent_spawned":
-        ensureAgent(payload.attacker_id, payload.strategy, payload.data || {}); break;
+      case "agent_spawned": onSpawn(payload); break;
       case "thinking": onThinking(payload); break;
       case "attack": onAttack(payload); break;
       case "response": onResponse(payload); break;
@@ -630,65 +1005,153 @@ function dispatch(type, payload) {
     }
   } catch (e) { /* never let a malformed frame break the stream */ }
 }
-function onDone(ev) {
-  ended = true;
-  setStatus("done", "run complete");
-  var d = ev.data || {};
-  banner("done", "Run complete — " + (counts.breach) + " breach(es), " + counts.def + " defended."
-    + (d.vulnerabilities ? (" " + d.vulnerabilities + " vulnerability class(es).") : ""));
-  Object.keys(agents).forEach(function(k){ agents[k].card.classList.remove("firing"); });
-  closeStream();
+function buildStreamUrl() {
+  var base = CONFIG.streamUrl || "/api/redteam/stream";
+  if (CONFIG.transport === "ws") return base;  // service hands a ready ws url
+  // SSE: rebuild query from controls so Connect reflects the picker.
+  var path = base.split("?")[0];
+  var params = [];
+  params.push("profile=" + encodeURIComponent($("f-profile").value || "quick"));
+  params.push("mock=" + ($("f-mock").checked ? "1" : "0"));
+  var src = ($("f-sources").value || "").trim();
+  if (src) params.push("sources=" + encodeURIComponent(src));
+  return path + "?" + params.join("&");
 }
-function onError(ev) {
-  ended = true;
-  setStatus("err", "stream error");
-  var d = ev.data || {};
-  banner("err", "Stream error: " + esc((d && d.message) || (ev && ev.text) || "unknown"));
-  closeStream();
+function setLiveButtons(connected) {
+  $("btn-connect").disabled = connected;
+  $("btn-stop").disabled = !connected;
 }
-
-// ---- transport ------------------------------------------------------------
-var es = null, ws = null, reconnects = 0;
-var EVENT_TYPES = ["profile","agent_spawned","thinking","attack","response","verdict","vuln","summary","done","error"];
-
-function parseData(raw) { try { return JSON.parse(raw); } catch (e) { return {}; } }
-
+function connect() {
+  if (view !== "live") return;
+  resetState();
+  setLiveButtons(true);
+  if (CONFIG.transport === "ws") startWS(); else startSSE();
+}
 function startSSE() {
   setStatus("live", "live (SSE)");
-  es = new EventSource(CONFIG.streamUrl);
-  EVENT_TYPES.forEach(function(t) {
-    es.addEventListener(t, function(e) { dispatch(t, parseData(e.data)); });
-  });
+  try { es = new EventSource(buildStreamUrl()); }
+  catch (e) { setStatus("err", "cannot open stream"); setLiveButtons(false); return; }
+  EVENT_TYPES.forEach(function(t){ es.addEventListener(t, function(e){ dispatch(t, parseData(e.data)); }); });
   es.onerror = function() {
-    if (ended) { return; }
+    if (ended) return;
     setStatus("", "reconnecting…");
-    // EventSource auto-reconnects; if the server already finished, the next
-    // open will immediately error again — cap the noise.
     reconnects++;
-    if (reconnects > 8) { closeStream(); setStatus("done", "stream closed"); }
+    if (reconnects > 8) { closeStream(); setStatus("done", "stream closed"); setLiveButtons(false); }
   };
 }
 function startWS() {
   setStatus("live", "live (WS)");
   try { ws = new WebSocket(CONFIG.streamUrl); }
-  catch (e) { setStatus("err", "cannot open socket"); banner("err", "Could not open WebSocket."); return; }
-  ws.onmessage = function(e) {
-    // The service frames each event as JSON {type, ...} OR an SSE-style blob.
-    var msg = parseData(e.data);
-    if (msg && msg.type) dispatch(msg.type, msg);
-  };
-  ws.onclose = function() { if (!ended) { setStatus("done", "stream closed"); } };
+  catch (e) { setStatus("err", "cannot open socket"); banner("err", "Could not open WebSocket."); setLiveButtons(false); return; }
+  ws.onmessage = function(e) { var msg = parseData(e.data); if (msg && msg.type) dispatch(msg.type, msg); };
+  ws.onclose = function() { if (!ended) { setStatus("done", "stream closed"); setLiveButtons(false); } };
   ws.onerror = function() { if (!ended) setStatus("err", "socket error"); };
 }
 function closeStream() {
-  try { if (es) es.close(); } catch (e) {}
-  try { if (ws && ws.readyState <= 1) ws.close(); } catch (e) {}
+  try { if (es) { es.close(); es = null; } } catch (e) {}
+  try { if (ws && ws.readyState <= 1) { ws.close(); } ws = null; } catch (e) {}
+}
+function stopLive() {
+  if (es || ws) { ended = true; closeStream(); setStatus("done", "stopped"); }
+  setLiveButtons(false);
 }
 
+// ── replay ──────────────────────────────────────────────────────────────
+function loadRunList() {
+  var sel = $("f-run");
+  sel.innerHTML = '<option value="">loading…</option>';
+  fetch("/api/redteam/runs").then(function(r){ return r.json(); }).then(function(list){
+    sel.innerHTML = '<option value="">— select a saved run —</option>';
+    (list || []).forEach(function(r){
+      var asr = (typeof r.asr === "number") ? (" · " + Math.round(r.asr*100) + "% ASR") : "";
+      var o = el("option", null, (r.profile || r.run_id) + " · " + (r.target || "target") + asr);
+      o.value = r.run_id;
+      sel.appendChild(o);
+    });
+    if (!list || !list.length) { sel.innerHTML = '<option value="">no saved runs yet</option>'; }
+  }).catch(function(){ sel.innerHTML = '<option value="">could not load runs</option>'; });
+}
+function loadReplay(id) {
+  if (!id) return;
+  resetState();
+  runId = id; showRunId(id);
+  savedEvents = null; $("btn-play").disabled = true;
+  setStatus("", "loading replay…");
+  fetch("/api/redteam/runs/" + encodeURIComponent(id)).then(function(r){ return r.json(); }).then(function(payload){
+    var rep = (payload && payload.report) || {};
+    var ats = (payload && payload.attackers) || [];
+    ats.forEach(function(at){
+      var a = ensureAttacker(at.attacker_id, at.strategy, {});
+      a.breached = !!at.breached;
+      (at.turns || []).forEach(function(t){
+        var tt = getTurn(a, t.turn);
+        tt.prompt = t.prompt; tt.response = t.response; tt.attempt_id = t.attempt_id;
+        if (t.root_cause) tt.root_cause = t.root_cause;
+      });
+      renderLane(at.attacker_id);
+    });
+    // verdicts + per-turn meta from the raw attempts in the report
+    (rep.attempts || []).forEach(function(ad){
+      var a = attackers[ad.attacker_id]; if (!a) a = ensureAttacker(ad.attacker_id, ad.strategy, {});
+      a.provider = a.provider || ad.provider; a.model = a.model || ad.model;
+      a.mode = a.mode || ad.mode; a.intensity = a.intensity || ad.intensity;
+      var tt = getTurn(a, ad.turn != null ? ad.turn : (ad.turn_index != null ? ad.turn_index : 1));
+      if (ad.prompt != null && tt.prompt == null) tt.prompt = ad.prompt;
+      if (ad.response != null && tt.response == null) tt.response = ad.response;
+      if (ad.verdict) tt.verdict = ad.verdict;
+      renderLane(ad.attacker_id);
+    });
+    // scoreboard from stats
+    var st = rep.stats || {};
+    counts.attacks = st.attacks != null ? st.attacks : (rep.attempts || []).length;
+    counts.breaches = st.breaches != null ? st.breaches : 0;
+    counts.defended = st.defended != null ? st.defended : Math.max(0, counts.attacks - counts.breaches);
+    if (st.by_severity) Object.keys(st.by_severity).forEach(function(s){ sevCounts[s] = st.by_severity[s]; });
+    (st.owasp_breached || []).forEach(markOwasp);
+    if (typeof rep.asr === "number") setAsr(rep.asr); else if (typeof st.asr === "number") setAsr(st.asr);
+    (rep.vulnerabilities || []).forEach(function(v){
+      if (v.vuln_class) { vulns[v.vuln_class] = v; if (v.owasp) String(v.owasp).split(/[,\s]+/).forEach(markOwasp); }
+    });
+    updateScore((typeof rep.asr === "number") ? rep.asr : null);
+    renderFindings();
+    setStatus("done", "replay loaded");
+    banner("done", "Replay of run " + id + " — " + counts.breaches + " breach(es), " + counts.defended + " defended.");
+    // fetch events for optional re-animation
+    fetch("/api/redteam/runs/" + encodeURIComponent(id) + "/events").then(function(r){ return r.json(); }).then(function(evs){
+      if (Array.isArray(evs) && evs.length) { savedEvents = evs; $("btn-play").disabled = false; }
+    }).catch(function(){});
+  }).catch(function(){ setStatus("err", "could not load replay"); banner("err", "Could not load replay " + id + "."); });
+}
+function playReplay() {
+  if (!savedEvents || !savedEvents.length) return;
+  if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+  // reset the visible model but keep runId so trace stays enabled
+  var keepRun = runId;
+  resetState(); runId = keepRun; showRunId(keepRun);
+  setStatus("live", "re-animating");
+  var i = 0;
+  replayTimer = setInterval(function(){
+    if (i >= savedEvents.length) {
+      clearInterval(replayTimer); replayTimer = null;
+      if (!ended) setStatus("done", "replay finished");
+      return;
+    }
+    var ev = savedEvents[i++];
+    if (ev && ev.type) dispatch(ev.type, ev);
+  }, 120);
+}
+
+// ── boot ────────────────────────────────────────────────────────────────
 (function start() {
-  renderSevBar();
-  if (CONFIG.transport === "ws") startWS(); else startSSE();
-  window.addEventListener("beforeunload", closeStream);
+  renderSevBar(); renderOwasp();
+  setStatus("", "idle");
+  setLiveButtons(false);
+  if (CONFIG.transport === "ws") {
+    // The hosted service hands a live ws URL — connect immediately.
+    setLiveButtons(true);
+    startWS();
+  }
+  window.addEventListener("beforeunload", function(){ closeStream(); if (replayTimer) clearInterval(replayTimer); });
 })();
 </script>
 </body>
