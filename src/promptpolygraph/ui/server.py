@@ -32,6 +32,9 @@ from .page import PAGE
 # background daemon thread mutates this; handlers only read it. Plain dict
 # writes are atomic enough under CPython's GIL for this single-key-per-run use.
 PROGRESS: dict[str, dict[str, Any]] = {}
+# AI-designed custom red-team profiles, keyed by a short ref so the SSE stream
+# (GET) can run a full custom roster without cramming it into the query string.
+CUSTOM_PROFILES: dict[str, dict[str, Any]] = {}
 
 
 def _slugify(text: str, *, fallback: str = "panel") -> str:
@@ -231,6 +234,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_providers()
             return
 
+        if parts == ["api", "config"]:
+            self._api_config_load(query)
+            return
+
         if parts == ["api", "corpus", "export"]:
             self._api_corpus_dir_export(query)
             return
@@ -293,6 +300,18 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if parts == ["api", "corpus", "generate"]:
             self._api_corpus_generate()
+            return
+        if parts == ["api", "config", "design"]:
+            self._api_config_design()
+            return
+        if parts == ["api", "configs"]:
+            self._api_config_save()
+            return
+        if parts == ["api", "redteam", "design"]:
+            self._api_redteam_design()
+            return
+        if parts == ["api", "redteam", "profile"]:
+            self._api_redteam_profile()
             return
         if parts == ["api", "redteam", "trace"]:
             self._api_redteam_trace()
@@ -913,11 +932,21 @@ class _Handler(BaseHTTPRequestHandler):
         mock = mock_raw not in ("0", "false", "no", "")
         mock = _want_mock(mock)  # force offline when no key is configured
         sources = [s.strip() for s in (query.get("sources", [""])[0] or "").split(",") if s.strip()]
+        profile_ref = (query.get("profile_ref", [""])[0] or "").strip()
 
-        try:
-            profile = get_profile(profile_name)
-        except Exception:
-            profile = get_profile("all_frontier")
+        profile = None
+        if profile_ref and profile_ref in CUSTOM_PROFILES:
+            try:
+                from promptpolygraph.redteam.models import RedTeamProfile
+
+                profile = RedTeamProfile.model_validate(CUSTOM_PROFILES[profile_ref])
+            except Exception:
+                profile = None
+        if profile is None:
+            try:
+                profile = get_profile(profile_name)
+            except Exception:
+                profile = get_profile("all_frontier")
 
         try:
             adapter = self._redteam_target(query)
@@ -1006,6 +1035,160 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(discover_providers())
         except Exception as exc:
             self._json({"error": "discovery failed", "detail": str(exc)}, status=500)
+
+    # ---- config builder: AI design / save / load -----------------------
+    def _configs_dir(self) -> Path:
+        d = self.out_dir / "configs"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _api_config_design(self) -> None:
+        """AI-design a run config from a natural-language description."""
+        from promptpolygraph.configdesign import design_config
+
+        body = self._read_body()
+        desc = str(body.get("description") or "").strip()
+        if not desc:
+            self._json({"error": "description required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        provider = (body.get("provider") or "anthropic").strip().lower()
+        model = body.get("model") or None
+        base_url = body.get("base_url") or None
+        mock = _want_mock(bool(body.get("mock")))
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(model, provider=provider, base_url=base_url)
+            except Exception:
+                client, mock = None, True
+        try:
+            result = asyncio.run(design_config(client, desc, mock=mock))
+        except Exception as exc:
+            self._json({"error": "design failed", "detail": str(exc)}, status=500)
+            return
+        result["provider"] = "mock" if mock else provider
+        self._json(result)
+
+    def _api_config_save(self) -> None:
+        """Validate + persist a config as a named yaml under out_dir/configs/."""
+        import yaml
+
+        from promptpolygraph.config import Config
+
+        body = self._read_body()
+        config = body.get("config")
+        if not isinstance(config, dict):
+            self._json({"error": "config object required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            Config(**config)  # validate (unknown keys ignored)
+        except Exception as exc:
+            self._json({"error": "invalid config", "detail": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+        name = _slugify(str(body.get("name") or config.get("name") or "config"), fallback="config")
+        path = self._configs_dir() / f"{name}.yaml"
+        path.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        self._json({"name": name, "path": str(path)})
+
+    def _api_config_load(self, query: dict[str, list[str]]) -> None:
+        """Load a config (by path or name) into a dict for editing. Bounded to
+        the example configs + out_dir/configs + cwd/configs that /api/configs lists."""
+        import yaml
+
+        want = (query.get("path", [""])[0] or "").strip()
+        name = (query.get("name", [""])[0] or "").strip()
+        allowed: set[str] = set()
+        try:
+            ex = _repo_root() / "examples"
+            if ex.is_dir():
+                for d in ex.iterdir():
+                    c = d / "config.yaml"
+                    if c.is_file():
+                        allowed.add(str(c.resolve()))
+        except Exception:
+            pass
+        for base in (Path.cwd(), self.out_dir):
+            cd = base / "configs"
+            if cd.is_dir():
+                for c in list(cd.glob("*.yaml")) + list(cd.glob("*.yml")):
+                    allowed.add(str(c.resolve()))
+        target = None
+        if want:
+            rp = str(Path(want).expanduser().resolve())
+            if rp in allowed:
+                target = rp
+        elif name:
+            for a in allowed:
+                if Path(a).stem == _slugify(name, fallback=name):
+                    target = a
+                    break
+        if not target:
+            self._not_found("config not found")
+            return
+        try:
+            self._json({"config": yaml.safe_load(Path(target).read_text(encoding="utf-8")) or {}, "path": target})
+        except Exception:
+            self._not_found("could not read config")
+
+    def _api_redteam_design(self) -> None:
+        """AI-design a red-team config (grounded in the catalog/sources/profiles)."""
+        from promptpolygraph.redteam.design import design_redteam
+
+        body = self._read_body()
+        desc = str(body.get("description") or "").strip()
+        if not desc:
+            self._json({"error": "description required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        provider = (body.get("provider") or "anthropic").strip().lower()
+        model = body.get("model") or None
+        base_url = body.get("base_url") or None
+        mock = _want_mock(bool(body.get("mock")))
+        client = None
+        if not mock:
+            try:
+                from promptpolygraph.llm import make_client
+
+                client = make_client(model, provider=provider, base_url=base_url)
+            except Exception:
+                client, mock = None, True
+        try:
+            result = asyncio.run(design_redteam(client, desc, mock=mock))
+        except Exception as exc:
+            self._json({"error": "design failed", "detail": str(exc)}, status=500)
+            return
+        result["provider"] = "mock" if mock else provider
+        self._json(result)
+
+    def _api_redteam_profile(self) -> None:
+        """Build a runnable custom RedTeamProfile from a designed spec and stash it
+        under a short ref the SSE stream can run via ?profile_ref=."""
+        from promptpolygraph.models import new_id
+        from promptpolygraph.redteam.design import profile_from_design
+
+        body = self._read_body()
+        spec = body.get("spec") or body.get("config")
+        if not isinstance(spec, dict):
+            self._json({"error": "spec object required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        provider = (body.get("provider") or "anthropic").strip().lower()
+        model = body.get("model") or None
+        base_url = body.get("base_url") or None
+        try:
+            profile = profile_from_design(spec, provider=provider, model=model, base_url=base_url)
+        except Exception as exc:
+            self._json({"error": "bad spec", "detail": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+        ref = new_id()[:10]
+        CUSTOM_PROFILES[ref] = profile.model_dump()
+        if len(CUSTOM_PROFILES) > 200:  # bound memory
+            for k in list(CUSTOM_PROFILES)[:-200]:
+                CUSTOM_PROFILES.pop(k, None)
+        self._json({"ref": ref, "name": profile.name, "turns": profile.turns,
+                    "judge_kind": profile.judge_kind,
+                    "attackers": [{"strategy": a.strategy, "mode": a.mode, "converter": a.converter,
+                                   "intensity": a.intensity} for a in profile.attackers]})
 
     # ---- studio: prompt-corpus generation + export ---------------------
     def _corpus_dir(self) -> Path:
