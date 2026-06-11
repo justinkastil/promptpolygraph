@@ -238,8 +238,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._api_providers()
             return
 
-        if parts == ["api", "health"]:
-            self._api_health()
+        if parts == ["api", "status"]:
+            self._api_status()
             return
 
         if parts == ["api", "config"]:
@@ -1047,7 +1047,7 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._json({"error": "discovery failed", "detail": str(exc)}, status=500)
 
-    def _api_health(self) -> None:
+    def _api_status(self) -> None:
         """Readiness for the status pill: which backends are usable, and whether
         we'd run live or fall back to mock (offline)."""
         from promptpolygraph.discovery import discover_providers
@@ -1087,7 +1087,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         async def _probe() -> Any:
             return await asyncio.wait_for(
-                adapter.query(Case(prompt="Connection check — please reply with: OK.", category="healthcheck")),
+                adapter.query(Case(prompt="Connection check — please reply with: OK.", category="connection_check")),
                 timeout=8.0,
             )
 

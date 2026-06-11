@@ -260,6 +260,57 @@ function esc(s) {
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 function dash(v) { return (v === null || v === undefined || v === "") ? "&mdash;" : esc(v); }
+// Accessible tooltip affordance: a styled "?" carrying the tip both as a CSS
+// bubble (data-tip) and as a native title= fallback (screen readers / no-CSS).
+// Hover + keyboard-focus both reveal it (see .tip in THEME_CSS). `left` nudges
+// the bubble to the right edge for controls near the panel border.
+function tip(text, left) {
+  const t = esc(text);
+  return '<span class="tip' + (left ? ' tip-left' : '') + '" tabindex="0" role="img"'
+    + ' aria-label="' + t + '" data-tip="' + t + '" title="' + t + '">?</span>';
+}
+// Canonical plain-language tip copy, shared across the config builder, New Run,
+// and the Studio generator so identical controls read identically everywhere.
+const TIP_SEED = "Fixes the random seed so 'varied'/'adversarial' generation produces the identical prompt set every run — for reproducible baselines and apples-to-apples comparisons. Leave blank for fresh prompts each run.";
+const TIP_MODE = "fixed = load a saved set (reproducible) · varied = generate fresh prompts · adversarial = red-team/edge prompts · hybrid = fixed core + generated supplement.";
+const TIP_PERCAT = "Per category = prompts for each category; Count = a total spread across categories. Leave both blank for 8 per category.";
+const TIP_DIFFICULTY = "Adversarial pressure level for generated probes.";
+const TIP_JUDGES = "How many independent LLM graders score each response (median used, disagreement flagged). More = more robust, more cost.";
+const TIP_GATE = "strict = every applicable dimension must clear its threshold; weighted = a weighted average must clear it.";
+const TIP_RT_PROFILE = "A preconfigured attacker team (who attacks, how many turns, which model).";
+const TIP_PERSONA_POOL = "Sample N personas from the library to react to the responses.";
+// Shared "Test connection" result renderer. state: "busy" | "ok" | "bad".
+function renderConnResult(elId, state, html) {
+  const box = document.getElementById(elId);
+  if (!box) return;
+  box.className = "conn-result " + state;
+  box.innerHTML = (state === "busy" ? "" : '<span class="cdot"></span>') + html;
+}
+// POST an adapter spec to /api/adapter/test and render the result into elId.
+// {ok:true} → green "Good to go — <name> responded in <ms>ms" (+ sample);
+// {ok:false} → red "Not connected — <error>" (shows 'adapter not wired: …'
+// plainly so a custom/callable adapter with no fn is obvious).
+function runAdapterTest(elId, adapterSpec) {
+  if (!adapterSpec || !adapterSpec.type) {
+    renderConnResult(elId, "bad", "Not connected — no adapter type selected.");
+    return;
+  }
+  renderConnResult(elId, "busy", "Testing connection…");
+  postJSON("/api/adapter/test", { adapter: adapterSpec }).then(res => {
+    res = res || {};
+    if (res.ok) {
+      let html = "Good to go — <b>" + esc(res.name || "adapter") + "</b> responded";
+      if (res.latency_ms != null) html += " in " + esc(res.latency_ms) + "ms";
+      html += ".";
+      if (res.sample) html += '<span class="csample">' + esc(res.sample) + '</span>';
+      renderConnResult(elId, "ok", html);
+    } else {
+      renderConnResult(elId, "bad", "Not connected — " + esc(res.error || "adapter did not respond"));
+    }
+  }).catch(e => {
+    renderConnResult(elId, "bad", "Not connected — " + esc((e && e.message) || String(e)));
+  });
+}
 function num(v, d) {
   if (v === null || v === undefined) return "&mdash;";
   d = (d === undefined) ? 1 : d;
@@ -1436,21 +1487,25 @@ function renderNewRun(configs, pfiles) {
     + '<div class="form-grid" style="padding:0 0 4px">'
     + '<div class="field" style="grid-column:1 / -1"><label>Config</label>'
       + '<select id="nr-config" onchange="updateNrConfigHint()">' + cfgOpts + '</select>'
-      + '<span class="field-hint" id="nr-config-hint">Blank fields below inherit this config\'s own settings.</span></div>'
+      + '<span class="field-hint" id="nr-config-hint">Blank fields below inherit this config\'s own settings.</span>'
+      + (configs.length ? '<div style="margin-top:8px"><button class="btn" type="button" onclick="testPickedConfigAdapter()">Test adapter connection</button>'
+          + '<span class="field-hint" style="display:inline;margin-left:8px">Verify this config\'s target is reachable before launching.</span>'
+          + '<div class="conn-result" id="nr-adapter-conn"></div></div>' : '')
+      + '</div>'
     + '</div></div>'
     + '<div class="builder-sec"><div class="bs-title">Overrides <span class="bs-note">optional — leave blank to use the config</span></div>'
     + '<div class="form-grid" style="padding:0 0 4px">'
-    + '<div class="field"><label>Mode</label><select id="nr-mode">'
+    + '<div class="field"><label>Mode' + tip(TIP_MODE) + '</label><select id="nr-mode">'
       + ['','fixed','varied','adversarial','hybrid'].map(m => '<option value="' + m + '">' + (m || "inherit from config") + '</option>').join("")
       + '</select><span class="field-hint">How prompts are sourced for the run.</span></div>'
-    + '<div class="field"><label>Count (varied / adversarial)</label><input type="number" id="nr-count" min="1" placeholder="inherit from config">'
+    + '<div class="field"><label>Count (varied / adversarial)' + tip(TIP_PERCAT) + '</label><input type="number" id="nr-count" min="1" placeholder="inherit from config">'
       + '<span class="field-hint">Total prompts to generate.</span></div>'
-    + '<div class="field"><label>Per category</label><input type="number" id="nr-percat" min="1" placeholder="inherit from config">'
+    + '<div class="field"><label>Per category' + tip(TIP_PERCAT) + '</label><input type="number" id="nr-percat" min="1" placeholder="inherit from config">'
       + '<span class="field-hint">Prompts for each category.</span></div>'
-    + '<div class="field"><label>Difficulty</label><select id="nr-diff">'
+    + '<div class="field"><label>Difficulty' + tip(TIP_DIFFICULTY) + '</label><select id="nr-diff">'
       + ['','mild','standard','aggressive'].map(m => '<option value="' + m + '">' + (m || "inherit from config") + '</option>').join("")
       + '</select><span class="field-hint">Pressure level for adversarial prompts.</span></div>'
-    + '<div class="field"><label>Persona panel</label><select id="nr-personas">' + personaOpts + '</select>'
+    + '<div class="field"><label>Persona panel' + tip(TIP_PERSONA_POOL) + '</label><select id="nr-personas">' + personaOpts + '</select>'
       + '<span class="field-hint">Reviewer panel that reacts to responses.</span></div>'
     + '</div></div>'
     + '<div class="builder-sec"><div class="bs-title">Scope &amp; output</div>'
@@ -1531,6 +1586,22 @@ async function updateNrConfigHint() {
   hint.innerHTML = bits.length
     ? 'This config runs ' + bits.join(' · ') + '. Blank overrides below inherit these.'
     : 'This config pins no corpus amount — blank fields use its built-in defaults.';
+}
+
+// Test the selected existing config's adapter: read it via GET /api/config?path=
+// (the same endpoint the hint uses), then POST its adapter to /api/adapter/test.
+async function testPickedConfigAdapter() {
+  const sel = document.getElementById("nr-config");
+  const path = (sel && sel.value) || "";
+  if (!path) { renderConnResult("nr-adapter-conn", "bad", "Not connected — select a config first."); return; }
+  renderConnResult("nr-adapter-conn", "busy", "Reading config…");
+  let data;
+  try { data = await getJSON("/api/config?path=" + encodeURIComponent(path)); }
+  catch (e) { renderConnResult("nr-adapter-conn", "bad", "Not connected — could not read config: " + esc(e.message)); return; }
+  const ad = (data && data.config && data.config.adapter) || {};
+  const spec = { type: ad.type || "demo", options: ad.options || ad.opts || {} };
+  if (ad.name) spec.name = ad.name;
+  runAdapterTest("nr-adapter-conn", spec);
 }
 
 async function launchRun() {
@@ -1678,21 +1749,21 @@ function renderPromptStudio() {
     // what to generate
     + '<div class="builder-sec" style="border-top:0;padding-top:14px"><div class="bs-title">Prompts</div>'
     + '<div class="form-grid" style="padding:0 0 4px">'
-    + '<div class="field"><label>Mode</label><select id="cg-mode">' + modeOpts + '</select>'
+    + '<div class="field"><label>Mode' + tip(TIP_MODE) + '</label><select id="cg-mode">' + modeOpts + '</select>'
       + '<span class="field-hint">Kind of prompts to synthesize.</span></div>'
     + '<div class="field" style="grid-column:span 2"><label>Domain <span class="opt">optional</span></label>'
       + '<input type="text" id="cg-domain" placeholder="e.g. a budgeting assistant for freelancers">'
       + '<span class="field-hint">Grounds the generated prompts in your use case.</span></div>'
-    + '<div class="field"><label>Difficulty <span class="opt">adversarial</span></label><select id="cg-diff">' + diffOpts + '</select>'
+    + '<div class="field"><label>Difficulty <span class="opt">adversarial</span>' + tip(TIP_DIFFICULTY) + '</label><select id="cg-diff">' + diffOpts + '</select>'
       + '<span class="field-hint">Pressure level for adversarial prompts.</span></div>'
-    + '<div class="field"><label>Count <span class="opt">total</span></label><input type="number" id="cg-count" min="1" placeholder="optional total">'
+    + '<div class="field"><label>Count <span class="opt">total</span>' + tip(TIP_PERCAT) + '</label><input type="number" id="cg-count" min="1" placeholder="optional total">'
       + '<span class="field-hint">Alternative to per-category: a grand total spread across categories.</span></div>'
-    + '<div class="field"><label>Per category</label><input type="number" id="cg-percat" min="1" placeholder="blank = 8 per category">'
+    + '<div class="field"><label>Per category' + tip(TIP_PERCAT) + '</label><input type="number" id="cg-percat" min="1" placeholder="blank = 8 per category">'
       + '<span class="field-hint">Prompts for each category. Leave both blank for <b>8 per category</b>.</span></div>'
     + '<div class="field" style="grid-column:span 2"><label>Categories <span class="opt">optional, comma-separated</span></label>'
       + '<input type="text" id="cg-cats" placeholder="e.g. factual_qa, how_to, refusal">'
       + '<span class="field-hint">Blank lets the generator pick categories for the domain.</span></div>'
-    + '<div class="field"><label>Seed <span class="opt">optional</span></label><input type="number" id="cg-seed" placeholder="reproducible">'
+    + '<div class="field"><label>Seed <span class="opt">optional</span>' + tip(TIP_SEED) + '</label><input type="number" id="cg-seed" placeholder="reproducible">'
       + '<span class="field-hint">Fix for a repeatable corpus.</span></div>'
     + '</div></div>'
     // backend
@@ -2097,19 +2168,27 @@ function builderFormHtml() {
     + '</div></div>'
     // adapter
     + '<div class="builder-sec"><div class="bs-title">Adapter</div><div class="form-grid" style="padding:0 0 4px">'
-    + '<div class="field"><label>Type</label><select id="bld-adapter">' + opts(BUILD_ADAPTERS, "demo") + '</select>'
+    + '<div class="field"><label>Type'
+      + tip("How the harness reaches the system under test. demo = built-in echo target · llm = a provider/model · http = a chat endpoint (set base_url in Options) · callable = your own Python function (a custom adapter must be wired, or Test connection reports \'not wired\').")
+      + '</label><select id="bld-adapter">' + opts(BUILD_ADAPTERS, "demo") + '</select>'
       + '<span class="field-hint">How the run reaches the system under test.</span></div>'
-    + '<div class="field" style="grid-column:span 2"><label>Options <span class="opt">JSON, optional</span></label>'
+    + '<div class="field" style="grid-column:span 2"><label>Options <span class="opt">JSON, optional</span>'
+      + tip("Adapter-specific settings as JSON, e.g. {\\"base_url\\": \\"/v1/chat\\"} for an http adapter, or {\\"name\\": \\"my.module:fn\\"} for a callable.")
+      + '</label>'
       + '<textarea id="bld-adapter-opts" placeholder=\'{ "base_url": "/v1/chat" }\'></textarea>'
       + '<span class="field-hint">Adapter-specific settings, e.g. an endpoint URL.</span></div>'
-    + '</div></div>'
+    + '</div>'
+    + '<div style="padding:2px 0 4px"><button class="btn" id="bld-adapter-test" type="button" onclick="testBuilderAdapter()">Test connection</button>'
+      + '<span class="field-hint" style="display:inline;margin-left:8px">Sends one trivial query to verify the adapter is reachable before you run.</span>'
+      + '<div class="conn-result" id="bld-adapter-conn"></div></div>'
+    + '</div>'
     // corpus
     + '<div class="builder-sec"><div class="bs-title">Corpus</div><div class="form-grid" style="padding:0 0 4px">'
-    + '<div class="field"><label>Mode</label><select id="bld-mode">' + opts(BUILD_CORPUS_MODES, "varied") + '</select>'
+    + '<div class="field"><label>Mode' + tip(TIP_MODE) + '</label><select id="bld-mode">' + opts(BUILD_CORPUS_MODES, "varied") + '</select>'
       + '<span class="field-hint">How prompts are sourced.</span></div>'
-    + '<div class="field"><label>Per category</label><input type="number" id="bld-percat" min="1" value="8">'
+    + '<div class="field"><label>Per category' + tip(TIP_PERCAT) + '</label><input type="number" id="bld-percat" min="1" value="8">'
       + '<span class="field-hint">Prompts generated per category (default <b>8</b>).</span></div>'
-    + '<div class="field"><label>Difficulty</label><select id="bld-diff">' + opts(BUILD_DIFFS, "standard") + '</select>'
+    + '<div class="field"><label>Difficulty' + tip(TIP_DIFFICULTY) + '</label><select id="bld-diff">' + opts(BUILD_DIFFS, "standard") + '</select>'
       + '<span class="field-hint">Pressure level for adversarial prompts.</span></div>'
     + '</div>'
     + '<div class="field" style="padding:0 0 4px"><label>Categories</label>'
@@ -2121,11 +2200,11 @@ function builderFormHtml() {
     + '</div>'
     // analyze + audit
     + '<div class="builder-sec"><div class="bs-title">Analysis &amp; audit</div><div class="form-grid" style="padding:0 0 4px">'
-    + '<div class="field"><label>Judges</label><select id="bld-judges">' + opts(["1","2","3"], "1") + '</select>'
+    + '<div class="field"><label>Judges' + tip(TIP_JUDGES) + '</label><select id="bld-judges">' + opts(["1","2","3"], "1") + '</select>'
       + '<span class="field-hint">Scoring models; more raises agreement signal.</span></div>'
-    + '<div class="field"><label>Gate mode</label><select id="bld-gate">' + opts(BUILD_GATES, "weighted") + '</select>'
+    + '<div class="field"><label>Gate mode' + tip(TIP_GATE) + '</label><select id="bld-gate">' + opts(BUILD_GATES, "weighted") + '</select>'
       + '<span class="field-hint">How dimension scores combine into pass / fail.</span></div>'
-    + '<div class="field"><label>Persona pool</label><input type="number" id="bld-personapool" min="0" value="5">'
+    + '<div class="field"><label>Persona pool' + tip(TIP_PERSONA_POOL) + '</label><input type="number" id="bld-personapool" min="0" value="5">'
       + '<span class="field-hint">Reviewer personas; <b>0</b> disables the panel.</span></div>'
     + '</div>'
     + '<div class="checks" style="padding:2px 0 4px"><label><input type="checkbox" id="bld-forensic" checked> Forensic audit</label></div>'
@@ -2137,7 +2216,7 @@ function builderFormHtml() {
     + '</div>'
     // red team + backend
     + '<div class="builder-sec"><div class="bs-title">Red team &amp; backend</div><div class="form-grid" style="padding:0 0 4px">'
-    + '<div class="field"><label>Red-team profile</label><select id="bld-rtprofile">' + opts(BUILD_RT_PROFILES, "all_frontier") + '</select>'
+    + '<div class="field"><label>Red-team profile' + tip(TIP_RT_PROFILE) + '</label><select id="bld-rtprofile">' + opts(BUILD_RT_PROFILES, "all_frontier") + '</select>'
       + '<span class="field-hint">Attack suite the run probes with.</span></div>'
     + '<div class="field"><label>Provider</label><select class="field" id="bld-provider"><option>loading…</option></select></div>'
     + '<div class="field"><label>Model</label><select class="field" id="bld-model"><option>—</option></select>'
@@ -2206,6 +2285,19 @@ function assembleConfig() {
   const model = resolveModel("bld-model", "bld-model-custom");
   if (model) { cfg.model = model; cfg.llm.model = model; }
   return cfg;
+}
+
+// Test the adapter currently described in the builder form, before saving.
+function testBuilderAdapter() {
+  let adapterOpts = {};
+  const rawOpts = (document.getElementById("bld-adapter-opts").value || "").trim();
+  if (rawOpts) {
+    try { adapterOpts = JSON.parse(rawOpts); }
+    catch (e) { renderConnResult("bld-adapter-conn", "bad", "Not connected — Options is not valid JSON: " + esc(e.message)); return; }
+  }
+  const spec = { type: document.getElementById("bld-adapter").value, options: adapterOpts };
+  if (adapterOpts && typeof adapterOpts === "object" && adapterOpts.name) spec.name = adapterOpts.name;
+  runAdapterTest("bld-adapter-conn", spec);
 }
 
 // populate the builder form FROM a config (Save→Load round-trip, or Inject).
@@ -2330,6 +2422,8 @@ window.__dkInject = function(cfg) {
 """
     + DESIGNER_DOCK_JS
     + r"""
+// readiness pill: literal endpoint path is fine to embed on the dashboard.
+initStatusPill("/api/status");
 showRuns();
 </script>
 </body>

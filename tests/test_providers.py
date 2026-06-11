@@ -67,9 +67,9 @@ def _post(base, path, body):
         return e.code, json.loads(e.read())
 
 
-def test_health_status(tmp_path):
+def test_status_endpoint(tmp_path):
     base = _start(tmp_path)
-    with urllib.request.urlopen(base + "/api/health", timeout=5) as r:
+    with urllib.request.urlopen(base + "/api/status", timeout=5) as r:
         h = json.loads(r.read())
     assert h["status"] in ("live", "mock")
     assert isinstance(h["any_provider"], bool) and h["mock_only"] == (not h["any_provider"])

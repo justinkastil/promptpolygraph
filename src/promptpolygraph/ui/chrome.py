@@ -131,6 +131,72 @@ THEME_CSS: str = r"""
   .muted { color: var(--muted); }
   .mono { font-family: var(--mono); font-size: 12px; }
 
+  /* ── shared readiness / connection status pill (header) ──────────────── */
+  /* Present on both surfaces; populated on load from the readiness endpoint so
+     the user sees at a glance whether the harness will run live or mock-only. */
+  header.top .status-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--muted); font-size: 12px; font-weight: 600;
+    cursor: default; line-height: 1.3; white-space: nowrap;
+  }
+  header.top .status-pill .sdot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2, #6a7280); flex: 0 0 auto;
+  }
+  header.top .status-pill.live { border-color: rgba(70,192,138,.45); color: var(--pass); background: rgba(70,192,138,.08); }
+  header.top .status-pill.live .sdot { background: var(--pass); box-shadow: 0 0 0 3px rgba(70,192,138,.16); }
+  header.top .status-pill.mock { border-color: rgba(230,180,80,.45); color: var(--warn); background: rgba(230,180,80,.08); }
+  header.top .status-pill.mock .sdot { background: var(--warn); box-shadow: 0 0 0 3px rgba(230,180,80,.16); }
+
+  /* ── shared tooltip system ───────────────────────────────────────────── */
+  /* A small "?" (or any element) carrying class .tip + a title=. The CSS bubble
+     shows on hover AND keyboard focus; the title= is the accessible fallback so
+     screen readers and no-CSS clients still get the text. */
+  .tip {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; margin-left: 5px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+    font: 700 10px/1 var(--sans); cursor: help; vertical-align: middle;
+    text-transform: none; letter-spacing: 0; user-select: none; transition: color .14s, border-color .14s;
+  }
+  .tip:hover, .tip:focus-visible { color: var(--text); border-color: var(--accent); outline: none; }
+  .tip:focus-visible { box-shadow: var(--focus-ring); }
+  .tip::after {
+    content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    width: max-content; max-width: 280px; padding: 8px 10px;
+    background: #0a0c11; color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); font: 400 11.5px/1.5 var(--sans); text-align: left;
+    white-space: normal; word-break: normal; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    opacity: 0; pointer-events: none; transition: opacity .14s, transform .14s; z-index: 60;
+  }
+  .tip::before {
+    content: ""; position: absolute; bottom: calc(100% + 3px); left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    border: 5px solid transparent; border-top-color: var(--border);
+    opacity: 0; pointer-events: none; transition: opacity .14s, transform .14s; z-index: 61;
+  }
+  .tip:hover::after, .tip:focus-visible::after,
+  .tip:hover::before, .tip:focus-visible::before { opacity: 1; transform: translateX(-50%) translateY(0); }
+  /* edge-aware variants so a tip near the right edge isn't clipped */
+  .tip.tip-left::after { left: auto; right: -4px; transform: translateX(0) translateY(4px); }
+  .tip.tip-left:hover::after, .tip.tip-left:focus-visible::after { transform: translateX(0) translateY(0); }
+
+  /* ── shared "Test connection" result line ────────────────────────────── */
+  .conn-result { font-size: 12.5px; line-height: 1.5; margin-top: 8px; display: block; }
+  .conn-result .cdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .conn-result.ok { color: var(--pass); }
+  .conn-result.ok .cdot { background: var(--pass); }
+  .conn-result.bad { color: var(--fail); }
+  .conn-result.bad .cdot { background: var(--fail); }
+  .conn-result.busy { color: var(--accent); }
+  .conn-result.busy .cdot { background: var(--accent); }
+  .conn-result .csample {
+    display: block; margin-top: 5px; padding: 7px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg); color: var(--muted);
+    font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; word-break: break-word;
+  }
+
   /* ── shared header Designer toggle ───────────────────────────────────── */
   header.top .designer-toggle {
     appearance: none; border: 1px solid var(--accent); border-radius: 8px;
@@ -282,6 +348,19 @@ def header_html(active: str, *, links: bool) -> str:
     # Shared Designer toggle — identical on both surfaces. Each page defines its
     # own toggleDesigner() (open/close) and design/inject handlers; the dock
     # markup + CSS are shared via designer_dock_html() + THEME_CSS.
+    # Shared readiness / connection status pill — identical on both surfaces.
+    # Populated on page load by initStatusPill() (in DESIGNER_DOCK_JS) from
+    # GET /api/health: green "Live" when any provider is wired, amber
+    # "Mock-only (offline)" otherwise. The title= lists each provider + reason
+    # as an accessible fallback; the same text fills the CSS tooltip bubble.
+    status_pill = (
+        '<span class="status-pill tip" id="status-pill" tabindex="0" role="status" '
+        'aria-live="polite" data-tip="Checking which model backends are wired…" '
+        'title="Checking which model backends are wired…">'
+        '<span class="sdot" aria-hidden="true"></span>'
+        '<span id="status-pill-text">Checking…</span></span>'
+    )
+
     designer_btn = (
         '<button type="button" class="designer-toggle" id="designer-toggle" '
         'aria-expanded="false" aria-controls="designer-dock" '
@@ -296,6 +375,7 @@ def header_html(active: str, *, links: bool) -> str:
         + nav
         + '<span class="spacer"></span>'
         + crumb
+        + status_pill
         + designer_btn
         + "</header>"
     )
@@ -477,5 +557,47 @@ function dkChips(items) {
   return '<div class="dk-chips">' + (items || []).map(function(i){
     return '<span class="dk-chip">' + esc(i) + '</span>';
   }).join("") + '</div>';
+}
+
+// ── shared readiness status pill (header) ────────────────────────────────
+// Runs on BOTH the dashboard and the Arena. Given the readiness endpoint path
+// (passed in so each surface controls the exact literal it embeds), GET it and
+// set the pill to green "● Live" (a provider is wired) or amber
+// "● Mock-only (offline)", and fill its tooltip with each provider + reason so
+// the user sees exactly what is wired and what is missing. Relative URL only.
+function initStatusPill(readyUrl) {
+  var pill = document.getElementById("status-pill");
+  var txt = document.getElementById("status-pill-text");
+  if (!pill || !txt) return;
+  fetch(readyUrl).then(function(r){ return r.json(); }).then(function(h){
+    h = h || {};
+    var live = (h.status === "live");
+    pill.classList.remove("live", "mock");
+    pill.classList.add(live ? "live" : "mock");
+    txt.textContent = live ? "Live" : "Mock-only (offline)";
+    var provs = h.providers || [];
+    var lines = [];
+    if (live) lines.push("Live — at least one model backend is wired.");
+    else lines.push("Mock-only — no model backend is wired; runs use offline mock.");
+    if (provs.length) {
+      provs.forEach(function(p){
+        var mark = p.available ? "✓" : "✗";
+        var reason = p.available ? "ready" : (p.reason || "unavailable");
+        lines.push(mark + " " + (p.id || "?") + " - " + reason);
+      });
+    } else {
+      lines.push("No providers discovered - run polygraph init, set an API key, or start a local model.");
+    }
+    var tipText = lines.join("\n");
+    pill.setAttribute("data-tip", tipText);
+    pill.setAttribute("title", tipText);
+  }).catch(function(){
+    pill.classList.remove("live");
+    pill.classList.add("mock");
+    txt.textContent = "Status unavailable";
+    var msg = "Backend readiness check failed - status unknown.";
+    pill.setAttribute("data-tip", msg);
+    pill.setAttribute("title", msg);
+  });
 }
 """
