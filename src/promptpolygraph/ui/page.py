@@ -2173,7 +2173,7 @@ function builderFormHtml() {
       + '</label><select id="bld-adapter">' + opts(BUILD_ADAPTERS, "demo") + '</select>'
       + '<span class="field-hint">How the run reaches the system under test.</span></div>'
     + '<div class="field" style="grid-column:span 2"><label>Options <span class="opt">JSON, optional</span>'
-      + tip("Adapter-specific settings as JSON, e.g. {\\"base_url\\": \\"/v1/chat\\"} for an http adapter, or {\\"name\\": \\"my.module:fn\\"} for a callable.")
+      + tip("Adapter-specific settings as JSON — e.g. a base_url for an http adapter, or a module:function name for a callable adapter.")
       + '</label>'
       + '<textarea id="bld-adapter-opts" placeholder=\'{ "base_url": "/v1/chat" }\'></textarea>'
       + '<span class="field-hint">Adapter-specific settings, e.g. an endpoint URL.</span></div>'
