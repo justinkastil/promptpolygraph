@@ -224,8 +224,28 @@ def _adapter_extra(args) -> dict:
 
 
 def cmd_generate(cfg: Config, args) -> None:
+    import sys
+
     client = _client(cfg)
-    cases = C.build_corpus(cfg.corpus, resolve=cfg.resolve, client=client, mock=_is_mock(cfg), domain=cfg.domain)
+    _gen_state = {"target": 0}
+
+    def _prog(stage: str, info: dict) -> None:
+        if stage == "plan":
+            _gen_state["target"] = info.get("target", 0)
+            print(_color(f"planning {_gen_state['target']} prompts (mode={info.get('mode')})…", "dim"))
+        elif stage == "batch":
+            sys.stdout.write(_color(f"\r  batch {info.get('index')} (+{info.get('size')})…", "dim"))
+            sys.stdout.flush()
+        elif stage == "prompt":
+            t = info.get("target") or _gen_state["target"] or "?"
+            sys.stdout.write(f"\r  generated {info.get('i')}/{t}  ({(info.get('category') or '')[:24]})            ")
+            sys.stdout.flush()
+        elif stage == "done":
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+    cases = C.build_corpus(cfg.corpus, resolve=cfg.resolve, client=client,
+                           mock=_is_mock(cfg), domain=cfg.domain, progress=_prog)
     out = Path(args.out or (Path(cfg.out_dir) / "generated")).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     by_cat: dict[str, list[dict]] = {}

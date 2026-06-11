@@ -280,19 +280,37 @@ async def generate(
     coverage_gaps: list[str] | None = None,
     domain: str | None = None,
     mock: bool = False,
+    progress: "Callable[[str, dict], None] | None" = None,
 ) -> list[Case]:
-    """Synthesize a list of `Case` probes (LLM-backed, or deterministic mock)."""
+    """Synthesize a list of `Case` probes (LLM-backed, or deterministic mock).
+
+    `progress(stage, info)` is called at "plan", "batch", "prompt", and "done"
+    so a UI/CLI can show generation steps instead of one long silent wait."""
     cats = list(categories) or ["default"]
 
+    def _p(stage: str, info: dict) -> None:
+        if progress:
+            try:
+                progress(stage, info)
+            except Exception:
+                pass
+
     if mock or client is None:
-        return _mock_cases(
+        cases = _mock_cases(
             count=count, categories=cats, per_category=per_category, seed=seed,
             domain=domain,
         )
+        _p("plan", {"target": len(cases), "mode": mode})
+        for i, c in enumerate(cases, 1):
+            _p("prompt", {"category": c.category, "prompt": c.prompt, "i": i, "target": len(cases)})
+        _p("done", {"count": len(cases)})
+        return cases
 
     system = _system_prompt(mode, difficulty, domain)
     steering = _steering_block(seed_bank, failure_clusters, coverage_gaps)
     plan = _distribute(cats, count, per_category)
+    _total = sum(plan.values())
+    _p("plan", {"target": _total, "plan": dict(plan), "mode": mode})
 
     # Build batches of <=_BATCH_SIZE cases. Each batch can mix categories, so we
     # chunk by total remaining while tracking which categories still need cases.
@@ -314,6 +332,7 @@ async def generate(
             domain=domain,
         )
         batch_index += 1
+        _p("batch", {"index": batch_index, "size": len(raw), "produced": len(cases), "target": _total})
         for item in raw:
             cat = item.get("category")
             if cat not in remaining or remaining.get(cat, 0) <= 0:
@@ -328,6 +347,8 @@ async def generate(
                 item["metadata"].setdefault("generated", mode)
             cases.append(Case(**item))
             remaining[cat] -= 1
+            _p("prompt", {"category": cat, "prompt": item.get("prompt", ""),
+                          "i": len(cases), "target": _total})
             if sum(remaining.values()) <= 0:
                 break
         else:
@@ -336,6 +357,7 @@ async def generate(
         if sum(remaining.values()) <= 0:
             break
 
+    _p("done", {"count": len(cases)})
     return cases[:count] if per_category is None else cases
 
 
@@ -371,6 +393,7 @@ def build_corpus(
     client: LLMClient | None = None,
     mock: bool = False,
     domain: str | None = None,
+    progress: "Callable[[str, dict], None] | None" = None,
 ) -> list[Case]:
     """Synchronous dispatcher used by the CLI to materialize a corpus.
 
@@ -407,6 +430,7 @@ def build_corpus(
                 per_category=cfg.per_category,
                 domain=domain,
                 mock=mock,
+                progress=progress,
             )
         )
 
@@ -434,6 +458,7 @@ def build_corpus(
                     seed_bank=seed_bank,
                     domain=domain,
                     mock=mock,
+                    progress=progress,
                 )
             )
         combined = fixed + supplement
