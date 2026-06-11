@@ -23,6 +23,9 @@ th { background: var(--panel); }
 <div class="verdict {{ 'pass' if cover.overall_pass else 'fail' }}">
   {{ cover.verdict }} &mdash; {{ cover.categories_passing }}/{{ cover.categories_total }} categories passing
 </div>
+{% if charts and charts.dimension_bars %}
+<div style="margin:.75rem 0">{{ charts.dimension_bars | safe }}</div>
+{% endif %}
 
 <h2>Category scores</h2>
 <table><thead><tr><th>Category</th><th>Count</th>{% for d in dimensions %}<th>{{ d }}</th>{% endfor %}<th>Pass</th>{% if has_baseline %}<th>&Delta;</th>{% endif %}</tr></thead><tbody>

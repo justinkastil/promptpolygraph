@@ -124,6 +124,36 @@ PAGE: str = r"""<!DOCTYPE html>
   ol.changes li { padding: 3px 0; }
   .persona-card { padding: 12px 16px; border-top: 1px solid var(--border); }
   .persona-card h3 { margin: 0 0 4px; font-size: 13.5px; }
+
+  .chart-card { padding: 14px 16px; }
+  .chart-card .ctitle { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+  .chart-row { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+  .chart-row > div { flex: 1 1 320px; min-width: 280px; }
+  .diff-block { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; margin: 6px 0 2px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+  .diff-block .d-add { color: var(--pass); display: block; }
+  .diff-block .d-del { color: var(--fail); display: block; }
+  .diff-block .d-ctx { color: var(--text); display: block; }
+  .diff-block .d-hdr { color: var(--muted); display: block; }
+  .fix-card { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 13px; margin: 8px 16px; background: var(--panel-2); }
+  .fix-card .fix-head { font-weight: 700; }
+  .locus { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  .gap-chip { display: inline-block; background: rgba(229,115,107,.12); color: var(--fail); border: 1px solid rgba(229,115,107,.4); border-radius: 999px; padding: 1px 9px; font-size: 11px; font-weight: 600; margin: 0 4px 4px 0; }
+  .lead-fix { background: var(--panel-2); border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: 8px; padding: 10px 13px; margin: 8px 16px; }
+  .lead-fix .lead-label { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--accent); }
+  .fm-list { list-style: none; padding: 0; margin: 4px 16px; }
+  .fm-list li { padding: 4px 0; border-bottom: 1px dashed var(--border); }
+
+  .cmpbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 0 16px; }
+  .cmpbar .hint { color: var(--muted); font-size: 12px; }
+  .btn.disabled-btn { opacity: .5; cursor: default; pointer-events: none; }
+  tbody.runs tr.sel { background: rgba(106,163,255,.12); }
+  .sel-box { margin-right: 8px; }
+  .delta-up { color: var(--pass); }
+  .delta-down { color: var(--fail); }
+  .matrix td.base { color: var(--muted); }
+  .reglist { list-style: none; padding: 0; margin: 6px 0; }
+  .reglist li { padding: 5px 0; border-bottom: 1px dashed var(--border); }
+  .reglist .drop { color: var(--fail); font-weight: 700; font-family: var(--mono); }
 </style>
 </head>
 <body>
@@ -170,13 +200,221 @@ async function getJSON(url) {
   return await r.json();
 }
 
+// ---- inline-SVG chart helpers ------------------------------------------
+// All helpers return SVG strings. They are namespace-free (no xmlns) so the
+// page contains no external/CDN URL of any kind; the browser renders inline
+// SVG fine without the namespace. Numeric inputs are coerced; nulls render
+// as neutral "no data" cells. Every text value is run through esc().
+const CMAX = 10;
+function _clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+function _hex2rgb(h) {
+  h = (h || "").replace("#", "");
+  if (h.length === 3) h = h.split("").map(c => c + c).join("");
+  if (h.length !== 6) return [106, 163, 255];
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+}
+function _lerp(a, b, t) {
+  t = _clamp(t, 0, 1);
+  const c = i => Math.round(a[i] + (b[i] - a[i]) * t).toString(16).padStart(2, "0");
+  return "#" + c(0) + c(1) + c(2);
+}
+const _RED = [229,115,107], _AMBER = [230,180,80], _GREEN = [70,192,138];
+function scoreColor(v, thr, vmax) {
+  vmax = vmax || CMAX;
+  if (v === null || v === undefined || isNaN(v)) return "#1d212b";
+  thr = (thr && thr > 0) ? thr : vmax / 2;
+  if (v <= thr) return _lerp(_RED, _AMBER, thr ? v / thr : 0);
+  return _lerp(_AMBER, _GREEN, (v - thr) / ((vmax - thr) || 1));
+}
+function _txtOn(hex) {
+  const [r,g,b] = _hex2rgb(hex);
+  return (0.299*r + 0.587*g + 0.114*b) < 140 ? "#ffffff" : "#0f1115";
+}
+function _trunc(s, n) { s = String(s); return s.length <= n ? s : s.slice(0, n-1) + "…"; }
+function _svgOpen(w, h, label) {
+  return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" '
+    + 'style="max-width:' + w + 'px;height:auto;font-family:var(--sans)" '
+    + 'role="img" aria-label="' + esc(label) + '">';
+}
+function _noData(msg) {
+  return _svgOpen(280, 54, msg) + '<rect width="280" height="54" rx="8" fill="#1d212b"/>'
+    + '<text x="140" y="31" text-anchor="middle" font-size="12" fill="#98a0ad">' + esc(msg) + '</text></svg>';
+}
+
+// heatmap(rows, cols, valueFn, {threshold,vmax,accent}) -> SVG
+function heatmap(rows, cols, valueFn, opt) {
+  opt = opt || {};
+  const thr = opt.threshold, vmax = opt.vmax || CMAX, accent = opt.accent || "#6aa3ff";
+  if (!rows.length || !cols.length) return _noData("No scores");
+  const labelW = 130, cellW = Math.max(58, Math.min(96, Math.floor(620 / cols.length))), cellH = 28, padTop = 50, gap = 3;
+  const gridW = cols.length * (cellW + gap);
+  const w = labelW + gridW + 12, h = padTop + rows.length * (cellH + gap) + 6;
+  let s = _svgOpen(w, h, "Score heatmap");
+  cols.forEach((c, j) => {
+    const cx = labelW + j * (cellW + gap) + cellW / 2;
+    s += '<text x="' + cx.toFixed(1) + '" y="' + (padTop - 30) + '" text-anchor="middle" font-size="11" font-weight="600" fill="#e6e9ef">' + esc(_trunc(c, 10)) + '</text>';
+  });
+  s += '<line x1="' + labelW + '" y1="' + (padTop - 8) + '" x2="' + (labelW + gridW) + '" y2="' + (padTop - 8) + '" stroke="' + esc(accent) + '" stroke-width="2"/>';
+  rows.forEach((r, i) => {
+    const ry = padTop + i * (cellH + gap);
+    s += '<text x="' + (labelW - 10) + '" y="' + (ry + cellH/2 + 4).toFixed(1) + '" text-anchor="end" font-size="11" fill="#e6e9ef">' + esc(_trunc(r, 17)) + '</text>';
+    cols.forEach((c, j) => {
+      let v = valueFn(r, c);
+      v = (v === null || v === undefined || v === "") ? null : Number(v);
+      const rx = labelW + j * (cellW + gap);
+      const fill = scoreColor(v, thr, vmax);
+      const tcol = v === null ? "#98a0ad" : _txtOn(fill);
+      const label = v === null ? "—" : v.toFixed(1);
+      s += '<rect x="' + rx.toFixed(1) + '" y="' + ry.toFixed(1) + '" width="' + cellW + '" height="' + cellH + '" rx="4" fill="' + fill + '" stroke="#2a2f3a"/>'
+        + '<text x="' + (rx + cellW/2).toFixed(1) + '" y="' + (ry + cellH/2 + 4).toFixed(1) + '" text-anchor="middle" font-size="11" font-weight="600" fill="' + tcol + '">' + label + '</text>';
+    });
+  });
+  return s + "</svg>";
+}
+
+// barChart([{label,value,color?}], {vmax,threshold,accent}) -> SVG (horizontal)
+function barChart(items, opt) {
+  opt = opt || {};
+  const vmax = opt.vmax || CMAX, thr = opt.threshold, accent = opt.accent || "#6aa3ff";
+  items = (items || []).filter(x => x);
+  if (!items.length) return _noData("No data");
+  const labelW = 116, barW = 280, rowH = 24, padL = 10, padTop = 12;
+  const w = padL + labelW + barW + 52, h = padTop + items.length * (rowH + 7) + 22;
+  const trackX = padL + labelW;
+  let s = _svgOpen(w, h, "Bar chart");
+  if (thr != null) {
+    const tx = trackX + barW * _clamp(thr / vmax, 0, 1);
+    s += '<line x1="' + tx.toFixed(1) + '" y1="' + (padTop - 4) + '" x2="' + tx.toFixed(1) + '" y2="' + (h - 16) + '" stroke="#98a0ad" stroke-width="1" stroke-dasharray="3 3"/>'
+      + '<text x="' + tx.toFixed(1) + '" y="' + (h - 4) + '" text-anchor="middle" font-size="9.5" fill="#98a0ad">thr ' + Number(thr).toFixed(1) + '</text>';
+  }
+  items.forEach((it, i) => {
+    const y = padTop + i * (rowH + 7);
+    const v = (it.value === null || it.value === undefined) ? null : Number(it.value);
+    s += '<text x="' + (padL + labelW - 8) + '" y="' + (y + rowH/2 + 4).toFixed(1) + '" text-anchor="end" font-size="11" fill="#e6e9ef">' + esc(_trunc(it.label, 14)) + '</text>'
+      + '<rect x="' + trackX + '" y="' + y + '" width="' + barW + '" height="' + rowH + '" rx="5" fill="#1d212b" stroke="#2a2f3a"/>';
+    if (v !== null && !isNaN(v)) {
+      const fw = barW * _clamp(v / vmax, 0, 1);
+      const fill = it.color || scoreColor(v, thr, vmax);
+      s += '<rect x="' + trackX + '" y="' + y + '" width="' + fw.toFixed(1) + '" height="' + rowH + '" rx="5" fill="' + fill + '"/>'
+        + '<text x="' + (trackX + barW + 8) + '" y="' + (y + rowH/2 + 4).toFixed(1) + '" font-size="11" font-weight="600" fill="#e6e9ef">' + v.toFixed(1) + '</text>';
+    } else {
+      s += '<text x="' + (trackX + 8) + '" y="' + (y + rowH/2 + 4).toFixed(1) + '" font-size="11" fill="#98a0ad">—</text>';
+    }
+  });
+  s += '<line x1="' + trackX + '" y1="' + (h - 16) + '" x2="' + (trackX + barW) + '" y2="' + (h - 16) + '" stroke="' + esc(accent) + '" stroke-width="1" opacity="0.35"/>';
+  return s + "</svg>";
+}
+
+// lineChart([{label,points:[..],color?}], {vmax,threshold,xlabels?}) -> SVG
+function lineChart(series, opt) {
+  opt = opt || {};
+  const vmax = opt.vmax || CMAX, thr = opt.threshold;
+  const colors = ["#6aa3ff", "#46c08a", "#e6b450", "#c08adf", "#e5736b", "#5fd0c4"];
+  series = (series || []).filter(s => s && s.points && s.points.length);
+  if (!series.length) return _noData("No trend data");
+  const nX = Math.max.apply(null, series.map(s => s.points.length));
+  const padL = 40, padR = 14, padT = 12, padB = 28;
+  const plotW = 420, plotH = 180;
+  const w = padL + plotW + padR, h = padT + plotH + padB + (series.length > 1 ? 18 : 0);
+  const xpos = i => nX === 1 ? padL + plotW/2 : padL + plotW * i / (nX - 1);
+  const ypos = v => padT + plotH * (1 - _clamp(v / vmax, 0, 1));
+  let s = _svgOpen(w, h, "Trend");
+  [0, vmax/2, vmax].forEach(gv => {
+    const gy = ypos(gv);
+    s += '<line x1="' + padL + '" y1="' + gy.toFixed(1) + '" x2="' + (padL + plotW) + '" y2="' + gy.toFixed(1) + '" stroke="#2a2f3a" stroke-width="1"/>'
+      + '<text x="' + (padL - 6) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end" font-size="9.5" fill="#98a0ad">' + gv.toFixed(0) + '</text>';
+  });
+  if (thr != null) {
+    const ty = ypos(thr);
+    s += '<line x1="' + padL + '" y1="' + ty.toFixed(1) + '" x2="' + (padL + plotW) + '" y2="' + ty.toFixed(1) + '" stroke="#e6b450" stroke-width="1" stroke-dasharray="4 3"/>';
+  }
+  const xlabels = opt.xlabels || [];
+  for (let i = 0; i < nX; i++) {
+    s += '<text x="' + xpos(i).toFixed(1) + '" y="' + (padT + plotH + 16) + '" text-anchor="middle" font-size="9" fill="#98a0ad">' + esc(xlabels[i] != null ? xlabels[i] : (i + 1)) + '</text>';
+  }
+  series.forEach((ser, si) => {
+    const col = ser.color || colors[si % colors.length];
+    const coords = [];
+    ser.points.forEach((v, i) => { if (v !== null && v !== undefined && !isNaN(v)) coords.push([xpos(i), ypos(Number(v))]); });
+    if (coords.length >= 2) s += '<polyline points="' + coords.map(c => c[0].toFixed(1) + "," + c[1].toFixed(1)).join(" ") + '" fill="none" stroke="' + col + '" stroke-width="2.2"/>';
+    coords.forEach(c => { s += '<circle cx="' + c[0].toFixed(1) + '" cy="' + c[1].toFixed(1) + '" r="3" fill="' + col + '"/>'; });
+  });
+  if (series.length > 1) {
+    let lx = padL, ly = padT + plotH + padB + 6;
+    series.forEach((ser, si) => {
+      const col = ser.color || colors[si % colors.length];
+      const lab = _trunc(ser.label || ("series " + (si + 1)), 14);
+      s += '<rect x="' + lx + '" y="' + (ly - 9) + '" width="11" height="11" rx="2" fill="' + col + '"/>'
+        + '<text x="' + (lx + 15) + '" y="' + ly + '" font-size="10" fill="#e6e9ef">' + esc(lab) + '</text>';
+      lx += 30 + lab.length * 6;
+    });
+  }
+  return s + "</svg>";
+}
+
+// radar([{name,axes:{key:val}}], axisDefs:[{key,label}], {vmax,accent}) -> SVG
+function radar(seriesIn, axisDefs, opt) {
+  opt = opt || {};
+  const vmax = opt.vmax || CMAX;
+  const colors = [opt.accent || "#6aa3ff", "#46c08a", "#e6b450", "#c08adf", "#e5736b", "#5fd0c4"];
+  const series = (seriesIn || []).filter(p => p && p.axes);
+  if (!series.length || !axisDefs.length) return _noData("No persona reactions");
+  const n = axisDefs.length, cx = 165, cy = 158, radius = 104, w = 440, h = 350;
+  const pt = (idx, frac) => {
+    const ang = -Math.PI/2 + idx * (2*Math.PI/n);
+    const rr = radius * _clamp(frac, 0, 1);
+    return [cx + rr*Math.cos(ang), cy + rr*Math.sin(ang)];
+  };
+  let s = _svgOpen(w, h, "Persona radar");
+  [0.25, 0.5, 0.75, 1].forEach(ring => {
+    const pts = axisDefs.map((_, i) => pt(i, ring)).map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+    s += '<polygon points="' + pts + '" fill="none" stroke="#2a2f3a" stroke-width="1"/>';
+  });
+  axisDefs.forEach((ax, i) => {
+    const e = pt(i, 1), l = pt(i, 1.22);
+    let anchor = "middle";
+    if (l[0] < cx - 5) anchor = "end"; else if (l[0] > cx + 5) anchor = "start";
+    s += '<line x1="' + cx + '" y1="' + cy + '" x2="' + e[0].toFixed(1) + '" y2="' + e[1].toFixed(1) + '" stroke="#2a2f3a" stroke-width="1"/>'
+      + '<text x="' + l[0].toFixed(1) + '" y="' + (l[1] + 4).toFixed(1) + '" text-anchor="' + anchor + '" font-size="10.5" font-weight="600" fill="#e6e9ef">' + esc(ax.label) + '</text>';
+  });
+  series.slice(0, 6).forEach((p, si) => {
+    const col = colors[si % colors.length];
+    const pts = axisDefs.map((ax, i) => { const v = p.axes[ax.key]; return pt(i, (v == null || isNaN(v)) ? 0 : Number(v)/vmax); });
+    s += '<polygon points="' + pts.map(c => c[0].toFixed(1) + "," + c[1].toFixed(1)).join(" ") + '" fill="' + col + '" fill-opacity="0.14" stroke="' + col + '" stroke-width="2"/>';
+    pts.forEach(c => { s += '<circle cx="' + c[0].toFixed(1) + '" cy="' + c[1].toFixed(1) + '" r="2.4" fill="' + col + '"/>'; });
+  });
+  let ly = 16;
+  series.slice(0, 6).forEach((p, si) => {
+    const col = colors[si % colors.length];
+    s += '<rect x="' + (w - 132) + '" y="' + (ly - 9) + '" width="11" height="11" rx="2" fill="' + col + '"/>'
+      + '<text x="' + (w - 117) + '" y="' + ly + '" font-size="10.5" fill="#e6e9ef">' + esc(_trunc(p.name, 16)) + '</text>';
+    ly += 18;
+  });
+  return s + "</svg>";
+}
+
+// diff -> colored monospace HTML block
+function diffBlock(diff) {
+  const lines = String(diff).split("\n").map(ln => {
+    let cls = "d-ctx";
+    if (ln.startsWith("@@") || ln.startsWith("+++") || ln.startsWith("---")) cls = "d-hdr";
+    else if (ln.startsWith("+")) cls = "d-add";
+    else if (ln.startsWith("-")) cls = "d-del";
+    return '<span class="' + cls + '">' + esc(ln) + '</span>';
+  });
+  return '<div class="diff-block">' + lines.join("") + '</div>';
+}
+
 // ---- state --------------------------------------------------------------
 const app = document.getElementById("app");
 const crumb = document.getElementById("crumb");
 let pollTimer = null;
-let view = "runs";          // "runs" | "detail"
+let view = "runs";          // "runs" | "detail" | "compare"
 let currentRunId = null;
 let currentTab = "results"; // "results" | "audit"
+let selectMode = false;     // compare-selection mode in the runs list
+const selected = new Set(); // selected run ids for compare
+let runsCache = [];         // last /api/runs payload (chronological metadata)
 
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
@@ -192,6 +430,7 @@ async function renderRuns() {
   let runs;
   try { runs = await getJSON("/api/runs"); }
   catch (e) { app.innerHTML = '<div class="err">Could not load runs: ' + esc(e.message) + '</div>'; return; }
+  runsCache = runs;
   if (!runs.length) {
     app.innerHTML = '<div class="empty">No runs found yet. Produce one with <span class="mono">polygraph all …</span> and it will appear here.</div>';
     return;
@@ -200,7 +439,15 @@ async function renderRuns() {
   for (const r of runs) {
     const done = r.completed_cases || 0, total = r.total_cases || 0;
     const frac = total ? Math.round(100 * done / total) : 0;
-    rows += '<tr onclick="showRun(\'' + esc(r.run_id) + '\')">'
+    const isSel = selected.has(r.run_id);
+    const onclick = selectMode
+      ? 'onclick="toggleSel(\'' + esc(r.run_id) + '\')"'
+      : 'onclick="showRun(\'' + esc(r.run_id) + '\')"';
+    const selCell = selectMode
+      ? '<td><input type="checkbox" class="sel-box"' + (isSel ? " checked" : "") + '></td>'
+      : '';
+    rows += '<tr class="' + (isSel ? "sel" : "") + '" ' + onclick + '>'
+      + selCell
       + '<td class="mono">' + shortId(r.run_id) + '</td>'
       + '<td>' + dash(r.name) + '</td>'
       + '<td>' + dash(r.mode) + '</td>'
@@ -212,10 +459,157 @@ async function renderRuns() {
       + '<td class="muted">' + fmtTime(r.created_at) + '</td>'
       + '</tr>';
   }
-  app.innerHTML =
-    '<table><thead><tr><th>ID</th><th>Name</th><th>Mode</th><th>Adapter</th>'
+  const selHead = selectMode ? '<th></th>' : '';
+  const toggleLabel = selectMode ? "Cancel" : "Compare runs";
+  const compareBtn = selectMode
+    ? '<button class="btn' + (selected.size < 2 ? " disabled-btn" : "") + '" onclick="openCompare()">Compare ' + selected.size + ' selected</button>'
+    : '';
+  const bar = '<div class="cmpbar"><button class="btn" onclick="toggleSelectMode()">' + toggleLabel + '</button>'
+    + compareBtn
+    + (selectMode ? '<span class="hint">Pick 2 or more runs; the first selected is the baseline.</span>' : '')
+    + '</div>';
+  app.innerHTML = bar
+    + '<table><thead><tr>' + selHead + '<th>ID</th><th>Name</th><th>Mode</th><th>Adapter</th>'
     + '<th>Cases</th><th>Pass</th><th>Created</th></tr></thead>'
     + '<tbody class="runs">' + rows + '</tbody></table>';
+}
+
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  if (!selectMode) selected.clear();
+  renderRuns();
+}
+function toggleSel(id) {
+  if (selected.has(id)) selected.delete(id); else selected.add(id);
+  renderRuns();
+}
+
+// ---- compare view -------------------------------------------------------
+async function openCompare() {
+  if (selected.size < 2) return;
+  view = "compare";
+  stopPoll();
+  crumb.textContent = "All runs  ›  Compare " + selected.size + " runs";
+  app.innerHTML = '<div class="empty">Loading comparison…</div>';
+
+  // chronological order from the runs list; first is baseline
+  const order = runsCache
+    .filter(r => selected.has(r.run_id))
+    .slice()
+    .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+  // fall back to selection order if metadata lacks timestamps
+  const ids = order.length ? order.map(r => r.run_id) : Array.from(selected);
+
+  const cols = [];
+  for (const id of ids) {
+    let meta;
+    try { meta = await getJSON("/api/runs/" + encodeURIComponent(id)); }
+    catch (e) { continue; }
+    const run = meta.run || {};
+    cols.push({ id: id, name: run.name || id.slice(0, 8), summary: meta.summary || {} });
+  }
+  if (cols.length < 2) {
+    app.innerHTML = '<div class="err">Could not load enough runs to compare.</div>'; return;
+  }
+  renderCompare(cols);
+}
+
+function renderCompare(cols) {
+  const base = cols[0];
+  // union of dimensions + categories across all runs
+  const dimSet = [];
+  const catSet = [];
+  for (const c of cols) {
+    for (const d of (c.summary.dimensions || [])) if (!dimSet.includes(d)) dimSet.push(d);
+    for (const k of Object.keys(c.summary.category_scores || {})) if (!catSet.includes(k)) catSet.push(k);
+  }
+  catSet.sort();
+  const thr = base.summary.threshold;
+
+  const catMean = (sum, cat) => {
+    const e = (sum.category_scores || {})[cat];
+    if (!e) return null;
+    const vals = (sum.dimensions || []).map(d => e[d]).filter(v => v != null).map(Number);
+    return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+  };
+
+  // (a) comparison matrix: categories × runs, cell mean colored by delta vs baseline
+  let mhead = '<tr><th>Category</th>';
+  for (const c of cols) mhead += '<th>' + esc(_trunc(c.name, 18)) + (c === base ? ' <span class="muted">(base)</span>' : '') + '</th>';
+  mhead += '</tr>';
+  let mrows = "";
+  for (const cat of catSet) {
+    const baseM = catMean(base.summary, cat);
+    let r = '<td>' + esc(cat) + '</td>';
+    for (const c of cols) {
+      const m = catMean(c.summary, cat);
+      if (m === null) { r += '<td class="muted">&mdash;</td>'; continue; }
+      if (c === base) { r += '<td class="mono base">' + m.toFixed(1) + '</td>'; continue; }
+      const delta = (baseM != null) ? (m - baseM) : null;
+      let cell = m.toFixed(1);
+      if (delta != null) {
+        const cls = delta >= 0 ? "delta-up" : "delta-down";
+        const sign = delta >= 0 ? "+" : "";
+        cell += ' <span class="' + cls + '">(' + sign + delta.toFixed(1) + ')</span>';
+      }
+      r += '<td class="mono">' + cell + '</td>';
+    }
+    mrows += '<tr>' + r + '</tr>';
+  }
+  const matrix = '<div class="panel"><h2>Comparison matrix</h2><div class="body">'
+    + '<table class="matrix"><thead>' + mhead + '</thead><tbody>' + mrows + '</tbody></table></div></div>';
+
+  // (b) per-dimension trend lines across the chronological runs
+  let trends = "";
+  if (dimSet.length) {
+    const xlabels = cols.map(c => _trunc(c.name, 8));
+    let cards = "";
+    for (const d of dimSet) {
+      const pts = cols.map(c => {
+        const e = (c.summary.category_scores || {});
+        const vals = Object.values(e).map(x => x && x[d]).filter(v => v != null).map(Number);
+        return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+      });
+      cards += '<div class="chart-card"><p class="ctitle">' + esc(d) + '</p>'
+        + lineChart([{ label: d, points: pts }], { threshold: thr, xlabels: xlabels }) + '</div>';
+    }
+    trends = '<div class="panel"><h2>Per-dimension trend</h2><div class="body chart-row">' + cards + '</div></div>';
+  }
+
+  // (c) regressions list: dims that dropped > 0.5 vs baseline in any later run
+  const regs = [];
+  for (let ci = 1; ci < cols.length; ci++) {
+    const c = cols[ci];
+    for (const cat of catSet) {
+      const be = (base.summary.category_scores || {})[cat];
+      const ce = (c.summary.category_scores || {})[cat];
+      if (!be || !ce) continue;
+      for (const d of dimSet) {
+        const bv = be[d], cv = ce[d];
+        if (bv == null || cv == null) continue;
+        const drop = Number(bv) - Number(cv);
+        if (drop > 0.5) {
+          regs.push({ run: c.name, cat: cat, dim: d, from: Number(bv), to: Number(cv), drop: drop });
+        }
+      }
+    }
+  }
+  regs.sort((a, b) => b.drop - a.drop);
+  let regHtml;
+  if (regs.length) {
+    regHtml = '<ul class="reglist">' + regs.map(rg =>
+      '<li><span class="drop">−' + rg.drop.toFixed(1) + '</span> '
+      + esc(rg.dim) + ' in <b>' + esc(rg.cat) + '</b> '
+      + '<span class="muted">(' + rg.from.toFixed(1) + ' → ' + rg.to.toFixed(1) + ' in ' + esc(_trunc(rg.run, 18)) + ')</span></li>'
+    ).join("") + '</ul>';
+  } else {
+    regHtml = '<div class="muted" style="padding:6px 0">No dimension dropped more than 0.5 vs the baseline.</div>';
+  }
+  const regsPanel = '<div class="panel"><h2>Regressions vs baseline</h2><div class="body" style="padding:6px 16px">' + regHtml + '</div></div>';
+
+  const headLine = '<div style="margin-bottom:10px"><span style="font-size:18px;font-weight:700">Comparing ' + cols.length + ' runs</span> '
+    + '<span class="muted">baseline: ' + esc(_trunc(base.name, 24)) + '</span></div>';
+  app.innerHTML = headLine + matrix + trends + regsPanel;
 }
 
 // ---- run detail ---------------------------------------------------------
@@ -308,6 +702,24 @@ function renderResults(summary, cases) {
   const catScores = summary.category_scores || {};
   const thr = summary.threshold;
 
+  // heatmap (categories × dimensions)
+  let heat = "";
+  const heatCats = Object.keys(catScores).sort();
+  if (heatCats.length && dims.length) {
+    const hm = heatmap(heatCats, dims, (cat, d) => {
+      const e = catScores[cat]; return e ? e[d] : null;
+    }, { threshold: thr });
+    const bars = barChart(dims.map(d => {
+      const vals = heatCats.map(c => catScores[c] && catScores[c][d]).filter(v => v != null).map(Number);
+      const m = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+      return { label: d, value: m };
+    }), { threshold: thr });
+    heat = '<div class="panel"><h2>Score heatmap</h2><div class="body chart-row">'
+      + '<div class="chart-card"><p class="ctitle">Category × dimension</p>' + hm + '</div>'
+      + '<div class="chart-card"><p class="ctitle">Mean by dimension</p>' + bars + '</div>'
+      + '</div></div>';
+  }
+
   // category-score table
   let cst = "";
   const catNames = Object.keys(catScores).sort();
@@ -352,7 +764,7 @@ function renderResults(summary, cases) {
       + '<span class="count">' + rows.length + ' case' + (rows.length === 1 ? "" : "s") + '</span>'
       + '</summary>' + inner + '</details>';
   }
-  body.innerHTML = cst + '<div class="panel"><h2>Cases by category</h2>' + sections + '</div>';
+  body.innerHTML = heat + cst + '<div class="panel"><h2>Cases by category</h2>' + sections + '</div>';
 }
 
 function renderCase(row, dims, thr) {
@@ -437,43 +849,125 @@ async function renderAuditTab(runId) {
     syHtml += '<div class="label" style="padding:6px 16px 0">Narrative</div><div class="narr">' + esc(syn.narrative) + '</div>';
   if (syHtml) html += '<div class="panel"><h2>Forensic synthesis</h2><div class="body">' + syHtml + '</div></div>';
 
-  // per-category forensic audits
+  // per-category forensic audits — root cause → fix is the centerpiece
   const cas = f.category_audits || [];
   if (cas.length) {
     let secs = "";
     for (const ca of cas) {
-      let inner = "";
+      let inner = '<div class="case" style="padding-left:18px">';
       if (ca.highest_leverage_one_liner)
-        inner += '<div class="case"><div class="label">Highest-leverage change</div><div>' + esc(ca.highest_leverage_one_liner) + '</div>';
-      else inner += '<div class="case">';
-      if (ca.gap_dims && ca.gap_dims.length)
-        inner += '<div class="label">Gap dimensions</div><div class="muted">' + ca.gap_dims.map(esc).join(", ") + '</div>';
-      if (ca.failure_modes && ca.failure_modes.length)
-        inner += '<div class="label">Failure modes</div><ul class="frust">' + ca.failure_modes.map(x => '<li>' + esc(typeof x === "string" ? x : JSON.stringify(x)) + '</li>').join("") + '</ul>';
-      if (ca.leverage_changes && ca.leverage_changes.length)
-        inner += '<div class="label">Leverage changes</div><ul class="frust">' + ca.leverage_changes.map(x => '<li>' + esc(typeof x === "string" ? x : JSON.stringify(x)) + '</li>').join("") + '</ul>';
+        inner += '<div class="lead-fix" style="margin:8px 0"><span class="lead-label">Highest-leverage change</span><div>' + esc(ca.highest_leverage_one_liner) + '</div></div>';
+      if (ca.gap_dims && ca.gap_dims.length) {
+        inner += '<div style="margin:6px 0">' + ca.gap_dims.map(g => '<span class="gap-chip">' + esc(g) + '</span>').join("") + '</div>';
+      }
+      if (ca.failure_modes && ca.failure_modes.length) {
+        inner += '<div class="label">Failure modes</div><ul class="fm-list" style="margin-left:0">';
+        for (const fm of ca.failure_modes) {
+          if (typeof fm === "string") { inner += '<li>' + esc(fm) + '</li>'; continue; }
+          let li = "";
+          if (fm.dimension) li += '<b>' + esc(fm.dimension) + '</b>: ';
+          li += esc(fm.pattern || "");
+          if (fm.code_locus) li += ' <span class="locus">' + esc(fm.code_locus) + '</span>';
+          if (fm.rubric_criterion_missed) li += ' <span class="muted">— misses: ' + esc(fm.rubric_criterion_missed) + '</span>';
+          inner += '<li>' + li + '</li>';
+        }
+        inner += '</ul>';
+      }
+      if (ca.leverage_changes && ca.leverage_changes.length) {
+        inner += '<div class="label">Suggested fixes</div>';
+        for (const lc of ca.leverage_changes) {
+          if (typeof lc === "string") { inner += '<div class="fix-card" style="margin-left:0">' + esc(lc) + '</div>'; continue; }
+          let fc = '<div class="fix-card" style="margin-left:0"><div class="fix-head">' + esc(lc.change || "fix");
+          if (lc.target_dimension) fc += ' <span class="muted">→ ' + esc(lc.target_dimension) + '</span>';
+          fc += '</div>';
+          const sf = lc.suggested_fix || {};
+          const locus = lc.code_locus || sf.file;
+          if (locus) fc += '<div class="locus">' + esc(locus) + (sf.locus ? ' · ' + esc(sf.locus) : "") + '</div>';
+          const metaBits = [];
+          if (lc.est_impact) metaBits.push("impact " + lc.est_impact);
+          if (lc.effort) metaBits.push("effort " + lc.effort);
+          if (lc.confidence) metaBits.push("confidence " + lc.confidence);
+          if (metaBits.length) fc += '<div class="muted" style="font-size:12px">' + esc(metaBits.join(" · ")) + '</div>';
+          if (sf.rationale) fc += '<div style="margin-top:5px">' + esc(sf.rationale) + '</div>';
+          if (sf.diff) fc += diffBlock(sf.diff);
+          fc += '</div>';
+          inner += fc;
+        }
+      }
       inner += '</div>';
-      secs += '<details class="cat"><summary><span class="chev">▶</span><span class="name">' + esc(ca.category || "category") + '</span></summary>' + inner + '</details>';
+      secs += '<details class="cat"><summary><span class="chev">▶</span><span class="name">' + esc(ca.category || "category") + '</span>'
+        + (ca.gap_dims && ca.gap_dims.length ? '<span class="count">gaps: ' + ca.gap_dims.map(esc).join(", ") + '</span>' : "")
+        + '</summary>' + inner + '</details>';
     }
-    html += '<div class="panel"><h2>Forensic — by category</h2>' + secs + '</div>';
+    html += '<div class="panel"><h2>Root cause → fix, by category</h2>' + secs + '</div>';
   }
 
-  // persona reactions
+  // persona reactions + radar
   const p = audit.persona || {};
   const reactions = p.reactions || [];
   if (reactions.length) {
-    let cards = "";
+    // compute per-persona axis averages from reactions[].reactions[]
+    const axisDefs = [
+      { key: "trust", label: "Trust" },
+      { key: "usefulness", label: "Usefulness" },
+      { key: "clarity", label: "Clarity" },
+      { key: "would_return", label: "Would return" },
+    ];
+    const radarSeries = [];
     for (const pr of reactions) {
-      let card = '<div class="persona-card"><h3>' + esc(pr.persona || "Persona") + '</h3>';
+      const agg = { trust: [], usefulness: [], clarity: [], would_return: [] };
+      for (const cr of (pr.reactions || [])) {
+        for (const k of Object.keys(agg)) {
+          let v = cr[k];
+          if (v === true) v = 10; else if (v === false) v = 0;
+          v = Number(v);
+          if (!isNaN(v)) agg[k].push(v);
+        }
+      }
+      const axes = {};
+      let any = false;
+      for (const k of Object.keys(agg)) {
+        if (agg[k].length) { axes[k] = agg[k].reduce((a,b)=>a+b,0)/agg[k].length; any = true; }
+        else axes[k] = null;
+      }
+      if (any) radarSeries.push({ name: pr.persona || pr.persona_id || "Persona", axes: axes });
+    }
+
+    let cards = "";
+    if (radarSeries.length) {
+      cards += '<div class="chart-card"><p class="ctitle">Persona experience (avg trust · usefulness · clarity · would-return)</p>'
+        + radar(radarSeries, axisDefs, {}) + '</div>';
+    }
+    for (const pr of reactions) {
+      let card = '<div class="persona-card"><h3>' + esc(pr.persona || pr.persona_id || "Persona") + '</h3>';
       if (pr.persona_summary) card += '<div class="muted" style="font-size:13px">' + esc(pr.persona_summary) + '</div>';
       if (pr.biggest_frustrations && pr.biggest_frustrations.length) {
         card += '<div class="label">Biggest frustrations</div><ul class="frust">'
           + pr.biggest_frustrations.map(x => '<li>' + esc(typeof x === "string" ? x : JSON.stringify(x)) + '</li>').join("") + '</ul>';
       }
+      if (pr.what_would_win_me) card += '<div class="label">What would win me</div><div>' + esc(pr.what_would_win_me) + '</div>';
       card += '</div>';
       cards += card;
     }
-    html += '<div class="panel"><h2>Persona reactions</h2><div class="body">' + cards + '</div></div>';
+    html += '<div class="panel"><h2>Persona panel</h2><div class="body">' + cards + '</div></div>';
+  }
+
+  // rubric vs persona divergence
+  const cmp = p.comparison || {};
+  if (cmp && Object.keys(cmp).length) {
+    const rows = [
+      ["Rubric fidelity verdict", cmp.rubric_fidelity_verdict],
+      ["Chasing-tail risks", cmp.chasing_tail_risks],
+      ["Human-value blindspots", cmp.human_value_blindspots],
+      ["Reconciled priorities", cmp.reconciled_priorities],
+      ["Final path", cmp.final_path],
+    ].filter(r => r[1]);
+    let dhtml = "";
+    for (const r of rows) {
+      const v = Array.isArray(r[1]) ? r[1].map(esc).join("; ") : (typeof r[1] === "string" ? esc(r[1]) : esc(JSON.stringify(r[1])));
+      dhtml += '<div class="label" style="padding:6px 16px 0">' + esc(r[0]) + '</div><div style="padding:0 16px">' + v + '</div>';
+    }
+    if (dhtml) html += '<div class="panel"><h2>Rubric vs persona divergence</h2><div class="body">' + dhtml + '</div></div>';
   }
 
   if (!html) html = '<div class="empty">No audit available for this run.</div>';

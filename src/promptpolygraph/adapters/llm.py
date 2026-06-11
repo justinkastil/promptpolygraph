@@ -25,6 +25,51 @@ from typing import Any
 from ..models import Case, Response
 from .base import BaseAdapter
 
+# Small built-in per-1k-token price table (USD), keyed by a substring of the
+# model id. Best-effort defaults; override per-run via options.price_per_1k_in /
+# price_per_1k_out. Prices are illustrative, not authoritative.
+_PRICE_PER_1K: dict[str, tuple[float, float]] = {
+    "opus": (0.015, 0.075),
+    "sonnet": (0.003, 0.015),
+    "haiku": (0.0008, 0.004),
+    "gpt-4o-mini": (0.00015, 0.0006),
+    "gpt-4o": (0.0025, 0.01),
+    "gpt-4": (0.03, 0.06),
+    "gpt-3.5": (0.0005, 0.0015),
+}
+
+
+def _lookup_price(model: str) -> tuple[float, float] | None:
+    ml = (model or "").lower()
+    for key, price in _PRICE_PER_1K.items():
+        if key in ml:
+            return price
+    return None
+
+
+def compute_cost(
+    model: str,
+    tokens_in: int | None,
+    tokens_out: int | None,
+    *,
+    price_in: float | None = None,
+    price_out: float | None = None,
+) -> float | None:
+    """Best-effort USD cost from token usage. Returns None if neither tokens nor
+    a price are known."""
+    if price_in is None or price_out is None:
+        looked = _lookup_price(model)
+        if looked is None and (price_in is None and price_out is None):
+            return None
+        if looked is not None:
+            price_in = price_in if price_in is not None else looked[0]
+            price_out = price_out if price_out is not None else looked[1]
+    if price_in is None and price_out is None:
+        return None
+    ti = tokens_in or 0
+    to = tokens_out or 0
+    return (ti / 1000.0) * (price_in or 0.0) + (to / 1000.0) * (price_out or 0.0)
+
 
 class LLMAdapter(BaseAdapter):
     name = "llm"
@@ -40,6 +85,8 @@ class LLMAdapter(BaseAdapter):
         temperature: float = 0.0,
         base_url: str | None = None,
         api_key_env: str | None = None,
+        price_per_1k_in: float | None = None,
+        price_per_1k_out: float | None = None,
         **_: Any,
     ):
         super().__init__(name)
@@ -50,6 +97,8 @@ class LLMAdapter(BaseAdapter):
         self._temperature = temperature
         self._base_url = base_url
         self._api_key_env = api_key_env
+        self._price_in = price_per_1k_in
+        self._price_out = price_per_1k_out
         self._client: Any = None
 
     def _ensure_client(self) -> Any:
@@ -95,6 +144,10 @@ class LLMAdapter(BaseAdapter):
             latency_ms=self._elapsed_ms(start),
             tokens_in=tin,
             tokens_out=tout,
+            cost_usd=compute_cost(
+                self._model, tin, tout,
+                price_in=self._price_in, price_out=self._price_out,
+            ),
             model=self._model,
             source=self.name,
         )

@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..models import Case, Response, RunMeta, Score
+from . import charts as _charts
 
 DEFAULT_ACCENT = "#4f46e5"
 
@@ -320,6 +321,16 @@ def _build_forensic(audit: Optional[dict]) -> Optional[dict]:
                         "est_impact": lc.get("est_impact"),
                         "effort": lc.get("effort"),
                         "confidence": lc.get("confidence"),
+                        "suggested_fix": (
+                            {
+                                "file": (lc.get("suggested_fix") or {}).get("file"),
+                                "locus": (lc.get("suggested_fix") or {}).get("locus"),
+                                "rationale": (lc.get("suggested_fix") or {}).get("rationale"),
+                                "diff": (lc.get("suggested_fix") or {}).get("diff"),
+                            }
+                            if isinstance(lc.get("suggested_fix"), dict)
+                            else None
+                        ),
                     }
                     for lc in (ca.get("leverage_changes") or [])
                     if isinstance(lc, dict)
@@ -366,6 +377,82 @@ def _build_pairwise(pairwise: Optional[dict]) -> Optional[dict]:
     }
 
 
+def _build_trend_series(summary: dict, baseline_diff: Optional[dict]) -> list[dict]:
+    """Per-dimension [baseline, current] series when a baseline diff is present.
+
+    The baseline diff carries, per category/dimension, the prior ("base") and
+    current ("value") means; we average across categories to a per-dimension
+    pair so the report can show movement at a glance. Returns [] when no
+    baseline data exists so the template simply omits the trend chart.
+    """
+    if not baseline_diff or not baseline_diff.get("by_category"):
+        return []
+    dims = list(summary.get("dimensions") or [])
+    by_cat = baseline_diff.get("by_category") or {}
+    out: list[dict] = []
+    for d in dims:
+        base_vals: list[float] = []
+        cur_vals: list[float] = []
+        for tab in by_cat.values():
+            if not isinstance(tab, dict):
+                continue
+            ent = tab.get(d)
+            if not isinstance(ent, dict):
+                continue
+            for key, bucket in (("base", base_vals), ("baseline", base_vals),
+                                ("value", cur_vals), ("current", cur_vals)):
+                v = ent.get(key)
+                try:
+                    if v is not None:
+                        bucket.append(float(v))
+                except (TypeError, ValueError):
+                    pass
+        base_mean = sum(base_vals) / len(base_vals) if base_vals else None
+        cur_mean = sum(cur_vals) / len(cur_vals) if cur_vals else None
+        if base_mean is not None or cur_mean is not None:
+            out.append({"label": d, "points": [base_mean, cur_mean]})
+    return out
+
+
+def _build_charts(
+    summary: dict,
+    audit: Optional[dict],
+    branding: dict,
+    baseline_diff: Optional[dict],
+) -> dict:
+    """Precompute inline-SVG chart strings for the template to embed verbatim.
+
+    Each value is a complete ``<svg>`` string (or None when the underlying data
+    is absent, so the template can skip the block). Branding accent tints the
+    chart chrome. Never raises: a chart failure degrades to None.
+    """
+    accent = branding.get("accent") or DEFAULT_ACCENT
+
+    def _safe(fn: Any) -> Optional[str]:
+        try:
+            svg = fn()
+            return svg if svg and svg.lstrip().startswith("<svg") else None
+        except Exception:
+            return None
+
+    series = _build_trend_series(summary, baseline_diff)
+    threshold = None
+    try:
+        threshold = float(summary.get("threshold")) if summary.get("threshold") is not None else None
+    except (TypeError, ValueError):
+        threshold = None
+
+    return {
+        "heatmap": _safe(lambda: _charts.score_heatmap(summary, accent=accent)),
+        "dimension_bars": _safe(lambda: _charts.dimension_bars(summary, accent=accent)),
+        "persona_radar": _safe(lambda: _charts.persona_radar(audit or {}, accent=accent)),
+        "trend": (
+            _safe(lambda: _charts.trend_line(series, accent=accent, threshold=threshold))
+            if series else None
+        ),
+    }
+
+
 def _build_branding(branding: Optional[dict], run_meta: RunMeta) -> dict:
     branding = branding or {}
     title = branding.get("title") or f"Polygraph Review — {run_meta.name}"
@@ -400,9 +487,11 @@ def build_context(
     summary = summary or {}
     cost = summary.get("cost") or {}
     lat = summary.get("latency") or {}
+    branding_block = _build_branding(branding, run_meta)
 
     return {
         "cover": _build_cover(run_meta, summary, cases, scores),
+        "charts": _build_charts(summary, audit, branding_block, baseline_diff),
         "dimensions": list(summary.get("dimensions") or []),
         "has_baseline": bool(baseline_diff and baseline_diff.get("by_category")),
         "categories": _build_categories(cases, responses, scores, summary, baseline_diff),
@@ -422,5 +511,5 @@ def build_context(
         },
         "assertion_pass_rate": _num((summary.get("assertion_pass_rate") or 0) * 100, 1),
         "agreement": _num(summary.get("agreement_mean")) if summary.get("agreement_mean") is not None else None,
-        "branding": _build_branding(branding, run_meta),
+        "branding": branding_block,
     }
