@@ -178,6 +178,10 @@ def test_page_has_control_plane_and_no_external_urls():
     assert "/api/run" in PAGE
     assert "/api/configs" in PAGE
     assert "/api/personas" in PAGE
+    # Studio now hosts the prompt-corpus generator alongside personas
+    assert "Studio" in PAGE
+    assert "/api/corpus/generate" in PAGE
+    assert "/api/corpus/export" in PAGE
     # still offline-only (mirrors test_dashboard)
     cleaned = PAGE.replace("http://127.0.0.1", "").replace("http://localhost", "")
     assert "http://" not in cleaned
