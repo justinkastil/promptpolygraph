@@ -215,8 +215,25 @@ _HEAD = (
     border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; min-width: 160px;
     transition: border-color .14s, box-shadow .14s; }
   .catadd input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
-  .builder-sec { border-top: 1px solid var(--border); padding: 14px 16px 6px; }
-  .builder-sec > .bs-title { font-size: var(--label-size); font-weight: 700; letter-spacing: var(--label-spacing); text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+  .builder-sec { border-top: 1px solid var(--border); padding: 16px 16px 10px; }
+  .builder-sec > .bs-title { display: flex; align-items: baseline; gap: 8px; font-size: var(--label-size); font-weight: 700; letter-spacing: var(--label-spacing); text-transform: uppercase; color: var(--text); margin-bottom: 12px; }
+  .builder-sec > .bs-title::before { content: ""; width: 3px; align-self: stretch; min-height: 12px; border-radius: 2px; background: var(--accent); opacity: .7; }
+  .builder-sec > .bs-title .bs-note { font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); font-size: 11.5px; }
+
+  /* helper microcopy under a field; ".opt" is an inline "optional" qualifier on a label */
+  .field-hint { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.45; margin-top: 2px; letter-spacing: 0; text-transform: none; font-weight: 400; }
+  .field-hint b { color: var(--text); font-weight: 700; }
+  .field label .opt { color: var(--muted-2, #6a7280); font-weight: 600; text-transform: none; letter-spacing: 0; font-size: 10.5px; }
+  #nr-config-hint b { color: var(--accent); font-weight: 700; }
+
+  /* the two New-Run paths read as a segmented choice rather than two loose tabs */
+  .nr-paths { display: inline-flex; gap: 2px; margin: 12px 16px 10px; padding: 3px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .nr-path { padding: 6px 16px; cursor: pointer; color: var(--muted); border-radius: 5px; border-bottom: 0; font-weight: 600; font-size: 13px; transition: background .14s, color .14s; }
+  .nr-path:hover { color: var(--text); }
+  .nr-path.active { color: var(--text); background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--border); }
+
+  /* launch bar: clear primary-vs-secondary hierarchy + a divider above it */
+  .launchbar { border-top: 1px solid var(--border); margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -1414,23 +1431,36 @@ function renderNewRun(configs, pfiles) {
     : '';
 
   const pickForm =
-    '<div class="form-grid">'
-    + '<div class="field"><label>Config</label><select id="nr-config">' + cfgOpts + '</select></div>'
+    '<div class="builder-sec" style="border-top:0;padding-top:14px">'
+    + '<div class="bs-title">Config</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field" style="grid-column:1 / -1"><label>Config</label>'
+      + '<select id="nr-config" onchange="updateNrConfigHint()">' + cfgOpts + '</select>'
+      + '<span class="field-hint" id="nr-config-hint">Blank fields below inherit this config\'s own settings.</span></div>'
+    + '</div></div>'
+    + '<div class="builder-sec"><div class="bs-title">Overrides <span class="bs-note">optional — leave blank to use the config</span></div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
     + '<div class="field"><label>Mode</label><select id="nr-mode">'
-      + ['','fixed','varied','adversarial','hybrid'].map(m => '<option value="' + m + '">' + (m || "(config default)") + '</option>').join("")
-      + '</select></div>'
-    + '<div class="field"><label>Count (varied/adversarial)</label><input type="number" id="nr-count" min="1" placeholder="config default"></div>'
-    + '<div class="field"><label>Per category</label><input type="number" id="nr-percat" min="1" placeholder="config default"></div>'
+      + ['','fixed','varied','adversarial','hybrid'].map(m => '<option value="' + m + '">' + (m || "inherit from config") + '</option>').join("")
+      + '</select><span class="field-hint">How prompts are sourced for the run.</span></div>'
+    + '<div class="field"><label>Count (varied / adversarial)</label><input type="number" id="nr-count" min="1" placeholder="inherit from config">'
+      + '<span class="field-hint">Total prompts to generate.</span></div>'
+    + '<div class="field"><label>Per category</label><input type="number" id="nr-percat" min="1" placeholder="inherit from config">'
+      + '<span class="field-hint">Prompts for each category.</span></div>'
     + '<div class="field"><label>Difficulty</label><select id="nr-diff">'
-      + ['','mild','standard','aggressive'].map(m => '<option value="' + m + '">' + (m || "(config default)") + '</option>').join("")
-      + '</select></div>'
-    + '<div class="field"><label>Persona panel</label><select id="nr-personas">' + personaOpts + '</select></div>'
-    + '</div>'
-    + '<div class="form-grid" style="padding-top:0">'
-    + '<div class="field"><label>Categories (optional)</label><div class="checks">' + catChecks + '</div></div>'
+      + ['','mild','standard','aggressive'].map(m => '<option value="' + m + '">' + (m || "inherit from config") + '</option>').join("")
+      + '</select><span class="field-hint">Pressure level for adversarial prompts.</span></div>'
+    + '<div class="field"><label>Persona panel</label><select id="nr-personas">' + personaOpts + '</select>'
+      + '<span class="field-hint">Reviewer panel that reacts to responses.</span></div>'
+    + '</div></div>'
+    + '<div class="builder-sec"><div class="bs-title">Scope &amp; output</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Categories <span class="opt">optional</span></label><div class="checks">' + catChecks + '</div>'
+      + '<span class="field-hint">Pick a subset, or leave all unchecked for the config\'s categories.</span></div>'
     + '<div class="field"><label>Report formats</label><div class="checks">' + fmtChecks + '</div></div>'
-    + '<div class="field"><label>Options</label><div class="checks"><label><input type="checkbox" id="nr-mock" checked> Mock (offline)</label></div></div>'
-    + '</div>'
+    + '<div class="field"><label>Backend</label><div class="checks"><label><input type="checkbox" id="nr-mock" checked> Mock (offline)</label></div>'
+      + '<span class="field-hint">Mock needs no API key.</span></div>'
+    + '</div></div>'
     + corpusSel
     + '<div class="launchbar"><button class="btn primary" id="nr-launch" onclick="launchRun()">Launch run</button>'
     + cfgEditBtn
@@ -1440,8 +1470,8 @@ function renderNewRun(configs, pfiles) {
   // "Build a config" pane — a real config builder (PART B).
   const buildForm = builderFormHtml()
     + '<div class="launchbar">'
-    + '<button class="btn primary" id="bld-save" onclick="saveBuilderConfig(false)">Save config</button>'
     + '<button class="btn primary" id="bld-launch" onclick="saveBuilderConfig(true)">Save &amp; launch</button>'
+    + '<button class="btn" id="bld-save" onclick="saveBuilderConfig(false)">Save config</button>'
     + '<span class="hint">Saved configs appear in the picker; Inject from the AI Designer fills this form.</span></div>'
     + '<div id="bld-result"></div>'
     + '<div id="nr-progress"></div>';
@@ -1464,6 +1494,43 @@ function renderNewRun(configs, pfiles) {
     + 'Or click <b>✦ Designer</b> in the header to draft a config from a description.</div>';
   app.innerHTML = form + studioLink;
   if (newRunPath === "build") ensureBuilderProviders();
+  updateNrConfigHint();
+}
+
+// Read-only hint: resolve what the currently-picked config actually uses, so
+// "inherit from config" reads as a concrete amount rather than a vague word.
+// Fetches GET /api/config?path=<picker value>; never mutates request bodies or
+// element ids the launch flow relies on.
+let _nrHintToken = 0;
+async function updateNrConfigHint() {
+  const hint = document.getElementById("nr-config-hint");
+  const sel = document.getElementById("nr-config");
+  if (!hint || !sel) return;
+  const path = sel.value || "";
+  if (!path) {
+    hint.innerHTML = "No config selected — a built-in default config will be used.";
+    return;
+  }
+  const token = ++_nrHintToken;
+  hint.innerHTML = 'Reading this config…';
+  let data;
+  try { data = await getJSON("/api/config?path=" + encodeURIComponent(path)); }
+  catch (e) { if (token === _nrHintToken) hint.innerHTML = "Blank fields below inherit this config’s own settings."; return; }
+  if (token !== _nrHintToken) return;  // a newer selection superseded this one
+  const cfg = (data && data.config) || {};
+  const co = cfg.corpus || {};
+  const bits = [];
+  if (co.mode) bits.push('mode <b>' + esc(co.mode) + '</b>');
+  // amount: per_category pins a number; count pins a total; fixed corpus loads a dir
+  if (co.per_category != null && co.per_category !== "") bits.push('<b>' + esc(co.per_category) + '</b>/category');
+  else if (co.count != null && co.count !== "") bits.push('<b>' + esc(co.count) + '</b> total');
+  else if (co.mode === "fixed" || co.path || co.dir || co.corpus_dir) bits.push('loads the config’s corpus (no fixed count)');
+  if (co.difficulty) bits.push('difficulty <b>' + esc(co.difficulty) + '</b>');
+  const cats = co.categories || [];
+  if (Array.isArray(cats) && cats.length) bits.push('<b>' + cats.length + '</b> categor' + (cats.length === 1 ? 'y' : 'ies'));
+  hint.innerHTML = bits.length
+    ? 'This config runs ' + bits.join(' · ') + '. Blank overrides below inherit these.'
+    : 'This config pins no corpus amount — blank fields use its built-in defaults.';
 }
 
 async function launchRun() {
@@ -1608,26 +1675,37 @@ function renderPromptStudio() {
     '<option value="' + m + '"' + (m === "standard" ? " selected" : "") + '>' + m + '</option>').join("");
 
   const gen = '<div class="panel"><h2>Generate a prompt corpus</h2>'
-    + '<div class="form-grid">'
-    + '<div class="field"><label>Mode</label><select id="cg-mode">' + modeOpts + '</select></div>'
-    + '<div class="field" style="grid-column:span 2"><label>Domain (optional)</label>'
-      + '<input type="text" id="cg-domain" placeholder="e.g. a budgeting assistant for freelancers"></div>'
-    + '<div class="field"><label>Difficulty (adversarial)</label><select id="cg-diff">' + diffOpts + '</select></div>'
-    + '<div class="field"><label>Count (total, optional)</label><input type="number" id="cg-count" min="1" placeholder="default"></div>'
-    + '<div class="field"><label>Per category (optional)</label><input type="number" id="cg-percat" min="1" placeholder="default"></div>'
-    + '<div class="field" style="grid-column:span 2"><label>Categories (optional, comma-separated)</label>'
-      + '<input type="text" id="cg-cats" placeholder="e.g. factual_qa, how_to, refusal"></div>'
-    + '<div class="field"><label>Seed (optional)</label><input type="number" id="cg-seed" placeholder="reproducible"></div>'
+    // what to generate
+    + '<div class="builder-sec" style="border-top:0;padding-top:14px"><div class="bs-title">Prompts</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Mode</label><select id="cg-mode">' + modeOpts + '</select>'
+      + '<span class="field-hint">Kind of prompts to synthesize.</span></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Domain <span class="opt">optional</span></label>'
+      + '<input type="text" id="cg-domain" placeholder="e.g. a budgeting assistant for freelancers">'
+      + '<span class="field-hint">Grounds the generated prompts in your use case.</span></div>'
+    + '<div class="field"><label>Difficulty <span class="opt">adversarial</span></label><select id="cg-diff">' + diffOpts + '</select>'
+      + '<span class="field-hint">Pressure level for adversarial prompts.</span></div>'
+    + '<div class="field"><label>Count <span class="opt">total</span></label><input type="number" id="cg-count" min="1" placeholder="optional total">'
+      + '<span class="field-hint">Alternative to per-category: a grand total spread across categories.</span></div>'
+    + '<div class="field"><label>Per category</label><input type="number" id="cg-percat" min="1" placeholder="blank = 8 per category">'
+      + '<span class="field-hint">Prompts for each category. Leave both blank for <b>8 per category</b>.</span></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Categories <span class="opt">optional, comma-separated</span></label>'
+      + '<input type="text" id="cg-cats" placeholder="e.g. factual_qa, how_to, refusal">'
+      + '<span class="field-hint">Blank lets the generator pick categories for the domain.</span></div>'
+    + '<div class="field"><label>Seed <span class="opt">optional</span></label><input type="number" id="cg-seed" placeholder="reproducible">'
+      + '<span class="field-hint">Fix for a repeatable corpus.</span></div>'
+    + '</div></div>'
+    // backend
+    + '<div class="builder-sec"><div class="bs-title">Backend</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
     + '<div class="field"><label>Provider</label><select class="field" id="cg-provider"><option>loading…</option></select></div>'
     + '<div class="field"><label>Model</label><select class="field" id="cg-model"><option>—</option></select>'
       + '<input type="text" id="cg-model-custom" placeholder="custom model name" style="display:none;margin-top:4px"></div>'
+    + '<div class="field"><label>Mode</label>'
+      + '<div class="checks"><label><input type="checkbox" id="cg-mock" checked> Mock (offline)</label></div>'
+      + '<span class="field-hint"><span class="mono">anthropic</span> is the default; use <span class="mono">ollama</span> for local. Mock needs no key.</span></div>'
     + '</div>'
     + '<div id="cg-provider-notice"></div>'
-    + '<div class="form-grid" style="padding-top:0">'
-    + '<div class="field" style="grid-column:1 / -1"><label>Backend</label>'
-      + '<div class="checks"><label><input type="checkbox" id="cg-mock" checked> Mock (offline)</label></div>'
-      + '<span class="hint">Any provider works — <span class="mono">anthropic</span> is the default; use e.g. '
-      + '<span class="mono">ollama</span> for a fully local backend. Mock needs no key.</span></div>'
     + '</div>'
     + '<div class="launchbar"><button class="btn primary" id="cg-gen-btn" onclick="generateCorpus()">Generate corpus</button>'
     + '<span class="hint">Saves a loadable corpus dir; preview and exports appear below.</span></div>'
@@ -1978,6 +2056,7 @@ function setNewRunPath(p) {
   if (pick) pick.style.display = (p === "pick") ? "" : "none";
   if (build) build.style.display = (p === "build") ? "" : "none";
   if (p === "build") ensureBuilderProviders();
+  else if (typeof updateNrConfigHint === "function") updateNrConfigHint();
 }
 
 // ---- config builder -----------------------------------------------------
@@ -2007,46 +2086,64 @@ function builderFormHtml() {
     '<label><input type="checkbox" class="bld-fmt" value="' + esc(f) + '"'
     + (f === "md" || f === "html" ? " checked" : "") + '> ' + esc(f) + '</label>').join("");
   return ''
-    + '<div class="form-grid">'
-    + '<div class="field"><label>Name</label><input type="text" id="bld-name" placeholder="my-eval"></div>'
-    + '<div class="field" style="grid-column:span 2"><label>Domain (system under test)</label>'
-      + '<input type="text" id="bld-domain" placeholder="e.g. a budgeting assistant for freelancers"></div>'
-    + '</div>'
+    // identity
+    + '<div class="builder-sec" style="border-top:0;padding-top:14px"><div class="bs-title">Identity</div>'
+    + '<div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Name</label><input type="text" id="bld-name" placeholder="my-eval">'
+      + '<span class="field-hint">Shown in the runs list and report.</span></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Domain <span class="opt">system under test</span></label>'
+      + '<input type="text" id="bld-domain" placeholder="e.g. a budgeting assistant for freelancers">'
+      + '<span class="field-hint">Plain-language description; grounds generated prompts.</span></div>'
+    + '</div></div>'
     // adapter
-    + '<div class="builder-sec"><div class="bs-title">Adapter</div><div class="form-grid" style="padding:0 0 6px">'
-    + '<div class="field"><label>Type</label><select id="bld-adapter">' + opts(BUILD_ADAPTERS, "demo") + '</select></div>'
-    + '<div class="field" style="grid-column:span 2"><label>Options (JSON, optional)</label>'
-      + '<textarea id="bld-adapter-opts" placeholder=\'{ "base_url": "/v1/chat" }\'></textarea></div>'
+    + '<div class="builder-sec"><div class="bs-title">Adapter</div><div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Type</label><select id="bld-adapter">' + opts(BUILD_ADAPTERS, "demo") + '</select>'
+      + '<span class="field-hint">How the run reaches the system under test.</span></div>'
+    + '<div class="field" style="grid-column:span 2"><label>Options <span class="opt">JSON, optional</span></label>'
+      + '<textarea id="bld-adapter-opts" placeholder=\'{ "base_url": "/v1/chat" }\'></textarea>'
+      + '<span class="field-hint">Adapter-specific settings, e.g. an endpoint URL.</span></div>'
     + '</div></div>'
     // corpus
-    + '<div class="builder-sec"><div class="bs-title">Corpus</div><div class="form-grid" style="padding:0 0 6px">'
-    + '<div class="field"><label>Mode</label><select id="bld-mode">' + opts(BUILD_CORPUS_MODES, "varied") + '</select></div>'
-    + '<div class="field"><label>Per category</label><input type="number" id="bld-percat" min="1" value="8"></div>'
-    + '<div class="field"><label>Difficulty</label><select id="bld-diff">' + opts(BUILD_DIFFS, "standard") + '</select></div>'
+    + '<div class="builder-sec"><div class="bs-title">Corpus</div><div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Mode</label><select id="bld-mode">' + opts(BUILD_CORPUS_MODES, "varied") + '</select>'
+      + '<span class="field-hint">How prompts are sourced.</span></div>'
+    + '<div class="field"><label>Per category</label><input type="number" id="bld-percat" min="1" value="8">'
+      + '<span class="field-hint">Prompts generated per category (default <b>8</b>).</span></div>'
+    + '<div class="field"><label>Difficulty</label><select id="bld-diff">' + opts(BUILD_DIFFS, "standard") + '</select>'
+      + '<span class="field-hint">Pressure level for adversarial prompts.</span></div>'
     + '</div>'
-    + '<div class="field" style="padding:0 0 6px"><label>Categories</label>'
+    + '<div class="field" style="padding:0 0 4px"><label>Categories</label>'
       + '<div class="catchips" id="bld-catchips"></div>'
       + '<div class="catadd" style="margin-top:8px"><input type="text" id="bld-catnew" placeholder="add a category…" '
       + 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();addBuilderCat();}">'
-      + '<button class="btn" onclick="addBuilderCat()">+ Add category</button></div></div>'
+      + '<button class="btn" onclick="addBuilderCat()">+ Add category</button></div>'
+      + '<span class="field-hint">Leave empty to let the generator choose categories for the domain.</span></div>'
     + '</div>'
     // analyze + audit
-    + '<div class="builder-sec"><div class="bs-title">Analyze &amp; audit</div><div class="form-grid" style="padding:0 0 6px">'
-    + '<div class="field"><label>Judges</label><select id="bld-judges">' + opts(["1","2","3"], "1") + '</select></div>'
-    + '<div class="field"><label>Gate mode</label><select id="bld-gate">' + opts(BUILD_GATES, "weighted") + '</select></div>'
-    + '<div class="field"><label>Persona pool</label><input type="number" id="bld-personapool" min="0" value="5"></div>'
+    + '<div class="builder-sec"><div class="bs-title">Analysis &amp; audit</div><div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Judges</label><select id="bld-judges">' + opts(["1","2","3"], "1") + '</select>'
+      + '<span class="field-hint">Scoring models; more raises agreement signal.</span></div>'
+    + '<div class="field"><label>Gate mode</label><select id="bld-gate">' + opts(BUILD_GATES, "weighted") + '</select>'
+      + '<span class="field-hint">How dimension scores combine into pass / fail.</span></div>'
+    + '<div class="field"><label>Persona pool</label><input type="number" id="bld-personapool" min="0" value="5">'
+      + '<span class="field-hint">Reviewer personas; <b>0</b> disables the panel.</span></div>'
     + '</div>'
     + '<div class="checks" style="padding:2px 0 4px"><label><input type="checkbox" id="bld-forensic" checked> Forensic audit</label></div>'
     + '</div>'
-    // report + redteam + llm
-    + '<div class="builder-sec"><div class="bs-title">Report, red team &amp; backend</div><div class="form-grid" style="padding:0 0 6px">'
-    + '<div class="field"><label>Red-team profile</label><select id="bld-rtprofile">' + opts(BUILD_RT_PROFILES, "all_frontier") + '</select></div>'
+    // report
+    + '<div class="builder-sec"><div class="bs-title">Report</div>'
+    + '<div class="field" style="padding:2px 0 4px"><label>Formats</label><div class="checks">' + fmtChecks + '</div>'
+      + '<span class="field-hint">Artifacts written when the run finishes.</span></div>'
+    + '</div>'
+    // red team + backend
+    + '<div class="builder-sec"><div class="bs-title">Red team &amp; backend</div><div class="form-grid" style="padding:0 0 4px">'
+    + '<div class="field"><label>Red-team profile</label><select id="bld-rtprofile">' + opts(BUILD_RT_PROFILES, "all_frontier") + '</select>'
+      + '<span class="field-hint">Attack suite the run probes with.</span></div>'
     + '<div class="field"><label>Provider</label><select class="field" id="bld-provider"><option>loading…</option></select></div>'
     + '<div class="field"><label>Model</label><select class="field" id="bld-model"><option>—</option></select>'
       + '<input type="text" id="bld-model-custom" placeholder="custom model name" style="display:none;margin-top:4px"></div>'
     + '</div>'
     + '<div id="bld-provider-notice"></div>'
-    + '<div class="field" style="padding:2px 0 4px"><label>Report formats</label><div class="checks">' + fmtChecks + '</div></div>'
     + '<div class="checks" style="padding:2px 0 4px"><label><input type="checkbox" id="bld-mock" checked> Mock (offline) when launching</label></div>'
     + '</div>';
 }
