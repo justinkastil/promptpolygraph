@@ -8,46 +8,18 @@ is escaped client-side via esc() before it touches the DOM.
 
 from __future__ import annotations
 
-PAGE: str = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PromptPolygraph Dashboard</title>
-<style>
-  :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --panel-2: #1d212b;
-    --border: #2a2f3a;
-    --text: #e6e9ef;
-    --muted: #98a0ad;
-    --accent: #6aa3ff;
-    --pass: #46c08a;
-    --fail: #e5736b;
-    --warn: #e6b450;
-    --row-hover: #20242f;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    background: var(--bg); color: var(--text); font-family: var(--sans);
-    font-size: 14px; line-height: 1.5;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  header.top {
-    display: flex; align-items: baseline; gap: 14px;
-    padding: 14px 22px; border-bottom: 1px solid var(--border);
-    background: var(--panel); position: sticky; top: 0; z-index: 10;
-  }
-  header.top h1 { font-size: 16px; margin: 0; letter-spacing: .3px; }
-  header.top .sub { color: var(--muted); font-size: 12px; }
-  header.top .spacer { flex: 1; }
-  header.top .crumb { color: var(--muted); font-size: 13px; cursor: pointer; }
-  header.top .crumb:hover { color: var(--text); }
+from promptpolygraph.ui.chrome import THEME_CSS, header_html
+
+# The dashboard is assembled from the shared chrome (theme tokens + header bar)
+# plus its own page-specific CSS and the SPA script. Splitting it this way keeps
+# the dashboard and the Red-Team Arena pinned to one visual identity.
+_HEAD = (
+    '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
+    '<meta charset="utf-8">\n'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+    "<title>PromptPolygraph Dashboard</title>\n"
+    "<style>" + THEME_CSS + r"""
+  /* ── dashboard-specific layout / components (built on the shared tokens) ── */
   .wrap { max-width: 1180px; margin: 0 auto; padding: 22px; }
 
   table { width: 100%; border-collapse: collapse; }
@@ -57,8 +29,6 @@ PAGE: str = r"""<!DOCTYPE html>
   tbody.runs tr:hover { background: var(--row-hover); }
   td.mono, .mono { font-family: var(--mono); font-size: 12px; }
 
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
-          font-weight: 600; border: 1px solid var(--border); color: var(--muted); }
   .pill.pass { color: var(--pass); border-color: rgba(70,192,138,.4); background: rgba(70,192,138,.08); }
   .pill.fail { color: var(--fail); border-color: rgba(229,115,107,.4); background: rgba(229,115,107,.08); }
   .pill.neutral { color: var(--muted); }
@@ -110,13 +80,7 @@ PAGE: str = r"""<!DOCTYPE html>
   .reason { color: var(--warn); font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
 
   .btnrow { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 18px; }
-  .btn { display: inline-block; padding: 7px 13px; border: 1px solid var(--border); border-radius: 8px;
-         background: var(--panel); color: var(--text); cursor: pointer; font-size: 13px; }
-  .btn:hover { background: var(--panel-2); text-decoration: none; }
 
-  .empty { color: var(--muted); padding: 26px 16px; text-align: center; }
-  .err { color: var(--fail); padding: 16px; }
-  .muted { color: var(--muted); }
   .frust { margin: 4px 0 0; padding-left: 18px; }
   .frust li { font-size: 13px; padding: 1px 0; }
   .narr { white-space: pre-wrap; padding: 0 16px 14px; line-height: 1.6; }
@@ -155,23 +119,11 @@ PAGE: str = r"""<!DOCTYPE html>
   .reglist li { padding: 5px 0; border-bottom: 1px dashed var(--border); }
   .reglist .drop { color: var(--fail); font-weight: 700; font-family: var(--mono); }
 
-  /* ── control plane ── */
-  header.top .navtabs { display: flex; gap: 2px; }
-  header.top .navtab { padding: 5px 12px; cursor: pointer; color: var(--muted); border-radius: 7px; font-weight: 600; font-size: 13px; text-decoration: none; }
-  header.top .navtab:hover { background: var(--panel-2); color: var(--text); }
-  header.top .navtab.active { color: var(--text); background: var(--panel-2); }
+  /* ── control plane (base header.top/.navtab/.field/.btn come from THEME_CSS) ── */
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; padding: 14px 16px; }
-  .field { display: flex; flex-direction: column; gap: 4px; }
-  .field label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
-  .field input[type=text], .field input[type=number], .field select, .field textarea {
-    background: var(--bg); color: var(--text); border: 1px solid var(--border);
-    border-radius: 7px; padding: 7px 9px; font-size: 13px; font-family: var(--sans); }
-  .field textarea { resize: vertical; min-height: 38px; }
-  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); }
   .checks { display: flex; flex-wrap: wrap; gap: 10px; padding: 2px 0; }
   .checks label { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 13px; text-transform: none; letter-spacing: 0; }
-  .btn.primary { background: var(--accent); color: #0b0d11; border-color: var(--accent); font-weight: 700; }
-  .btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
+  .checks label input { accent-color: var(--accent); }
   .btn.primary.disabled-btn { opacity: .5; }
   .launchbar { display: flex; align-items: center; gap: 12px; padding: 4px 16px 14px; }
   .runprog { margin: 0 16px 16px; }
@@ -228,18 +180,11 @@ PAGE: str = r"""<!DOCTYPE html>
 </style>
 </head>
 <body>
-<header class="top">
-  <h1>PromptPolygraph</h1>
-  <span class="sub">control plane</span>
-  <span class="navtabs" id="navtabs">
-    <span class="navtab" id="nav-runs" onclick="showRuns()">Runs</span>
-    <span class="navtab" id="nav-newrun" onclick="showNewRun()">New run</span>
-    <span class="navtab" id="nav-studio" onclick="showStudio()">Studio</span>
-    <a class="navtab" id="nav-redteam" href="/redteam">Red Team</a>
-  </span>
-  <span class="spacer"></span>
-  <span class="crumb" id="crumb" onclick="showRuns()">All runs</span>
-</header>
+"""
+)
+
+# The dashboard body: shared header (in-page switchers, links=False) + the SPA.
+_BODY = r"""
 <div class="wrap" id="app"><div class="empty">Loading…</div></div>
 
 <script>
@@ -290,6 +235,92 @@ async function postJSON(url, body) {
     throw new Error(msg);
   }
   return data;
+}
+
+// ---- provider / model dropdowns ----------------------------------------
+// Sourced from GET /api/providers (cached once per page load). Each entry:
+// {id,label,available,reason,needs_key,models,default_model,allow_custom,base_url?}.
+const CUSTOM_OPT = "__custom__";
+let _providersCache = null;
+async function loadProviders() {
+  if (_providersCache) return _providersCache;
+  try { _providersCache = await getJSON("/api/providers"); }
+  catch (e) { _providersCache = []; }
+  if (!Array.isArray(_providersCache)) _providersCache = [];
+  return _providersCache;
+}
+// Build provider + model <select>s. opts: {providerSel, modelSel, customInput,
+// notice, preferLocal}. preferLocal picks ollama first when available.
+async function initProviderSelects(opts) {
+  const provEl = document.getElementById(opts.providerSel);
+  const modelEl = document.getElementById(opts.modelSel);
+  if (!provEl || !modelEl) return;
+  const providers = await loadProviders();
+  const noticeEl = opts.notice ? document.getElementById(opts.notice) : null;
+
+  const anyAvailable = providers.some(p => p.available);
+  if (!providers.length || !anyAvailable) {
+    // Empty state: nothing configured. Surface the inline notice; leave the
+    // selects populated (disabled) so the form still reads sensibly.
+    if (noticeEl) {
+      noticeEl.innerHTML = '<div class="empty" style="padding:8px 16px;text-align:left">'
+        + 'No providers configured — run <span class="mono">polygraph init</span>, set an API key, or start Ollama.'
+        + '</div>';
+    }
+  } else if (noticeEl) {
+    noticeEl.innerHTML = "";
+  }
+
+  // pick a default provider id
+  let defId = "";
+  if (opts.preferLocal) {
+    const local = providers.find(p => p.id === "ollama" && p.available);
+    if (local) defId = local.id;
+  }
+  if (!defId) { const a = providers.find(p => p.available); if (a) defId = a.id; }
+  if (!defId && providers.length) defId = providers[0].id;
+
+  provEl.innerHTML = providers.map(p => {
+    const dis = p.available ? "" : " disabled";
+    const why = p.available ? "" : (p.reason ? " — " + p.reason : " (unavailable)");
+    const sel = (p.id === defId) ? " selected" : "";
+    return '<option value="' + esc(p.id) + '"' + dis + sel + '>' + esc(p.label || p.id) + esc(why) + '</option>';
+  }).join("");
+
+  provEl.onchange = () => fillModelSelect(opts);
+  fillModelSelect(opts);
+}
+function _providerById(id) { return (_providersCache || []).find(p => p.id === id) || null; }
+function fillModelSelect(opts) {
+  const provEl = document.getElementById(opts.providerSel);
+  const modelEl = document.getElementById(opts.modelSel);
+  const customEl = opts.customInput ? document.getElementById(opts.customInput) : null;
+  if (!provEl || !modelEl) return;
+  const p = _providerById(provEl.value);
+  const models = (p && p.models) || [];
+  const def = p && p.default_model;
+  let html = models.map(m =>
+    '<option value="' + esc(m) + '"' + (m === def ? " selected" : "") + '>' + esc(m) + '</option>').join("");
+  if (!models.length) html = '<option value="">(provider default)</option>';
+  if (p && p.allow_custom) html += '<option value="' + CUSTOM_OPT + '">custom…</option>';
+  modelEl.innerHTML = html;
+  modelEl.onchange = () => {
+    if (customEl) customEl.style.display = (modelEl.value === CUSTOM_OPT) ? "" : "none";
+  };
+  if (customEl) customEl.style.display = "none";
+}
+function resolveProvider(providerSelId) {
+  const el = document.getElementById(providerSelId);
+  return (el && el.value) ? el.value : "";
+}
+function resolveModel(modelSelId, customInputId) {
+  const el = document.getElementById(modelSelId);
+  if (!el) return "";
+  if (el.value === CUSTOM_OPT) {
+    const c = customInputId ? document.getElementById(customInputId) : null;
+    return (c && c.value || "").trim();
+  }
+  return el.value || "";
 }
 
 // ---- inline-SVG chart helpers ------------------------------------------
@@ -1516,9 +1547,11 @@ function renderPromptStudio() {
     + '<div class="field" style="grid-column:span 2"><label>Categories (optional, comma-separated)</label>'
       + '<input type="text" id="cg-cats" placeholder="e.g. factual_qa, how_to, refusal"></div>'
     + '<div class="field"><label>Seed (optional)</label><input type="number" id="cg-seed" placeholder="reproducible"></div>'
-    + '<div class="field"><label>Provider</label><input type="text" id="cg-provider" value="anthropic"></div>'
-    + '<div class="field"><label>Model (optional)</label><input type="text" id="cg-model" placeholder="provider default"></div>'
+    + '<div class="field"><label>Provider</label><select class="field" id="cg-provider"><option>loading…</option></select></div>'
+    + '<div class="field"><label>Model</label><select class="field" id="cg-model"><option>—</option></select>'
+      + '<input type="text" id="cg-model-custom" placeholder="custom model name" style="display:none;margin-top:4px"></div>'
     + '</div>'
+    + '<div id="cg-provider-notice"></div>'
     + '<div class="form-grid" style="padding-top:0">'
     + '<div class="field" style="grid-column:1 / -1"><label>Backend</label>'
       + '<div class="checks"><label><input type="checkbox" id="cg-mock" checked> Mock (offline)</label></div>'
@@ -1530,6 +1563,12 @@ function renderPromptStudio() {
     + '<div id="cg-result"></div></div>';
 
   body.innerHTML = gen;
+  // populate provider/model dropdowns from /api/providers; default to the
+  // first available provider (Studio has no IP-locality constraint).
+  initProviderSelects({
+    providerSel: "cg-provider", modelSel: "cg-model", customInput: "cg-model-custom",
+    notice: "cg-provider-notice", preferLocal: false,
+  });
   if (lastCorpusResult) drawCorpusResult(lastCorpusResult);
 }
 
@@ -1577,8 +1616,8 @@ function generateCorpus() {
     per_category: numOrParam("cg-percat"),
     categories: (document.getElementById("cg-cats").value || "").trim(),
     seed: numOrParam("cg-seed"),
-    provider: (document.getElementById("cg-provider").value || "anthropic").trim(),
-    model: (document.getElementById("cg-model").value || "").trim(),
+    provider: resolveProvider("cg-provider"),
+    model: resolveModel("cg-model", "cg-model-custom"),
     mock: document.getElementById("cg-mock").checked ? "1" : "0",
   };
   // same-origin relative URL; every value URL-encoded.
@@ -1861,3 +1900,8 @@ showRuns();
 </body>
 </html>
 """
+
+# Assemble the full self-contained dashboard document: shared <head> (theme),
+# shared header bar (in-page view switchers — this page is the dashboard), then
+# the SPA body/script.
+PAGE: str = _HEAD + header_html("runs", links=False) + _BODY
