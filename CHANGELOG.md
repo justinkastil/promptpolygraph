@@ -6,6 +6,12 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-06-13
+
+### Fixed
+- Package version metadata: `pyproject.toml` now reports the project's actual
+  version (was stale at `0.1.0`). First release published to PyPI.
+
 ## [0.6.5] - 2026-06-11
 
 ### Added
