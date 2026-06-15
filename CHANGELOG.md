@@ -6,6 +6,20 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-06-15
+
+### Fixed
+- LLM judging against the default model: `AnthropicClient` sent `temperature`
+  to `claude-opus-4-8` (the default judge/audit/generation model), which the
+  model rejects with HTTP 400. Every analyzer and audit call failed and fell
+  back to `n/a` scores, so a default `polygraph all` run with real judging
+  produced no rubric scores. The client now omits sampling params
+  (`temperature`/`top_p`/`top_k`) for models that reject them — Opus 4.8/4.7
+  and Fable 5/Mythos 5 — and keeps sending `temperature` to models that still
+  accept it (Opus 4.6, Sonnet 4.6, Haiku 4.5). `OpenAICompatibleClient` is
+  unaffected.
+- `__version__` was stale at `0.1.0`; now tracks the release version.
+
 ## [0.6.6] - 2026-06-13
 
 ### Fixed
