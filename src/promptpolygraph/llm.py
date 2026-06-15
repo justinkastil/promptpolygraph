@@ -14,6 +14,16 @@ from typing import Any, Protocol, runtime_checkable
 
 DEFAULT_MODEL = os.environ.get("POLYGRAPH_MODEL", "claude-opus-4-8")
 
+# Models that removed the sampling parameters (temperature/top_p/top_k):
+# sending any of them returns a 400. Covers Opus 4.8/4.7 and Fable 5 / Mythos 5.
+# Opus 4.6 / Sonnet 4.6 / Haiku 4.5 still accept temperature.
+_NO_SAMPLING_PARAMS = ("opus-4-8", "opus-4-7", "fable-5", "mythos-5")
+
+
+def _accepts_sampling_params(model: str) -> bool:
+    m = (model or "").lower()
+    return not any(tag in m for tag in _NO_SAMPLING_PARAMS)
+
 
 @runtime_checkable
 class LLMClient(Protocol):
@@ -49,13 +59,17 @@ class AnthropicClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
     ) -> str:
-        msg = await self._client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+        }
+        # Only pass temperature to models that still accept sampling params;
+        # Opus 4.8/4.7 and Fable 5 reject it with a 400.
+        if _accepts_sampling_params(self.model):
+            kwargs["temperature"] = temperature
+        msg = await self._client.messages.create(**kwargs)
         # The Messages API can return an empty content array or non-text blocks
         # in rare cases; never index [0] blindly.
         if not msg.content:
