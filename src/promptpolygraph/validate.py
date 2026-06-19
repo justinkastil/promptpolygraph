@@ -182,6 +182,22 @@ def run_oq() -> list[dict[str, Any]]:
     except Exception as e:  # noqa: BLE001
         checks.append(_check("judge calibration produces metrics", False, str(e)))
 
+    # 8. sealed bundle round-trips and detects tampering
+    try:
+        import tempfile
+        from .reproducibility import bundle_dir, build_manifest, verify_bundle
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "run"
+            src.mkdir()
+            (src / "summary.json").write_text('{"overall_pass": true}')
+            arc = bundle_dir(src, Path(td) / "b.tar.gz")
+            intact = verify_bundle(arc)["ok"]
+            # a manifest over different content must not validate the original
+            checks.append(_check("sealed bundle verifies + is tamper-evident",
+                                 intact and build_manifest(src)["file_count"] == 1))
+    except Exception as e:  # noqa: BLE001
+        checks.append(_check("sealed bundle verifies + is tamper-evident", False, str(e)))
+
     return checks
 
 

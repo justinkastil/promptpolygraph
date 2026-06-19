@@ -67,6 +67,12 @@ A CI/CD-integration release plus the first of the 1.0 validation/trust spine.
   reliability; `--guard` calibrates the Llama-Guard judge. New κ /
   classification primitives in `analyze/stats.py` (`cohen_kappa`,
   `fleiss_kappa`, `binary_classification_metrics`).
+- **Sealed run bundles** (`reproducibility.py`, `polygraph bundle` /
+  `polygraph verify`): pack a run's artifacts into a `.tar.gz` with a SHA-256
+  manifest of every file plus tool/dependency provenance; `verify` re-hashes the
+  contents and refuses (non-zero) on any tampered/missing/extra file. An
+  optional HMAC signature (`POLYGRAPH_SIGNING_KEY`) adds origin authentication
+  (stdlib only, no crypto dependency). `unbundle` re-inflates for offline replay.
 
 ### Changed
 - `__version__` now reads from the installed package metadata (was hardcoded).

@@ -306,6 +306,22 @@ tab; **SARIF 2.1.0** renders findings inline on the PR via GitHub/GitLab code sc
 red-team trace carries the `file:line`). `polygraph schema` writes JSON Schemas for editor autocomplete.
 See [docs/CI.md](docs/CI.md).
 
+## Validation & audit (toward 1.0)
+
+For institutions that need to defend the *evaluation itself*, PromptPolygraph ships an evidence layer:
+
+```bash
+polygraph validate --out evidence/   # IQ/OQ/PQ evidence bundle (install, components, reproducibility)
+polygraph references --check         # the OWASP/MITRE-ATLAS technique mapping is pinned (CI-enforced)
+polygraph calibrate --min-f1 0.7     # score the breach judge vs labeled ground truth (precision/recall/F1/κ)
+polygraph manifest --run <id>        # provenance: tool/deps/fingerprints/sources that produced a result
+polygraph bundle --run <id>          # seal artifacts into a tamper-evident .tar.gz (checksum manifest)
+polygraph verify run.polygraph.tar.gz   # re-hash + refuse on any tampered/missing file (HMAC-signable)
+```
+
+These make a run's numbers defensible: provenance-tracked probes, a calibrated judge, reproducible runs,
+confidence intervals, and a self-checking evidence bundle. See [docs/VALIDATION.md](docs/VALIDATION.md).
+
 ## Architecture
 
 One local process: `Corpus → Runner (async pool, timeout/retry/resume) → Adapter → target → Response →

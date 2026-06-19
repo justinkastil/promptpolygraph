@@ -1040,6 +1040,15 @@ def build_parser() -> argparse.ArgumentParser:
                          help="write a provenance manifest for a run (what produced the result)")
     pmf.add_argument("--run", required=True)
 
+    pbun = sub.add_parser("bundle", parents=[common],
+                          help="seal a run's artifacts into a tamper-evident .tar.gz with a checksum manifest")
+    pbun.add_argument("--run", required=True)
+    pbun.add_argument("--out", help="archive path (default: <run_dir>.polygraph.tar.gz)")
+
+    pver = sub.add_parser("verify", parents=[common],
+                          help="verify a sealed run bundle against its manifest (refuses on tamper)")
+    pver.add_argument("path", help="path to a .polygraph.tar.gz bundle")
+
     pcal = sub.add_parser("calibrate", parents=[common],
                           help="score the breach judge against the labeled ground-truth set")
     pcal.add_argument("--guard", action="store_true", help="calibrate the Llama-Guard judge instead")
@@ -1110,6 +1119,32 @@ def cmd_validate_config(cfg: Config, args) -> int:
             for e in rres["errors"]:
                 print(f"  ✗ {e}")
     return 0 if ok else 1
+
+
+def cmd_bundle(cfg: Config, args) -> int:
+    from .reproducibility import bundle_dir
+
+    rd = _run_dir(cfg, args.run)
+    if not rd.is_dir():
+        print(_color(f"no artifacts for run {args.run} at {rd}", "red"))
+        return 1
+    path = bundle_dir(rd, args.out)
+    print(_color(f"sealed bundle: {path}", "green"))
+    print(_color("  contains a SHA-256 manifest of every file; set POLYGRAPH_SIGNING_KEY to also sign", "dim"))
+    return 0
+
+
+def cmd_verify(cfg: Config, args) -> int:
+    from .reproducibility import verify_bundle
+
+    res = verify_bundle(args.path)
+    if res["ok"]:
+        print(_color(f"verify OK — {res['reason']} ({res['files_checked']} files)", "green"))
+        return 0
+    print(_color(f"verify FAILED — {res['reason']}", "red"))
+    for m in res["mismatches"][:20]:
+        print(f"  ✗ {m}")
+    return 1
 
 
 def cmd_calibrate(cfg: Config, args) -> int:
@@ -1256,6 +1291,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_manifest(cfg, args)
     elif args.cmd == "calibrate":
         return cmd_calibrate(cfg, args)
+    elif args.cmd == "bundle":
+        return cmd_bundle(cfg, args)
+    elif args.cmd == "verify":
+        return cmd_verify(cfg, args)
     elif args.cmd == "validate-config":
         return cmd_validate_config(cfg, args)
     elif args.cmd == "schema":
