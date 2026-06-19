@@ -161,6 +161,13 @@ a bare install is never broken by a missing extra.
 For an institution to trust the data PromptPolygraph reports, these properties
 are being formalized for the 1.0 release (tracked in the v1.0 validation epic):
 
+- **Statistical rigor** — *(0.7)* ASR and pass/assertion rates carry Wilson
+  confidence intervals; continuous aggregates carry seeded bootstrap intervals;
+  run-over-run regressions are significance-tested (two-sample test,
+  Benjamini-Hochberg-corrected); the gate can decline to fail inside the noise
+  band (`analyze.respect_ci`). Sample-size warnings flag under-powered
+  categories. (`analyze/stats.py`.) Variance decomposition + power planning are
+  still to come.
 - **Provenance** — every probe/source/dataset carries origin, license, version,
   and checksum; a per-run provenance manifest records exactly what was used.
 - **Reference integrity** — OWASP/ATLAS/technique mappings cite pinned source
@@ -169,9 +176,13 @@ are being formalized for the 1.0 release (tracked in the v1.0 validation epic):
   LLM-sampling nondeterminism; byte-stable mock mode; re-run diffing.
 - **Judge calibration** — breach-judge and rubric scorers validated against
   labeled ground truth with inter-rater agreement and error rates published.
-- **Statistical rigor** — ASR with confidence intervals; significance testing on
-  run-over-run regressions; sample-size guidance.
 - **Integrity of record** — versioned report schema, immutable run records, and
   optional signed/verifiable report artifacts with a tamper-evident audit log.
+
+A **CI-gate surface** *(0.7)* exposes the above to a pipeline: machine-readable
+JUnit + SARIF output (`report/junit.py`, `report/sarif.py`), a one-step
+regression gate with PR feedback (`ci/`), fail-fast config validation +
+JSON-schema generation (`schema_gen.py`), and pipeline scaffolding
+(`scaffold.py`). See `docs/CI.md`.
 
 See `docs/REDTEAM_LOCAL.md` for running attacker/judge models locally.

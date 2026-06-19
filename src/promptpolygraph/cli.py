@@ -1027,6 +1027,15 @@ def build_parser() -> argparse.ArgumentParser:
                          help="write JSON Schemas for config + rubric (editor autocomplete / CI)")
     psc.add_argument("--out", default="schemas", help="output directory (default: schemas/)")
 
+    from .scaffold import providers as _ci_providers
+    psci = sub.add_parser("scaffold-ci", parents=[common],
+                          help="write a starter CI pipeline (gate + JUnit/SARIF + PR feedback)")
+    psci.add_argument("provider", choices=_ci_providers(),
+                      help="github | gitlab | jenkins | precommit")
+    psci.add_argument("--config-path", dest="config_path", default="config.yaml",
+                      help="config path the generated pipeline references")
+    psci.add_argument("--force", action="store_true", help="overwrite an existing file")
+
     return parser
 
 
@@ -1060,6 +1069,19 @@ def cmd_validate_config(cfg: Config, args) -> int:
     return 0 if ok else 1
 
 
+def cmd_scaffold_ci(cfg: Config, args) -> int:
+    from .scaffold import scaffold_ci
+
+    res = scaffold_ci(args.provider, config=args.config_path, force=args.force)
+    if res["skipped"]:
+        print(_color(f"{res['path']} exists — pass --force to overwrite", "yellow"))
+        return 0
+    print(_color(f"wrote {res['path']}", "green"))
+    print(_color(f"edit the config path ({args.config_path}) and drop --mock once an adapter "
+                 "points at your system", "dim"))
+    return 0
+
+
 def cmd_schema(cfg: Config, args) -> int:
     from .schema_gen import write_schemas
 
@@ -1079,6 +1101,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_validate_config(Config(), args)
     if args.cmd == "schema":
         return cmd_schema(Config(), args)
+    if args.cmd == "scaffold-ci":
+        return cmd_scaffold_ci(Config(), args)
     cfg = _load_cfg(args)
     if args.cmd == "init":
         return cmd_init(cfg, args)
