@@ -45,6 +45,13 @@ A CI/CD-integration release plus the first of the 1.0 validation/trust spine.
 - **Rubric-vs-persona discordance scatter** in the HTML report: per-case rubric
   score vs persona-perceived value with threshold quadrants; the lower-right
   quadrant (high score, low trust) is highlighted as the actionable off-diagonal.
+- **Provenance + reference integrity** (`provenance.py`): a per-run provenance
+  manifest (tool/version/deps, fingerprints, and — for red-team — probe sources
+  with their package versions and the pinned standards mapping); auto-written
+  beside red-team runs and via `polygraph manifest --run <id>`. The
+  technique→OWASP/ATLAS mapping is pinned behind a checksummed lock
+  (`data/references.lock.json`); `polygraph references --check` (run in CI)
+  fails on drift or any unmapped technique. The wheel now ships the lock.
 
 ### Changed
 - `__version__` now reads from the installed package metadata (was hardcoded).

@@ -811,6 +811,9 @@ def cmd_redteam(cfg: Config, args) -> int:
     # always keep a machine-readable copy
     if "json" not in formats:
         _save_json(rd / "redteam.json", render_json(report))
+    # provenance manifest: what produced this result (sources+versions, pinned mapping)
+    from . import provenance as P
+    _save_json(rd / "provenance.json", P.redteam_provenance(report, sources=sources))
 
     st = report.stats or {}
     print(_color(f"\nverdict: {st.get('breaches', 0)}/{st.get('attacks', 0)} attacks breached "
@@ -1027,6 +1030,15 @@ def build_parser() -> argparse.ArgumentParser:
                          help="write JSON Schemas for config + rubric (editor autocomplete / CI)")
     psc.add_argument("--out", default="schemas", help="output directory (default: schemas/)")
 
+    pmf = sub.add_parser("manifest", parents=[common],
+                         help="write a provenance manifest for a run (what produced the result)")
+    pmf.add_argument("--run", required=True)
+
+    pref = sub.add_parser("references", parents=[common],
+                          help="check or update the pinned OWASP/ATLAS technique mapping")
+    pref.add_argument("--check", action="store_true", help="fail if the live mapping drifted from the lock")
+    pref.add_argument("--write", action="store_true", help="rewrite the reference lock from the current mapping")
+
     from .scaffold import providers as _ci_providers
     psci = sub.add_parser("scaffold-ci", parents=[common],
                           help="write a starter CI pipeline (gate + JUnit/SARIF + PR feedback)")
@@ -1069,6 +1081,41 @@ def cmd_validate_config(cfg: Config, args) -> int:
     return 0 if ok else 1
 
 
+def cmd_manifest(cfg: Config, args) -> int:
+    from . import provenance as P
+
+    store = _store(cfg)
+    meta = store.get_run(args.run)
+    if meta is None:
+        print(_color(f"no such run: {args.run}", "red"))
+        return 1
+    manifest = P.eval_provenance(meta, cfg)
+    out = _run_dir(cfg, args.run) / "provenance.json"
+    _save_json(out, manifest)
+    print(f"  provenance: {out}")
+    tp = manifest["tool"]
+    print(_color(f"  {tp['tool']} {tp['version']} · python {tp['python']} · "
+                 f"{len(tp['dependencies'])} deps pinned", "dim"))
+    return 0
+
+
+def cmd_references(cfg: Config, args) -> int:
+    from . import provenance as P
+
+    if args.write:
+        p = P.write_reference_lock()
+        print(_color(f"wrote reference lock: {p}", "green"))
+        return 0
+    res = P.check_reference_integrity()
+    if res["ok"]:
+        print(_color(f"reference integrity OK — {res['reason']} ({res['actual'][:12]})", "green"))
+        return 0
+    print(_color(f"reference integrity FAILED — {res['reason']}", "red"))
+    if res.get("expected"):
+        print(f"  expected {res['expected'][:12]}, got {res['actual'][:12]}")
+    return 1
+
+
 def cmd_scaffold_ci(cfg: Config, args) -> int:
     from .scaffold import scaffold_ci
 
@@ -1103,6 +1150,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_schema(Config(), args)
     if args.cmd == "scaffold-ci":
         return cmd_scaffold_ci(Config(), args)
+    if args.cmd == "references":
+        return cmd_references(Config(), args)
     cfg = _load_cfg(args)
     if args.cmd == "init":
         return cmd_init(cfg, args)
@@ -1143,6 +1192,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_redteam(cfg, args)
     elif args.cmd == "all":
         return cmd_all(cfg, args)
+    elif args.cmd == "manifest":
+        return cmd_manifest(cfg, args)
     elif args.cmd == "validate-config":
         return cmd_validate_config(cfg, args)
     elif args.cmd == "schema":

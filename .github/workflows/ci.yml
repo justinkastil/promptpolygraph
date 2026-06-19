@@ -28,6 +28,9 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+      - name: Reference integrity (OWASP/ATLAS mapping pinned)
+        run: polygraph references --check
+
       - name: Offline smoke (default example, no API key)
         run: |
           polygraph all --config examples/everyday_assistant/config.yaml \
@@ -53,7 +56,8 @@ jobs:
           names = zipfile.ZipFile(whl).namelist()
           personas = [n for n in names if n.startswith("promptpolygraph/data/personas/") and n.endswith(".yaml")]
           assert len(personas) >= 12, f"persona data missing from wheel: {personas}"
-          print(f"ok: {len(personas)} persona files packaged in {whl}")
+          assert "promptpolygraph/data/references.lock.json" in names, "reference lock missing from wheel"
+          print(f"ok: {len(personas)} persona files + reference lock packaged in {whl}")
           PY
       - uses: actions/upload-artifact@v4
         with:
