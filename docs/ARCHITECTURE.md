@@ -179,6 +179,11 @@ are being formalized for the 1.0 release (tracked in the v1.0 validation epic):
 - **Integrity of record** — versioned report schema, immutable run records, and
   optional signed/verifiable report artifacts with a tamper-evident audit log.
 
+A **validation package** *(0.7)* ties these together: `polygraph validate` runs
+IQ/OQ/PQ and emits a regenerable evidence bundle (`validate.py`); sealed run
+bundles with tamper-evident verify provide the audit artifact
+(`reproducibility.py`). See `docs/VALIDATION.md` and `docs/THREAT_MODEL.md`.
+
 A **CI-gate surface** *(0.7)* exposes the above to a pipeline: machine-readable
 JUnit + SARIF output (`report/junit.py`, `report/sarif.py`), a one-step
 regression gate with PR feedback (`ci/`), fail-fast config validation +

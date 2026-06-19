@@ -73,6 +73,10 @@ A CI/CD-integration release plus the first of the 1.0 validation/trust spine.
   contents and refuses (non-zero) on any tampered/missing/extra file. An
   optional HMAC signature (`POLYGRAPH_SIGNING_KEY`) adds origin authentication
   (stdlib only, no crypto dependency). `unbundle` re-inflates for offline replay.
+- **Trust docs**: `docs/THREAT_MODEL.md` (trust boundaries, assets, risks +
+  controls: adversarial content, code-dive egress, the assertion sandbox,
+  integrity/signing, reference drift, supply chain) and `SECURITY.md`
+  (disclosure + safe use).
 
 ### Changed
 - `__version__` now reads from the installed package metadata (was hardcoded).
