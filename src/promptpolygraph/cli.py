@@ -278,6 +278,70 @@ def cmd_analyze(cfg: Config, run_id: str) -> dict:
     return summary
 
 
+def _resolve_baseline_summary(cfg: Config, store, run_id: str, spec: str):
+    """Resolve a baseline spec into a (summary, label). Spec is a run id,
+    ``rolling:N`` (median of the N most-recent comparable runs), or ``HEAD``
+    (the most-recent comparable run before this one)."""
+    spec = (spec or "").strip()
+    meta = store.get_run(run_id)
+    fp = meta.corpus_fingerprint if meta else None
+
+    def _comparable_prior():
+        prior = [m for m in store.list_runs()
+                 if m.run_id != run_id and (fp is None or m.corpus_fingerprint == fp)]
+        prior.sort(key=lambda m: m.created_at or "", reverse=True)
+        return prior
+
+    if spec.startswith("rolling:"):
+        n = int(spec.split(":", 1)[1] or "5")
+        summaries = []
+        for m in _comparable_prior()[:n]:
+            p = _run_dir(cfg, m.run_id) / "summary.json"
+            if p.exists():
+                summaries.append(json.loads(p.read_text()))
+        return A.rolling_baseline_summary(summaries), f"rolling:{len(summaries)}"
+    if spec.upper() == "HEAD":
+        prior = _comparable_prior()
+        if not prior:
+            return {}, "HEAD(none)"
+        p = _run_dir(cfg, prior[0].run_id) / "summary.json"
+        return (json.loads(p.read_text()) if p.exists() else {}), prior[0].run_id[:8]
+    # explicit run id
+    p = _run_dir(cfg, spec) / "summary.json"
+    return (json.loads(p.read_text()) if p.exists() else {}), spec[:8]
+
+
+def _ci_feedback(cfg: Config, args, summary: dict) -> None:
+    """Emit GitHub annotations / a PR-comment / a job summary for an analyze --ci
+    run, computing the baseline diff when --baseline is given."""
+    from . import ci as _ci
+
+    baseline_diff = None
+    spec = getattr(args, "baseline", None)
+    if spec:
+        store = _store(cfg)
+        baseline, label = _resolve_baseline_summary(cfg, store, args.run, spec)
+        if baseline:
+            alpha = float(getattr(cfg.analyze, "alpha", 0.05) or 0.05)
+            conf = float(getattr(cfg.analyze, "confidence", 0.95) or 0.95)
+            baseline_diff = A.diff_baseline(summary, baseline, alpha=alpha, confidence=conf)
+            _save_json(_run_dir(cfg, args.run) / "ci_baseline_diff.json", baseline_diff)
+            print(_color(f"baseline {label}: {len(baseline_diff['regressions'])} regression(s), "
+                         f"{len(baseline_diff.get('significant_regressions', []))} significant", "dim"))
+
+    if getattr(args, "github_annotations", False):
+        n = _ci.emit_annotations(summary, baseline_diff)
+        md = _ci.pr_comment_markdown(summary, baseline_diff, run_id=args.run)
+        if _ci.write_step_summary(md):
+            print(_color("wrote GitHub job summary", "dim"))
+        print(_color(f"emitted {n} annotation(s)", "dim"))
+
+    if getattr(args, "pr_comment", None):
+        md = _ci.pr_comment_markdown(summary, baseline_diff, run_id=args.run)
+        Path(args.pr_comment).write_text(md)
+        print(f"  pr-comment: {args.pr_comment}")
+
+
 def cmd_audit(cfg: Config, run_id: str) -> dict:
     store = _store(cfg)
     cases = store.get_cases(run_id)
@@ -856,6 +920,11 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--run", required=True)
     pa.add_argument("--judges", type=int)
     pa.add_argument("--ci", action="store_true", help="exit non-zero if the gate fails")
+    pa.add_argument("--baseline", help="baseline for regression check: a run id, rolling:N, or HEAD")
+    pa.add_argument("--github-annotations", action="store_true",
+                    help="emit GitHub Actions ::error/::warning annotations + job summary")
+    pa.add_argument("--pr-comment", dest="pr_comment", metavar="PATH",
+                    help="write a markdown PR-comment summary to this path")
 
     pu = sub.add_parser("audit", parents=[common], help="persona + forensic audit of a run")
     pu.add_argument("--run", required=True)
@@ -1019,6 +1088,9 @@ def main(argv: list[str] | None = None) -> int:
         cmd_generate(cfg, args)
     elif args.cmd == "analyze":
         summary = cmd_analyze(cfg, args.run)
+        if getattr(args, "ci", False) or getattr(args, "github_annotations", False) \
+                or getattr(args, "pr_comment", None) or getattr(args, "baseline", None):
+            _ci_feedback(cfg, args, summary)
         return A.ci_exit_code(summary) if getattr(args, "ci", False) else 0
     elif args.cmd == "audit":
         cmd_audit(cfg, args.run)
