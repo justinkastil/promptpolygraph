@@ -95,6 +95,11 @@ class AnalyzeConfig(BaseModel):
     temperature: float = 0.0
     dimension_weights: dict[str, float] = Field(default_factory=dict)  # weighted-gate dims
     gate_mode: str = "strict"  # strict (every applicable dim >= threshold) | weighted
+    # Statistical rigor (additive; defaults preserve the strict point-estimate gate).
+    confidence: float = 0.95        # confidence level for reported intervals
+    respect_ci: bool = False        # when True the gate returns "inconclusive" (not fail)
+                                    # if the threshold falls inside a metric's CI band
+    min_sample_warn: int = 30       # warn when a category/metric is graded on fewer cases
 
 
 class RedTeamConfig(BaseModel):

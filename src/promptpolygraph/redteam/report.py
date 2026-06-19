@@ -61,6 +61,14 @@ def _asr_pct(report: RedTeamReport) -> str:
     return f"{asr * 100:.1f}%"
 
 
+def _asr_ci_pct(report: RedTeamReport) -> str | None:
+    """Return the ASR 95% CI as a percentage range, e.g. '12.1%–58.4%', or None."""
+    ci = (report.stats or {}).get("asr_ci")
+    if not ci or ci.get("ci_lower") is None:
+        return None
+    return f"{ci['ci_lower'] * 100:.1f}%–{ci['ci_upper'] * 100:.1f}%"
+
+
 def _owasp_coverage(report: RedTeamReport) -> list[dict[str, Any]]:
     """Return a list of {owasp, tested, breached} for every catalog OWASP category."""
     st = report.stats or {}
@@ -112,6 +120,9 @@ def render_md(report: RedTeamReport) -> str:
     out.append(f"| Breaches | {breaches} |")
     out.append(f"| Defended | {defended} |")
     out.append(f"| **Attack Success Rate (ASR)** | **{_asr_pct(report)}** |")
+    _ci = _asr_ci_pct(report)
+    if _ci:
+        out.append(f"| ASR 95% CI (Wilson) | {_ci} |")
     out.append("")
 
     # External sources note.
@@ -247,6 +258,7 @@ td.num { text-align:right; }
   padding:.6rem 1rem; min-width:110px; }
 .asr-stat .label { font-size:.75rem; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
 .asr-stat .value { font-size:1.4rem; font-weight:700; margin-top:.1rem; }
+.asr-stat .ci { font-size:.72rem; color:var(--muted); margin-top:.15rem; }
 .asr-stat.asr-highlight { border-color:var(--high); }
 .asr-stat.asr-highlight .value { color:var(--high); }
 .tag { display:inline-block; font-size:.75rem; padding:.1rem .45rem; border-radius:4px;
@@ -294,8 +306,10 @@ def render_html(report: RedTeamReport) -> str:
     h.append(f"<div class='asr-stat'><div class='label'>Attacks</div><div class='value'>{_e(attacks)}</div></div>")
     h.append(f"<div class='asr-stat'><div class='label'>Breaches</div><div class='value'>{_e(breaches)}</div></div>")
     h.append(f"<div class='asr-stat'><div class='label'>Defended</div><div class='value'>{_e(defended)}</div></div>")
+    _ci = _asr_ci_pct(report)
+    ci_sub = f"<div class='ci'>95% CI {_e(_ci)}</div>" if _ci else ""
     h.append(f"<div class='asr-stat asr-highlight'><div class='label'>Attack Success Rate</div>"
-             f"<div class='value'>{_e(_asr_pct(report))}</div></div>")
+             f"<div class='value'>{_e(_asr_pct(report))}</div>{ci_sub}</div>")
     h.append("</div>")
 
     # External sources note.
@@ -390,5 +404,10 @@ def render_json(report: RedTeamReport) -> dict:
         breaches = st.get("breaches", 0)
         asr = breaches / attacks if attacks else 0.0
     d["asr"] = float(asr)
+    asr_ci = st.get("asr_ci")
+    if asr_ci is None:
+        from ..analyze.stats import proportion_ci
+        asr_ci = proportion_ci(st.get("breaches", 0), st.get("attacks", len(report.attempts)))
+    d["asr_ci"] = asr_ci
     d["coverage"] = _owasp_coverage(report)
     return d

@@ -1,0 +1,378 @@
+"""Statistical rigor for evaluation + red-team metrics.
+
+Point estimates are not enough to stake a release on. This module turns counts
+and samples into *defensible* claims: a proportion (attack-success rate, pass
+rate, breach rate) carries a Wilson-score confidence interval; a continuous
+aggregate (mean dimension score, agreement) carries a bootstrap interval; and a
+run-over-run change is tested for significance with multiple-comparison
+correction rather than flagged off a fixed dead-band.
+
+Everything here is pure-Python with deterministic output (the bootstrap is
+seeded) so it runs offline, needs no scientific stack, and reproduces byte-for-
+byte. The numerical pieces (inverse-normal, Student-t two-sided p via the
+regularized incomplete beta) are standard and unit-tested against known values.
+
+A metric-with-uncertainty is the small dict shape the rest of the engine
+consumes::
+
+    {"value": 0.12, "ci_lower": 0.055, "ci_upper": 0.235, "n": 50,
+     "method": "wilson", "confidence": 0.95}
+"""
+
+from __future__ import annotations
+
+import math
+import random
+from statistics import mean as _mean
+from typing import Callable, Sequence
+
+__all__ = [
+    "norm_ppf",
+    "norm_cdf",
+    "z_for_confidence",
+    "wilson_interval",
+    "proportion_ci",
+    "bootstrap_ci",
+    "mean_ci",
+    "two_proportion_ztest",
+    "welch_ttest",
+    "mcnemar_test",
+    "benjamini_hochberg",
+    "gate_band_decision",
+]
+
+
+# ── numerical primitives ─────────────────────────────────────────────────────
+
+def norm_cdf(x: float) -> float:
+    """Standard-normal CDF via the error function."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def norm_ppf(p: float) -> float:
+    """Inverse standard-normal CDF (quantile) — Acklam's rational approximation.
+
+    Accurate to ~1e-9 over the open interval; clamps the boundaries.
+    """
+    if p <= 0.0:
+        return -math.inf
+    if p >= 1.0:
+        return math.inf
+    # coefficients
+    a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+         1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00]
+    b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+         6.680131188771972e+01, -1.328068155288572e+01]
+    c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+         -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00]
+    d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+         3.754408661907416e+00]
+    plow, phigh = 0.02425, 1 - 0.02425
+    if p < plow:
+        q = math.sqrt(-2 * math.log(p))
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / \
+               ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1)
+    if p > phigh:
+        q = math.sqrt(-2 * math.log(1 - p))
+        return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / \
+                ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1)
+    q = p - 0.5
+    r = q * q
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / \
+           (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1)
+
+
+def z_for_confidence(confidence: float = 0.95) -> float:
+    """Two-sided z multiplier for a confidence level (0.95 -> ~1.959964)."""
+    confidence = min(max(confidence, 1e-6), 1 - 1e-9)
+    return norm_ppf(1 - (1 - confidence) / 2.0)
+
+
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction for the incomplete beta function (Lentz's method)."""
+    MAXIT, EPS, FPMIN = 200, 3.0e-12, 1.0e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    if abs(d) < FPMIN:
+        d = FPMIN
+    d = 1.0 / d
+    h = d
+    for m in range(1, MAXIT + 1):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < FPMIN:
+            d = FPMIN
+        c = 1.0 + aa / c
+        if abs(c) < FPMIN:
+            c = FPMIN
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        if abs(d) < FPMIN:
+            d = FPMIN
+        c = 1.0 + aa / c
+        if abs(c) < FPMIN:
+            c = FPMIN
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < EPS:
+            break
+    return h
+
+
+def _betai(a: float, b: float, x: float) -> float:
+    """Regularized incomplete beta function I_x(a, b)."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    lbeta = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+    bt = math.exp(lbeta + a * math.log(x) + b * math.log(1.0 - x))
+    if x < (a + 1.0) / (a + b + 2.0):
+        return bt * _betacf(a, b, x) / a
+    return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+
+
+def _t_two_sided_p(t: float, df: float) -> float:
+    """Two-sided p-value for a Student-t statistic with df degrees of freedom."""
+    if df <= 0:
+        return 1.0
+    t = abs(t)
+    if t == 0.0:
+        return 1.0
+    return _betai(df / 2.0, 0.5, df / (df + t * t))
+
+
+# ── proportion intervals ─────────────────────────────────────────────────────
+
+def wilson_interval(successes: int, n: int, confidence: float = 0.95) -> tuple[float, float]:
+    """Wilson score interval for a binomial proportion.
+
+    Preferred over the normal (Wald) interval: it never leaves [0, 1] and stays
+    sensible at the extremes and for small n — exactly the regimes red-team ASR
+    and refusal rates live in.
+    """
+    if n <= 0:
+        return (0.0, 0.0)
+    z = z_for_confidence(confidence)
+    phat = successes / n
+    denom = 1 + z * z / n
+    centre = (phat + z * z / (2 * n)) / denom
+    half = (z / denom) * math.sqrt(phat * (1 - phat) / n + z * z / (4 * n * n))
+    return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+def proportion_ci(successes: int, n: int, confidence: float = 0.95) -> dict:
+    """A proportion with its Wilson confidence interval, as the standard dict."""
+    lo, hi = wilson_interval(successes, n, confidence)
+    return {
+        "value": round(successes / n, 6) if n else 0.0,
+        "ci_lower": round(lo, 6),
+        "ci_upper": round(hi, 6),
+        "n": int(n),
+        "method": "wilson",
+        "confidence": confidence,
+    }
+
+
+# ── continuous intervals ─────────────────────────────────────────────────────
+
+def bootstrap_ci(
+    values: Sequence[float],
+    *,
+    statistic: Callable[[Sequence[float]], float] = _mean,
+    confidence: float = 0.95,
+    n_resamples: int = 2000,
+    seed: int = 1234,
+) -> dict:
+    """Nonparametric percentile-bootstrap CI for a sample statistic.
+
+    Deterministic for a fixed seed so runs reproduce byte-for-byte. Falls back
+    to the point value with a zero-width band for n < 2.
+    """
+    vals = [float(v) for v in values if v is not None]
+    n = len(vals)
+    if n == 0:
+        return {"value": None, "ci_lower": None, "ci_upper": None, "n": 0, "method": "bootstrap"}
+    point = float(statistic(vals))
+    if n < 2:
+        return {"value": round(point, 6), "ci_lower": round(point, 6),
+                "ci_upper": round(point, 6), "n": n, "method": "bootstrap"}
+    rng = random.Random(seed)
+    stats: list[float] = []
+    for _ in range(n_resamples):
+        sample = [vals[rng.randrange(n)] for _ in range(n)]
+        stats.append(float(statistic(sample)))
+    stats.sort()
+    alpha = (1 - confidence) / 2.0
+    lo = stats[max(0, int(math.floor(alpha * n_resamples)))]
+    hi = stats[min(n_resamples - 1, int(math.ceil((1 - alpha) * n_resamples)) - 1)]
+    return {
+        "value": round(point, 6),
+        "ci_lower": round(lo, 6),
+        "ci_upper": round(hi, 6),
+        "n": n,
+        "method": "bootstrap",
+        "confidence": confidence,
+    }
+
+
+def mean_ci(values: Sequence[float], *, confidence: float = 0.95) -> dict:
+    """Student-t confidence interval for a sample mean (parametric)."""
+    vals = [float(v) for v in values if v is not None]
+    n = len(vals)
+    if n == 0:
+        return {"value": None, "ci_lower": None, "ci_upper": None, "n": 0, "method": "t"}
+    m = _mean(vals)
+    if n < 2:
+        return {"value": round(m, 6), "ci_lower": round(m, 6), "ci_upper": round(m, 6),
+                "n": n, "method": "t"}
+    var = sum((v - m) ** 2 for v in vals) / (n - 1)
+    se = math.sqrt(var / n)
+    # invert the t two-sided p to get the critical t for this confidence.
+    tcrit = _t_crit(confidence, n - 1)
+    half = tcrit * se
+    return {"value": round(m, 6), "ci_lower": round(m - half, 6),
+            "ci_upper": round(m + half, 6), "n": n, "method": "t", "confidence": confidence}
+
+
+def _t_crit(confidence: float, df: int) -> float:
+    """Critical two-sided t value via bisection on the t two-sided p-value."""
+    target = 1 - confidence
+    lo, hi = 0.0, 1000.0
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        if _t_two_sided_p(mid, df) > target:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+# ── significance tests ───────────────────────────────────────────────────────
+
+def two_proportion_ztest(s1: int, n1: int, s2: int, n2: int) -> dict:
+    """Two-proportion z-test (pooled). delta = p2 - p1 (b vs a).
+
+    Use for ASR / pass-rate change between two independent runs.
+    """
+    if n1 <= 0 or n2 <= 0:
+        return {"delta": 0.0, "z": 0.0, "p_value": 1.0, "n1": n1, "n2": n2}
+    p1, p2 = s1 / n1, s2 / n2
+    pool = (s1 + s2) / (n1 + n2)
+    se = math.sqrt(pool * (1 - pool) * (1 / n1 + 1 / n2))
+    if se == 0:
+        z = 0.0
+        p = 1.0
+    else:
+        z = (p2 - p1) / se
+        p = 2 * (1 - norm_cdf(abs(z)))
+    return {"delta": round(p2 - p1, 6), "z": round(z, 6), "p_value": round(p, 6),
+            "p1": round(p1, 6), "p2": round(p2, 6), "n1": n1, "n2": n2}
+
+
+def welch_ttest(a: Sequence[float], b: Sequence[float]) -> dict:
+    """Welch's unequal-variance t-test. delta = mean(b) - mean(a)."""
+    a = [float(x) for x in a if x is not None]
+    b = [float(x) for x in b if x is not None]
+    na, nb = len(a), len(b)
+    if na < 2 or nb < 2:
+        return {"delta": (_mean(b) - _mean(a)) if (a and b) else 0.0,
+                "t": 0.0, "df": 0.0, "p_value": 1.0, "se": 0.0, "na": na, "nb": nb}
+    ma, mb = _mean(a), _mean(b)
+    va = sum((x - ma) ** 2 for x in a) / (na - 1)
+    vb = sum((x - mb) ** 2 for x in b) / (nb - 1)
+    se = math.sqrt(va / na + vb / nb)
+    if se == 0:
+        return {"delta": round(mb - ma, 6), "t": 0.0, "df": 0.0, "p_value": 1.0,
+                "se": 0.0, "na": na, "nb": nb}
+    t = (mb - ma) / se
+    df = (va / na + vb / nb) ** 2 / (
+        (va / na) ** 2 / (na - 1) + (vb / nb) ** 2 / (nb - 1)
+    )
+    p = _t_two_sided_p(t, df)
+    return {"delta": round(mb - ma, 6), "t": round(t, 6), "df": round(df, 4),
+            "p_value": round(p, 6), "se": round(se, 6), "na": na, "nb": nb}
+
+
+def mcnemar_test(b: int, c: int) -> dict:
+    """McNemar's test for paired binary outcomes (same items, two conditions).
+
+    `b` = items that passed before and fail now; `c` = failed before, pass now.
+    Uses the exact binomial p-value (robust for the small discordant counts a
+    per-case pass/fail diff produces).
+    """
+    n = b + c
+    if n == 0:
+        return {"b": b, "c": c, "p_value": 1.0, "statistic": 0.0}
+    # exact two-sided binomial test at p=0.5 over the discordant pairs.
+    k = min(b, c)
+    tail = sum(math.comb(n, i) for i in range(0, k + 1)) / (2 ** n)
+    p = min(1.0, 2 * tail)
+    stat = (abs(b - c) - 1) ** 2 / n if n > 0 else 0.0  # continuity-corrected chi-sq
+    return {"b": b, "c": c, "p_value": round(p, 6), "statistic": round(stat, 6)}
+
+
+def benjamini_hochberg(pvalues: Sequence[float], alpha: float = 0.05) -> dict:
+    """Benjamini-Hochberg FDR control across many simultaneous tests.
+
+    Returns rejection flags (in the input order) and BH-adjusted q-values. This
+    is what stops a multi-dimension regression sweep from crying wolf: testing
+    many dimensions inflates false positives, BH corrects for it.
+    """
+    m = len(pvalues)
+    if m == 0:
+        return {"rejected": [], "qvalues": [], "alpha": alpha, "n_significant": 0}
+    order = sorted(range(m), key=lambda i: pvalues[i])
+    q = [0.0] * m
+    prev = 1.0
+    # step-up: walk from largest p to smallest, enforcing monotone q-values.
+    for rank in range(m, 0, -1):
+        idx = order[rank - 1]
+        val = min(prev, pvalues[idx] * m / rank)
+        q[idx] = val
+        prev = val
+    rejected = [q[i] <= alpha for i in range(m)]
+    return {"rejected": rejected, "qvalues": [round(x, 6) for x in q],
+            "alpha": alpha, "n_significant": sum(rejected)}
+
+
+# ── gate helpers ─────────────────────────────────────────────────────────────
+
+def gate_band_decision(
+    ci_lower: float | None,
+    ci_upper: float | None,
+    threshold: float,
+    *,
+    direction: str = "above",
+) -> str:
+    """Gate verdict that respects the confidence band.
+
+    `direction="above"` means the metric should be >= threshold (e.g. a quality
+    dimension); `"below"` means it should be <= threshold (e.g. ASR). The
+    verdict is:
+
+    - ``pass``         — the whole interval is on the good side of the threshold.
+    - ``fail``         — the whole interval is on the bad side.
+    - ``inconclusive`` — the threshold falls inside the interval: the run has not
+      gathered enough evidence to call it either way. CI should warn, not fail,
+      so noise does not flip a build red.
+    """
+    if ci_lower is None or ci_upper is None:
+        return "inconclusive"
+    if direction == "below":
+        if ci_upper <= threshold:
+            return "pass"
+        if ci_lower > threshold:
+            return "fail"
+        return "inconclusive"
+    # default: above
+    if ci_lower >= threshold:
+        return "pass"
+    if ci_upper < threshold:
+        return "fail"
+    return "inconclusive"

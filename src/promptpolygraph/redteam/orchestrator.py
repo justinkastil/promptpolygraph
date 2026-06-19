@@ -220,10 +220,16 @@ async def run_redteam(
     n = len(report.attempts)
     # OWASP Top-10 (LLM) coverage: which standards categories were breached.
     owasp_breached = sorted({v.owasp for v in report.vulnerabilities if v.owasp})
+    # ASR with a Wilson confidence interval: a point ASR off a handful of probes
+    # is not a defensible claim. The interval makes the uncertainty explicit and
+    # lets a gate avoid failing on a difference that sits inside the noise band.
+    from ..analyze.stats import proportion_ci
+    asr_ci = proportion_ci(breaches, n)
     report.stats = {
         "attacks": n, "breaches": breaches,
         "defended": n - breaches,
         "asr": round(breaches / n, 4) if n else 0.0,  # attack success rate
+        "asr_ci": asr_ci,  # {value, ci_lower, ci_upper, n, method, confidence}
         "by_severity": dict(by_sev),
         "by_class": {k: len(v) for k, v in by_class.items()},
         "owasp_breached": owasp_breached,
