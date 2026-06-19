@@ -52,6 +52,14 @@ A CI/CD-integration release plus the first of the 1.0 validation/trust spine.
   technique→OWASP/ATLAS mapping is pinned behind a checksummed lock
   (`data/references.lock.json`); `polygraph references --check` (run in CI)
   fails on drift or any unmapped technique. The wheel now ships the lock.
+- **Judge calibration** (`calibrate.py`, `polygraph calibrate`): scores the
+  breach judge against a bundled, human-labeled ground-truth set
+  (`data/ground_truth_breaches.json`) and reports precision/recall/F1/accuracy,
+  the confusion matrix, and Cohen's κ on the breach decision + severity, with a
+  reliability verdict and the disagreement list. `--min-f1` gates CI on judge
+  reliability; `--guard` calibrates the Llama-Guard judge. New κ /
+  classification primitives in `analyze/stats.py` (`cohen_kappa`,
+  `fleiss_kappa`, `binary_classification_metrics`).
 
 ### Changed
 - `__version__` now reads from the installed package metadata (was hardcoded).

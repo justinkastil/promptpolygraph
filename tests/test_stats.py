@@ -144,3 +144,23 @@ def test_gate_band_decision_below():
 
 def test_gate_band_decision_missing_band():
     assert stats.gate_band_decision(None, None, 7.0) == "inconclusive"
+
+
+def test_binary_classification_metrics_known():
+    m = stats.binary_classification_metrics([True, True, False, False], [True, False, False, False])
+    assert m["tp"] == 1 and m["fn"] == 1 and m["tn"] == 2 and m["fp"] == 0
+    assert m["precision"] == 1.0 and m["recall"] == 0.5
+    assert abs(m["f1"] - 0.6667) < 1e-3 and m["accuracy"] == 0.75
+
+
+def test_cohen_kappa_chance_and_perfect():
+    assert stats.cohen_kappa([1, 1, 0, 0], [1, 1, 0, 0]) == 1.0          # perfect
+    assert abs(stats.cohen_kappa([1, 1, 0, 0], [1, 0, 1, 0])) < 1e-9     # chance -> 0
+    assert stats.cohen_kappa([], []) == 0.0
+
+
+def test_fleiss_kappa_perfect_agreement():
+    # 3 items, 3 raters, all agree per item -> kappa 1.0
+    assert stats.fleiss_kappa([["a", "a", "a"], ["b", "b", "b"], ["a", "a", "a"]]) == 1.0
+    # degenerate (single rater) -> 0.0
+    assert stats.fleiss_kappa([["a"], ["b"]]) == 0.0

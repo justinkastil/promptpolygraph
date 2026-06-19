@@ -1034,6 +1034,14 @@ def build_parser() -> argparse.ArgumentParser:
                          help="write a provenance manifest for a run (what produced the result)")
     pmf.add_argument("--run", required=True)
 
+    pcal = sub.add_parser("calibrate", parents=[common],
+                          help="score the breach judge against the labeled ground-truth set")
+    pcal.add_argument("--guard", action="store_true", help="calibrate the Llama-Guard judge instead")
+    pcal.add_argument("--ground-truth", dest="ground_truth", help="path to a custom ground-truth JSON")
+    pcal.add_argument("--out", help="write the calibration report JSON here")
+    pcal.add_argument("--min-f1", dest="min_f1", type=float,
+                      help="exit non-zero if the judge's F1 is below this (CI calibration gate)")
+
     pref = sub.add_parser("references", parents=[common],
                           help="check or update the pinned OWASP/ATLAS technique mapping")
     pref.add_argument("--check", action="store_true", help="fail if the live mapping drifted from the lock")
@@ -1079,6 +1087,33 @@ def cmd_validate_config(cfg: Config, args) -> int:
             for e in rres["errors"]:
                 print(f"  ✗ {e}")
     return 0 if ok else 1
+
+
+def cmd_calibrate(cfg: Config, args) -> int:
+    from .calibrate import calibrate_breach_judge, load_ground_truth
+
+    gt = load_ground_truth(args.ground_truth) if getattr(args, "ground_truth", None) else None
+    report = asyncio.run(calibrate_breach_judge(
+        _client(cfg), mock=_is_mock(cfg), guard=getattr(args, "guard", False),
+        ground_truth=gt,
+    ))
+    out = Path(args.out) if getattr(args, "out", None) else _run_dir(cfg, "calibration") / "calibration.json"
+    _save_json(out, report)
+    m = report["metrics"]
+    verdict = _color("RELIABLE", "green") if report["reliable"] else _color("UNRELIABLE", "red")
+    src = "mock judge" if report["mock"] else f"{report['judge']} judge"
+    print(f"calibration ({src}, n={report['n']}): {verdict}")
+    print(f"  precision={m['precision']:.2f} recall={m['recall']:.2f} f1={m['f1']:.2f} "
+          f"accuracy={m['accuracy']:.2f}")
+    print(f"  confusion: tp={m['tp']} fp={m['fp']} tn={m['tn']} fn={m['fn']}  "
+          f"breach κ={report['breach_kappa']:.2f}  severity κ={report['severity_kappa']:.2f}")
+    for f in report["flags"]:
+        print(_color(f"  ⚠ {f}", "yellow"))
+    print(f"  report: {out}")
+    if getattr(args, "min_f1", None) is not None and m["f1"] < args.min_f1:
+        print(_color(f"calibration gate: F1 {m['f1']:.2f} < {args.min_f1:.2f}", "red"))
+        return 1
+    return 0
 
 
 def cmd_manifest(cfg: Config, args) -> int:
@@ -1194,6 +1229,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_all(cfg, args)
     elif args.cmd == "manifest":
         return cmd_manifest(cfg, args)
+    elif args.cmd == "calibrate":
+        return cmd_calibrate(cfg, args)
     elif args.cmd == "validate-config":
         return cmd_validate_config(cfg, args)
     elif args.cmd == "schema":

@@ -39,6 +39,9 @@ __all__ = [
     "mcnemar_test",
     "benjamini_hochberg",
     "gate_band_decision",
+    "binary_classification_metrics",
+    "cohen_kappa",
+    "fleiss_kappa",
 ]
 
 
@@ -339,6 +342,87 @@ def benjamini_hochberg(pvalues: Sequence[float], alpha: float = 0.05) -> dict:
     rejected = [q[i] <= alpha for i in range(m)]
     return {"rejected": rejected, "qvalues": [round(x, 6) for x in q],
             "alpha": alpha, "n_significant": sum(rejected)}
+
+
+# ── classification + agreement (judge calibration) ───────────────────────────
+
+def binary_classification_metrics(y_true: Sequence[bool], y_pred: Sequence[bool]) -> dict:
+    """Precision/recall/F1/accuracy + confusion counts for a binary classifier.
+
+    `y_true` is ground truth, `y_pred` the judge's call. The positive class is
+    True (e.g. "breached"). Returns zeros (not errors) on the degenerate cases.
+    """
+    tp = fp = tn = fn = 0
+    for t, p in zip(y_true, y_pred):
+        if p and t:
+            tp += 1
+        elif p and not t:
+            fp += 1
+        elif not p and t:
+            fn += 1
+        else:
+            tn += 1
+    n = tp + fp + tn + fn
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    accuracy = (tp + tn) / n if n else 0.0
+    return {
+        "tp": tp, "fp": fp, "tn": tn, "fn": fn, "n": n,
+        "precision": round(precision, 6), "recall": round(recall, 6),
+        "f1": round(f1, 6), "accuracy": round(accuracy, 6),
+    }
+
+
+def cohen_kappa(a: Sequence[Any], b: Sequence[Any]) -> float:
+    """Cohen's κ — agreement between two raters corrected for chance.
+
+    Works for any categorical labels (bool, severity strings, …). 1.0 is perfect
+    agreement, 0.0 is chance, negative is worse than chance.
+    """
+    pairs = list(zip(a, b))
+    n = len(pairs)
+    if n == 0:
+        return 0.0
+    cats = set(a) | set(b)
+    po = sum(1 for x, y in pairs if x == y) / n
+    ca = {c: sum(1 for x in a if x == c) / n for c in cats}
+    cb = {c: sum(1 for y in b if y == c) / n for c in cats}
+    pe = sum(ca[c] * cb[c] for c in cats)
+    if pe >= 1.0:
+        return 1.0  # everyone in one category and agreeing
+    return round((po - pe) / (1 - pe), 6)
+
+
+def fleiss_kappa(ratings: Sequence[Sequence[Any]], categories: Sequence[Any] | None = None) -> float:
+    """Fleiss' κ — agreement among a fixed number of raters over N items.
+
+    `ratings[i]` is the list of each rater's label for item i (same length per
+    item). Used for an ensemble of ≥3 judges. Returns 0.0 if undefined.
+    """
+    items = [list(r) for r in ratings if r]
+    if not items:
+        return 0.0
+    n_raters = len(items[0])
+    if n_raters < 2 or any(len(r) != n_raters for r in items):
+        return 0.0
+    cats = list(categories) if categories is not None else sorted(
+        {lbl for r in items for lbl in r}, key=str)
+    N = len(items)
+    # P_i: agreement within item i
+    Pi = []
+    cat_totals = {c: 0 for c in cats}
+    for r in items:
+        counts = {c: r.count(c) for c in cats}
+        for c in cats:
+            cat_totals[c] += counts[c]
+        Pi.append((sum(v * v for v in counts.values()) - n_raters) / (n_raters * (n_raters - 1)))
+    Pbar = sum(Pi) / N
+    pj = {c: cat_totals[c] / (N * n_raters) for c in cats}
+    Pe = sum(v * v for v in pj.values())
+    if Pe >= 1.0:
+        return 1.0
+    return round((Pbar - Pe) / (1 - Pe), 6)
 
 
 # ── gate helpers ─────────────────────────────────────────────────────────────
