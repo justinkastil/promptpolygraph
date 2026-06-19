@@ -20,7 +20,12 @@ from .models import (
     fingerprint,
 )
 
-__version__ = "0.6.7"
+try:  # keep in sync with the installed distribution rather than hand-editing
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("promptpolygraph")
+except Exception:  # not installed (e.g. running from a source tree) — fall back
+    __version__ = "0.7.0"
 
 __all__ = [
     "AssertionResult",

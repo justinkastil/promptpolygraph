@@ -16,10 +16,13 @@ from typing import Optional
 from ..models import Case, Response, Rubric, RunMeta, Score
 from .docx import render_docx
 from .html import render_html
+from .junit import render_junit_eval
 from .markdown import render_markdown
 from .pdf import render_pdf
+from .sarif import render_sarif_eval
 
-__all__ = ["build_report", "render_markdown", "render_docx", "render_html", "render_pdf"]
+__all__ = ["build_report", "render_markdown", "render_docx", "render_html", "render_pdf",
+           "render_junit_eval", "render_sarif_eval"]
 
 
 _FILENAMES = {
@@ -27,6 +30,8 @@ _FILENAMES = {
     "docx": "report.docx",
     "pdf": "report.pdf",
     "html": "report.html",
+    "junit": "report.junit.xml",
+    "sarif": "report.sarif.json",
 }
 
 
@@ -100,5 +105,15 @@ def build_report(
             if result:
                 out["pdf"] = result
             # else: pdf gracefully omitted
+
+        elif fmt == "junit":
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(render_junit_eval(run_meta, cases, responses, scores, summary))
+            out["junit"] = path
+
+        elif fmt == "sarif":
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(render_sarif_eval(run_meta, cases, responses, scores, summary))
+            out["sarif"] = path
 
     return out

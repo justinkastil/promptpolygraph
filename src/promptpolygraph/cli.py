@@ -734,6 +734,16 @@ def cmd_redteam(cfg: Config, args) -> int:
         p = rd / "redteam.json"
         _save_json(p, render_json(report))
         written.append(p)
+    if "junit" in formats:
+        from .report.junit import render_junit_redteam
+        p = rd / "redteam.junit.xml"
+        p.write_text(render_junit_redteam(report))
+        written.append(p)
+    if "sarif" in formats:
+        from .report.sarif import render_sarif_redteam
+        p = rd / "redteam.sarif.json"
+        p.write_text(render_sarif_redteam(report))
+        written.append(p)
     # always keep a machine-readable copy
     if "json" not in formats:
         _save_json(rd / "redteam.json", render_json(report))
@@ -852,7 +862,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     prp = sub.add_parser("report", parents=[common], help="render a report")
     prp.add_argument("--run", required=True)
-    prp.add_argument("--format", default="md,html")
+    prp.add_argument("--format", default="md,html",
+                     help="comma list: md,html,docx,pdf,junit,sarif (junit/sarif for CI)")
     prp.add_argument("--baseline", help="prior run id for delta columns")
 
     pc = sub.add_parser("compare", parents=[common], help="compare N runs (A/B or trend matrix)")
@@ -931,7 +942,7 @@ def build_parser() -> argparse.ArgumentParser:
                                        "(e.g. catalog,garak,pyrit,dataset:advbench)")
     prt.add_argument("--guard", action="store_true",
                      help="judge breaches with a Llama-Guard-style safety classifier instead of the LLM reviewer")
-    prt.add_argument("--format", default="md,html", help="md,html,json")
+    prt.add_argument("--format", default="md,html", help="md,html,json,junit,sarif")
 
     pall = sub.add_parser("all", parents=[common], help="run -> analyze -> audit -> report")
     _add_corpus_dials(pall)
