@@ -11,6 +11,13 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 A CI/CD-integration release plus the first of the 1.0 validation/trust spine.
 
 ### Added
+- **Validation package** (`validate.py`, `polygraph validate`): a regenerable
+  IQ/OQ/PQ evidence bundle. IQ qualifies the install (Python, dependencies,
+  packaged data, reference integrity); OQ exercises each component on golden
+  inputs (stats, corpus+gate, report renderers incl. valid JUnit/SARIF,
+  red-team ASR+CI, calibration); PQ confirms a mock run reproduces byte-for-byte.
+  Writes `evidence.json` + `evidence.md`, exits non-zero on any failure, runs in
+  CI. New `docs/VALIDATION.md`.
 - **Statistical rigor** (`analyze/stats.py`): Wilson-score confidence intervals
   on proportions (the red-team **ASR now ships with a 95% CI**; assertion pass
   rate too), a seeded/deterministic percentile bootstrap on continuous

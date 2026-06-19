@@ -1026,6 +1026,12 @@ def build_parser() -> argparse.ArgumentParser:
                          help="fail-fast validation of a config (and optional rubric) before a run")
     pvc.add_argument("--rubric", help="also validate this rubric.yaml")
 
+    pval = sub.add_parser("validate", parents=[common],
+                          help="run IQ/OQ/PQ and emit a validation evidence bundle")
+    pval.add_argument("--out", help="directory to write evidence.json + evidence.md")
+    pval.add_argument("--no-pq", dest="no_pq", action="store_true",
+                      help="skip the performance-qualification (reproducibility) run")
+
     psc = sub.add_parser("schema", parents=[common],
                          help="write JSON Schemas for config + rubric (editor autocomplete / CI)")
     psc.add_argument("--out", default="schemas", help="output directory (default: schemas/)")
@@ -1057,6 +1063,23 @@ def build_parser() -> argparse.ArgumentParser:
     psci.add_argument("--force", action="store_true", help="overwrite an existing file")
 
     return parser
+
+
+def cmd_validate(cfg: Config, args) -> int:
+    from . import validate as V
+
+    bundle = V.validate(getattr(args, "out", None), include_pq=not getattr(args, "no_pq", False))
+    for sec, s in bundle["summary"].items():
+        mark = _color("ok", "green") if s["passed"] == s["total"] else _color("FAIL", "red")
+        print(f"  {sec}: {s['passed']}/{s['total']} {mark}")
+        for c in bundle["qualifications"][sec]:
+            if not c["ok"]:
+                print(_color(f"    ✗ {c['name']} — {c['detail']}", "red"))
+    overall = _color("PASS", "green") if bundle["overall_ok"] else _color("FAIL", "red")
+    print(f"validation: {overall} (promptpolygraph {bundle['version']})")
+    if getattr(args, "out", None):
+        print(f"  evidence: {args.out}/evidence.json + evidence.md")
+    return 0 if bundle["overall_ok"] else 1
 
 
 def cmd_validate_config(cfg: Config, args) -> int:
@@ -1187,6 +1210,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_scaffold_ci(Config(), args)
     if args.cmd == "references":
         return cmd_references(Config(), args)
+    if args.cmd == "validate":
+        return cmd_validate(Config(), args)
     cfg = _load_cfg(args)
     if args.cmd == "init":
         return cmd_init(cfg, args)

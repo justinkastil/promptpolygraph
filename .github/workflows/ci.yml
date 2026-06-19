@@ -31,6 +31,9 @@ jobs:
       - name: Reference integrity (OWASP/ATLAS mapping pinned)
         run: polygraph references --check
 
+      - name: Validation package (IQ/OQ/PQ)
+        run: polygraph validate --out /tmp/evidence
+
       - name: Offline smoke (default example, no API key)
         run: |
           polygraph all --config examples/everyday_assistant/config.yaml \
