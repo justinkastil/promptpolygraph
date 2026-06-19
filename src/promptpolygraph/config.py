@@ -97,6 +97,7 @@ class AnalyzeConfig(BaseModel):
     gate_mode: str = "strict"  # strict (every applicable dim >= threshold) | weighted
     # Statistical rigor (additive; defaults preserve the strict point-estimate gate).
     confidence: float = 0.95        # confidence level for reported intervals
+    alpha: float = 0.05             # significance level for regression testing (BH-corrected)
     respect_ci: bool = False        # when True the gate returns "inconclusive" (not fail)
                                     # if the threshold falls inside a metric's CI band
     min_sample_warn: int = 30       # warn when a category/metric is graded on fewer cases

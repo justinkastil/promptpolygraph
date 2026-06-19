@@ -422,13 +422,27 @@ def cmd_regressions(cfg: Config, args) -> dict:
         baseline = json.loads(bpath.read_text()) if bpath.exists() else {}
         label = against[:8]
 
-    diff = A.diff_baseline(current, baseline)
+    alpha = float(getattr(cfg.analyze, "alpha", 0.05) or 0.05)
+    confidence = float(getattr(cfg.analyze, "confidence", 0.95) or 0.95)
+    diff = A.diff_baseline(current, baseline, alpha=alpha, confidence=confidence)
     out = rd / f"regressions_vs_{label.replace(':', '_')}.json"
     _save_json(out, diff)
+    sig = diff.get("significance", {}) or {}
+    sig_note = ""
+    if sig.get("available"):
+        sig_note = (f"; {len(diff['significant_regressions'])} statistically significant "
+                    f"(BH α={sig.get('alpha')})")
     print(f"regressions {args.run[:8]} vs {label}: "
-          f"{len(diff['regressions'])} regressions, {len(diff['improvements'])} improvements -> {out}")
+          f"{len(diff['regressions'])} regressions, {len(diff['improvements'])} improvements"
+          f"{sig_note} -> {out}")
     for r in diff["regressions"]:
-        print(f"  ↓ {r['category']}/{r['dimension']}: {r['baseline']:.2f} -> {r['current']:.2f} ({r['delta']:+.2f})")
+        star = ""
+        for s in diff.get("significant_regressions", []):
+            if s["category"] == r["category"] and s["dimension"] == r["dimension"]:
+                star = f"  [significant, q={s.get('q_value'):.3f}]"
+                break
+        print(f"  ↓ {r['category']}/{r['dimension']}: {r['baseline']:.2f} -> {r['current']:.2f} "
+              f"({r['delta']:+.2f}){star}")
     return diff
 
 

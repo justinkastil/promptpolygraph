@@ -60,6 +60,44 @@ def test_respect_ci_does_not_fail_on_straddling_band():
     assert band["overall_pass"] is True
 
 
+def _summary_with_ci(cat_dim_ci):
+    """Build a summary carrying the confidence layer for significance testing."""
+    dims = sorted({d for c in cat_dim_ci.values() for d in c})
+    cat_scores, by_cat = {}, {}
+    for cat, dims_ci in cat_dim_ci.items():
+        cat_scores[cat] = {"count": 50, **{d: v["value"] for d, v in dims_ci.items()}}
+        by_cat[cat] = {"dimensions": dims_ci}
+    return {"dimensions": dims, "category_scores": cat_scores,
+            "confidence": {"by_category": by_cat}}
+
+
+def test_baseline_significance_flags_real_drop_not_noise():
+    from promptpolygraph.analyze.baseline import diff_baseline
+    # quality drops 9.0 -> 6.0 with tight CIs (significant); tone wiggles within noise.
+    base = _summary_with_ci({"a": {
+        "quality": {"value": 9.0, "ci_lower": 8.85, "ci_upper": 9.15},
+        "tone": {"value": 7.0, "ci_lower": 6.4, "ci_upper": 7.6}}})
+    cur = _summary_with_ci({"a": {
+        "quality": {"value": 6.0, "ci_lower": 5.85, "ci_upper": 6.15},
+        "tone": {"value": 7.1, "ci_lower": 6.5, "ci_upper": 7.7}}})
+    diff = diff_baseline(cur, base)
+    assert diff["significance"]["available"] is True
+    sig = {(r["category"], r["dimension"]) for r in diff["significant_regressions"]}
+    assert ("a", "quality") in sig
+    assert ("a", "tone") not in sig  # within-noise move is not flagged
+
+
+def test_baseline_significance_unavailable_without_ci_layer():
+    from promptpolygraph.analyze.baseline import diff_baseline
+    base = {"dimensions": ["q"], "category_scores": {"a": {"q": 9.0}}}
+    cur = {"dimensions": ["q"], "category_scores": {"a": {"q": 6.0}}}
+    diff = diff_baseline(cur, base)
+    # heuristic regression still fires; significance gracefully unavailable
+    assert any(r["dimension"] == "q" for r in diff["regressions"])
+    assert diff["significance"]["available"] is False
+    assert diff["significant_regressions"] == []
+
+
 def test_redteam_asr_carries_confidence_interval():
     report = asyncio.run(run_redteam(DemoAdapter(), get_profile("quick"), mock=True))
     assert "asr_ci" in report.stats
