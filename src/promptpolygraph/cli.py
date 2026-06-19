@@ -950,11 +950,66 @@ def build_parser() -> argparse.ArgumentParser:
     pall.add_argument("--judges", type=int)
     pall.add_argument("--format", default="md,html")
 
+    pvc = sub.add_parser("validate-config", parents=[common],
+                         help="fail-fast validation of a config (and optional rubric) before a run")
+    pvc.add_argument("--rubric", help="also validate this rubric.yaml")
+
+    psc = sub.add_parser("schema", parents=[common],
+                         help="write JSON Schemas for config + rubric (editor autocomplete / CI)")
+    psc.add_argument("--out", default="schemas", help="output directory (default: schemas/)")
+
     return parser
+
+
+def cmd_validate_config(cfg: Config, args) -> int:
+    """Validate a config (and optional rubric) before a run. Exit 1 on any error."""
+    from .schema_gen import validate_config_file, validate_rubric_file
+
+    if not args.config:
+        print(_color("validate-config: pass --config <path>", "red"))
+        return 1
+    ok = True
+    res = validate_config_file(args.config)
+    for w in res["warnings"]:
+        print(_color(f"  warning: {w}", "yellow"))
+    if res["ok"]:
+        print(_color(f"config OK: {args.config}", "green"))
+    else:
+        ok = False
+        print(_color(f"config INVALID: {args.config}", "red"))
+        for e in res["errors"]:
+            print(f"  ✗ {e}")
+    if getattr(args, "rubric", None):
+        rres = validate_rubric_file(args.rubric)
+        if rres["ok"]:
+            print(_color(f"rubric OK: {args.rubric}", "green"))
+        else:
+            ok = False
+            print(_color(f"rubric INVALID: {args.rubric}", "red"))
+            for e in rres["errors"]:
+                print(f"  ✗ {e}")
+    return 0 if ok else 1
+
+
+def cmd_schema(cfg: Config, args) -> int:
+    from .schema_gen import write_schemas
+
+    written = write_schemas(args.out)
+    for name, path in written.items():
+        print(f"  {name}: {path}")
+    print(_color(f"add  # yaml-language-server: $schema={written['config']}  "
+                 "to a config for editor validation", "dim"))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # These commands must not eagerly load/validate the config (that is their job),
+    # so they run on a bare default Config before the loader can raise.
+    if args.cmd == "validate-config":
+        return cmd_validate_config(Config(), args)
+    if args.cmd == "schema":
+        return cmd_schema(Config(), args)
     cfg = _load_cfg(args)
     if args.cmd == "init":
         return cmd_init(cfg, args)
@@ -992,6 +1047,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_redteam(cfg, args)
     elif args.cmd == "all":
         return cmd_all(cfg, args)
+    elif args.cmd == "validate-config":
+        return cmd_validate_config(cfg, args)
+    elif args.cmd == "schema":
+        return cmd_schema(cfg, args)
     return 0
 
 
