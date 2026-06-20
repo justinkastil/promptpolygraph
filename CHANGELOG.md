@@ -275,7 +275,14 @@ Initial public release.
 - Deployable service: FastAPI API + worker + Postgres job queue + scheduler + webhooks
   + dashboard; one Docker image, AWS/GCP deploy guides; CI workflow.
 
-[Unreleased]: https://github.com/justinkastil/promptpolygraph/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/justinkastil/promptpolygraph/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/justinkastil/promptpolygraph/compare/v0.6.7...v0.7.0
+[0.6.6]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.6.6
+[0.6.5]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.6.5
+[0.6.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.6.0
+[0.5.1]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.5.1
+[0.5.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.5.0
+[0.4.1]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.4.1
 [0.4.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.4.0
 [0.3.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.3.0
 [0.1.1]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.1.1
