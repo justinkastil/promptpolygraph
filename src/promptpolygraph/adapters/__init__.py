@@ -14,6 +14,7 @@ from ..config import AdapterConfig
 from .base import Adapter, BaseAdapter
 from .callable import CallableAdapter
 from .demo import DemoAdapter
+from .frameworks import DSPyAdapter, LangChainAdapter, LlamaIndexAdapter
 from .http import HTTPAdapter
 from .llm import LLMAdapter
 
@@ -22,7 +23,10 @@ __all__ = [
     "BaseAdapter",
     "CallableAdapter",
     "DemoAdapter",
+    "DSPyAdapter",
     "HTTPAdapter",
+    "LangChainAdapter",
+    "LlamaIndexAdapter",
     "LLMAdapter",
     "build_adapter",
 ]
@@ -73,6 +77,12 @@ def build_adapter(cfg: AdapterConfig, **extra: Any) -> Adapter:
         if fn is None and isinstance(ref, str) and ref.strip():
             fn = _resolve_callable(ref.strip())
         return CallableAdapter(name=cfg.name or "callable", fn=fn, **options)
+    if kind == "langchain":
+        return LangChainAdapter(name=cfg.name or "langchain", **options)
+    if kind == "llamaindex":
+        return LlamaIndexAdapter(name=cfg.name or "llamaindex", **options)
+    if kind == "dspy":
+        return DSPyAdapter(name=cfg.name or "dspy", **options)
     factory = _plugin_adapters().get(kind)
     if factory is not None:
         return factory(name=cfg.name or kind, **options)

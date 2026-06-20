@@ -28,6 +28,14 @@ llm = ["openai>=1.40"]
 # and others) via the "litellm" provider. Optional: anthropic + the OpenAI-
 # compatible/local paths work without it.
 litellm = ["litellm>=1.40"]
+# Adapters that wrap a pipeline built with an orchestration framework. All
+# optional: the wrappers use the passed object by duck typing, so only the
+# framework you actually wrap needs to be installed.
+frameworks = [
+    "langchain-core>=0.2",
+    "llama-index-core>=0.10",
+    "dspy-ai>=2.4",
+]
 pdf = ["reportlab>=4.0"]
 # Ed25519 public-key signing of run bundles / report attestations. Optional:
 # HMAC signing (stdlib) is the default; this adds verifiable public-key signing.
@@ -71,6 +79,9 @@ http = "promptpolygraph.adapters.http:HTTPAdapter"
 llm = "promptpolygraph.adapters.llm:LLMAdapter"
 demo = "promptpolygraph.adapters.demo:DemoAdapter"
 callable = "promptpolygraph.adapters.callable:CallableAdapter"
+langchain = "promptpolygraph.adapters.frameworks:LangChainAdapter"
+llamaindex = "promptpolygraph.adapters.frameworks:LlamaIndexAdapter"
+dspy = "promptpolygraph.adapters.frameworks:DSPyAdapter"
 
 [project.entry-points."promptpolygraph.sources"]
 catalog = "promptpolygraph.redteam.sources.catalog_source:CatalogSource"
