@@ -27,7 +27,14 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
   privileged actions + chain verification), and `/api/whoami`. Backward
   compatible: a legacy flat `POLYGRAPH_API_KEYS` value resolves to admin of the
   `default` workspace, and an auth-disabled dev server to the same — existing
-  deployments are unchanged. (OIDC/SSO is the next PR.)
+  deployments are unchanged.
+- **Service-mode hardening — OIDC/SSO** (toward 1.0; `service/oidc.py`, optional
+  `[oidc]` extra). Human login via an IdP (Okta/Entra/Keycloak/Auth0): a bearer
+  JWT is verified against the IdP's JWKS (issuer/audience/expiry checked, MFA
+  optionally required via the `amr`/`acr` claim) and the token's identity is
+  mapped to a workspace member's role. **Fully optional and off by default** —
+  inert unless `oidc_issuer` is set; per-workspace API keys remain the CI /
+  service-account credential and the existing auth paths are unchanged.
 
 ## [0.7.0] - 2026-06-19
 

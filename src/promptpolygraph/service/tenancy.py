@@ -159,6 +159,14 @@ class Tenancy:
                 members.c.workspace_id == workspace_id, members.c.subject == subject)).first()
         return row[0] if row else None
 
+    def member_workspaces(self, subject: str) -> list[dict]:
+        """Every (workspace_id, role) the subject is a member of — for SSO login,
+        where a token's identity is mapped to its workspace membership(s)."""
+        with self.engine.connect() as c:
+            rows = c.execute(select(members.c.workspace_id, members.c.role)
+                             .where(members.c.subject == subject)).all()
+        return [{"workspace_id": r[0], "role": r[1]} for r in rows]
+
     # ─── api keys ────────────────────────────────────────────────────────────
     def create_api_key(self, workspace_id: str, role: str, label: str = "") -> dict:
         """Mint a key. Returns the plaintext ONCE (only the hash is stored)."""

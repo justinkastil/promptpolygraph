@@ -27,9 +27,36 @@ def _extract_key(x_api_key: str | None, authorization: str | None) -> str | None
     return None
 
 
+def _looks_like_jwt(token: str | None) -> bool:
+    return bool(token) and token.count(".") == 2 and not token.startswith("ppg_")
+
+
+def _principal_from_oidc(token: str, workspace_hint: str | None) -> Principal | None:
+    """Verify an IdP bearer JWT and map its identity to a workspace member.
+    Returns None when OIDC is not configured (so other paths handle the token)."""
+    from .oidc import OIDCError, get_verifier
+
+    verifier = get_verifier()
+    if verifier is None:
+        return None
+    try:
+        claims = verifier.verify(token)
+    except OIDCError as e:
+        raise HTTPException(status_code=401, detail=f"OIDC: {e}") from e
+
+    subject = claims.identity(get_settings().oidc_email_claim)
+    memberships = get_tenancy().member_workspaces(subject)
+    if not memberships:
+        raise HTTPException(status_code=403,
+                            detail=f"'{subject}' is authenticated but not a member of any workspace")
+    chosen = next((m for m in memberships if m["workspace_id"] == workspace_hint), memberships[0])
+    return Principal(chosen["workspace_id"], chosen["role"], subject=subject, via="oidc")
+
+
 async def get_principal(
     x_api_key: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
+    x_workspace: str | None = Header(default=None),
 ) -> Principal:
     settings = get_settings()
     key = _extract_key(x_api_key, authorization)
@@ -41,13 +68,19 @@ async def get_principal(
         if principal is not None:
             return principal
 
-    # 2. legacy flat keys -> admin of the default workspace
+    # 2. an OIDC/SSO bearer JWT (only when OIDC is configured)
+    if _looks_like_jwt(key):
+        principal = _principal_from_oidc(key, x_workspace)
+        if principal is not None:
+            return principal
+
+    # 3. legacy flat keys -> admin of the default workspace
     if settings.auth_enabled:
         if key and key in settings.api_key_set:
             return Principal(DEFAULT_WORKSPACE, "admin", subject="legacy", via="legacy")
         raise HTTPException(status_code=401, detail="invalid or missing API key")
 
-    # 3. no auth configured at all -> dev mode
+    # 4. no auth configured at all -> dev mode
     return Principal(DEFAULT_WORKSPACE, "admin", subject="dev", via="dev")
 
 
