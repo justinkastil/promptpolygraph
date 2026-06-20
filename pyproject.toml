@@ -50,6 +50,7 @@ redteam = [
     "huggingface-hub>=0.23",
 ]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+types = ["mypy>=1.10"]
 
 [project.scripts]
 polygraph = "promptpolygraph.cli:main"
@@ -62,3 +63,29 @@ packages = ["src/promptpolygraph"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# Pragmatic config: surface real type errors on the public-facing modules
+# without demanding full strictness across the tree. Third-party stubs are
+# frequently absent for optional deps (garak/pyrit/datasets/reportlab/...), so
+# missing imports are ignored rather than blocking the run. The package ships a
+# py.typed marker so downstream consumers can opt into these checks.
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_configs = true
+# Default check target. Scoped to public modules that pass cleanly today; the
+# broader tree (cli, service, redteam, report, ...) is not yet annotated and
+# would only add noise. A bare `mypy` invocation checks exactly these.
+files = [
+    "src/promptpolygraph/__init__.py",
+    "src/promptpolygraph/models.py",
+    "src/promptpolygraph/config.py",
+    "src/promptpolygraph/llm.py",
+    "src/promptpolygraph/audit_log.py",
+    "src/promptpolygraph/migrations.py",
+    "src/promptpolygraph/discovery.py",
+    "src/promptpolygraph/schema_gen.py",
+    "src/promptpolygraph/scaffold.py",
+    "src/promptpolygraph/configdesign.py",
+]
