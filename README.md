@@ -319,6 +319,35 @@ tab; **SARIF 2.1.0** renders findings inline on the PR via GitHub/GitLab code sc
 red-team trace carries the `file:line`). `polygraph schema` writes JSON Schemas for editor autocomplete.
 See [docs/CI.md](docs/CI.md).
 
+### Reusable GitHub Action
+
+A composite action wraps the gate (`all` -> `analyze --ci` -> `report --format junit,sarif`):
+
+```yaml
+- id: polygraph
+  uses: justinkastil/promptpolygraph@v1
+  with:
+    config: config.yaml
+    baseline: rolling:5     # optional regression check
+    # mock: "true"          # offline, no API keys
+    # mode: adversarial     # corpus mode for `all`
+    # extras: "llm,pdf"     # optional pip extras
+    # source: "."           # install the checked-out repo instead of PyPI
+
+# The action emits SARIF but uploads nothing itself; do it in your workflow:
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: ${{ steps.polygraph.outputs.report-dir }}/report.sarif.json
+```
+
+Inputs: `config` (required), `mode`, `format` (default `md,html`), `baseline`, `mock`
+(default `false`), `python-version` (default `3.12`), `extras`, `source` (default the
+`promptpolygraph` PyPI package; pass `.` to install the checked-out repo). Outputs: `verdict`
+(`pass`/`fail`) and `report-dir` (holds the reports, JUnit, SARIF, and `summary.json`). The
+step exits non-zero on gate failure. A runnable example is at
+[.github/workflows/example-action.yml](.github/workflows/example-action.yml).
+
 ## Validation & audit (toward 1.0)
 
 For institutions that need to defend the *evaluation itself*, PromptPolygraph ships an evidence layer:

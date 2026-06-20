@@ -1,0 +1,41 @@
+name: Example - PromptPolygraph Action
+
+# Demonstrates the composite action against the bundled example in mock mode,
+# which needs no API keys. Real usage points `config` at your own config.yaml
+# and drops `mock`.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "action.yml"
+      - ".github/workflows/example-action.yml"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Local checkout install (source: ".") so the example runs against this
+      # repo rather than the published package.
+      - id: polygraph
+        uses: ./
+        with:
+          config: examples/everyday_assistant/config.yaml
+          mock: "true"
+          format: "md,html"
+          source: "."
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.polygraph.outputs.report-dir }}/report.sarif.json
+
+      - name: Show verdict
+        run: echo "verdict=${{ steps.polygraph.outputs.verdict }}"
