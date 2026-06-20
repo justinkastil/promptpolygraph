@@ -1,6 +1,19 @@
 # PromptPolygraph
 
+[![PyPI version](https://img.shields.io/pypi/v/promptpolygraph.svg)](https://pypi.org/project/promptpolygraph/)
+[![Python versions](https://img.shields.io/pypi/pyversions/promptpolygraph.svg)](https://pypi.org/project/promptpolygraph/)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/justinkastil/promptpolygraph/actions/workflows/ci.yml/badge.svg)](https://github.com/justinkastil/promptpolygraph/actions/workflows/ci.yml)
+[![tests](https://img.shields.io/badge/tests-497%20passing-brightgreen.svg)](https://github.com/justinkastil/promptpolygraph/actions/workflows/ci.yml)
+
 **Synthetic-prompt evaluation and persona-audit harness for web and API AI systems.**
+
+> **Quickstart in 30 seconds** — no API key, no setup. Install, then run the bundled offline mock demo:
+> ```bash
+> pip install promptpolygraph
+> polygraph all --config examples/everyday_assistant/config.yaml --mock --format md
+> ```
+> See [Quickstart](#quickstart) below, or open the [Colab notebook](examples/notebooks/quickstart.ipynb).
 
 PromptPolygraph pushes thousands of synthetic prompts through any web/API/LLM system, scores the
 responses against a pluggable rubric (plus cheap deterministic assertions and an optional multi-judge
