@@ -19,7 +19,10 @@ import asyncio
 import importlib
 import json
 import operator
+import os
 import re
+import subprocess
+import sys
 from typing import Any
 
 from ..models import AssertionResult, AssertionSpec, Case, Response
@@ -222,10 +225,118 @@ def _result(
 
 
 # ─── Custom-code (python/callable) scorer ───────────────────────────────────
+#
+# TRUST BOUNDARY: assertion specs (including options.expr) come from config files
+# and corpora, which are untrusted input. The sandbox mode decides how much
+# capability that author-supplied code gets:
+#   - "disabled":   custom code never runs.
+#   - "expr":       AST-restricted, no builtins/imports/I/O (see safe_eval).
+#   - "subprocess": an unrestricted Python interpreter. This is a privilege
+#                   escalation and is refused unless explicitly opted in
+#                   (allow_subprocess / POLYGRAPH_ALLOW_SUBPROCESS). When it does
+#                   run, provider/secret env vars are stripped so leaked code
+#                   cannot exfiltrate credentials.
+
+# Env var names/suffixes carrying credentials. Stripped from any subprocess
+# scorer's environment so untrusted code cannot read them. Explicit names cover
+# known providers; the suffixes catch the long tail (*_API_KEY/*_TOKEN/*_SECRET).
+_SECRET_ENV_NAMES = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "POLYGRAPH_API_KEYS",
+        "POLYGRAPH_SIGNING_KEY",
+    }
+)
+_SECRET_ENV_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_KEY", "_PASSWORD")
+
+
+def _is_secret_env(name: str) -> bool:
+    upper = name.upper()
+    if upper in _SECRET_ENV_NAMES:
+        return True
+    return any(upper.endswith(suf) for suf in _SECRET_ENV_SUFFIXES)
+
+
+def _minimal_subprocess_env() -> dict[str, str]:
+    """Environment for a subprocess scorer: the current env with every secret
+    (provider keys, *_API_KEY/*_TOKEN/*_SECRET, etc.) removed."""
+    return {k: v for k, v in os.environ.items() if not _is_secret_env(k)}
+
+
+def _subprocess_allowed(allow_subprocess: bool) -> bool:
+    """Subprocess mode requires an explicit opt-in via the config flag or the
+    POLYGRAPH_ALLOW_SUBPROCESS env var (truthy: 1/true/yes/on)."""
+    if allow_subprocess:
+        return True
+    return os.environ.get("POLYGRAPH_ALLOW_SUBPROCESS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+# Driver executed by the child interpreter. Reads {expr, output} as JSON on
+# stdin, evaluates expr with `output` bound, and writes the result as JSON on
+# stdout. Kept inline (no temp file) and free of provider imports.
+_SUBPROCESS_DRIVER = (
+    "import sys, json\n"
+    "p = json.load(sys.stdin)\n"
+    "out = eval(p['expr'], {'__builtins__': __builtins__}, {'output': p['output']})\n"
+    "if isinstance(out, bool):\n"
+    "    r = {'bool': out}\n"
+    "else:\n"
+    "    r = {'num': float(out)}\n"
+    "json.dump(r, sys.stdout)\n"
+)
+
+
+def _eval_subprocess(spec: AssertionSpec, text: str) -> AssertionResult:
+    """Evaluate options.expr in a separate Python process with a secret-free env.
+
+    Caller must have already verified the subprocess opt-in. The child runs an
+    unrestricted interpreter, so isolation here is the stripped environment plus
+    a hard timeout, not language-level sandboxing.
+    """
+    expr = spec.options.get("expr")
+    if not expr:
+        return _result(spec, False, 0.0, "subprocess assertion needs options.expr")
+    timeout_s = float(spec.options.get("timeout_s", 5.0))
+    payload = json.dumps({"expr": str(expr), "output": text})
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", _SUBPROCESS_DRIVER],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=_minimal_subprocess_env(),
+        )
+    except subprocess.TimeoutExpired:
+        return _result(spec, False, 0.0, f"subprocess timed out after {timeout_s}s")
+    except Exception as exc:  # noqa: BLE001 - spawn failure must not abort the batch
+        return _result(spec, False, 0.0, f"subprocess spawn error: {exc}")
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip().splitlines()
+        return _result(spec, False, 0.0, f"subprocess error: {err[-1] if err else proc.returncode}")
+    try:
+        r = json.loads(proc.stdout)
+    except (ValueError, TypeError):
+        return _result(spec, False, 0.0, "subprocess returned non-JSON result")
+    if "bool" in r:
+        out = bool(r["bool"])
+        return _result(spec, out, 1.0 if out else 0.0)
+    v = float(r.get("num", 0.0))
+    return _result(spec, v > 0.0, v)
 
 
 def _eval_custom(
-    spec: AssertionSpec, case: Case, resp: Response, sandbox: str
+    spec: AssertionSpec,
+    case: Case,
+    resp: Response,
+    sandbox: str,
+    allow_subprocess: bool = False,
 ) -> AssertionResult:
     text = resp.text or ""
     if sandbox == "disabled":
@@ -252,9 +363,20 @@ def _eval_custom(
             return _result(spec, False, 0.0, "callable returned non-bool/non-numeric")
         return _result(spec, v > 0.0, v)
 
-    # kind == "python": evaluate options.expr in the AST sandbox.
-    if sandbox not in ("expr", "subprocess"):
+    # kind == "python".
+    if sandbox == "subprocess":
+        if not _subprocess_allowed(allow_subprocess):
+            return _result(
+                spec,
+                False,
+                0.0,
+                "subprocess sandbox refused: set scorers.allow_subprocess: true "
+                "(or POLYGRAPH_ALLOW_SUBPROCESS=1) to enable; expr is the safe default",
+            )
+        return _eval_subprocess(spec, text)
+    if sandbox != "expr":
         return _result(spec, False, 0.0, f"unknown sandbox mode: {sandbox!r}")
+    # sandbox == "expr": evaluate options.expr in the AST sandbox.
     expr = spec.options.get("expr")
     if not expr:
         return _result(spec, False, 0.0, "python assertion needs options.expr")
@@ -284,6 +406,7 @@ def _eval_one(
     *,
     similarity: float | None = None,
     sandbox: str = "disabled",
+    allow_subprocess: bool = False,
 ) -> AssertionResult:
     kind = spec.kind
     value = spec.value
@@ -368,7 +491,7 @@ def _eval_one(
             return _result(spec, passed, similarity, f"similarity {similarity:.3f} below 0.5")
 
         if kind in ("python", "callable"):
-            return _eval_custom(spec, case, resp, sandbox)
+            return _eval_custom(spec, case, resp, sandbox, allow_subprocess)
 
         if kind == "regex":
             passed = re.search(str(value), text, _re_flags(spec.flags)) is not None
@@ -450,6 +573,7 @@ async def score_assertions(
     *,
     embedder: Any = None,
     sandbox: str = "disabled",
+    allow_subprocess: bool = False,
     extra_specs: list[AssertionSpec] | None = None,
 ) -> tuple[list[AssertionResult], bool, float | None]:
     """Evaluate every assertion (case + optional shared `extra_specs`).
@@ -457,11 +581,21 @@ async def score_assertions(
     Returns (results, all_passed, assertion_score) where
     `assertion_score = Σ(weightᵢ·valueᵢ) / Σ(weightᵢ)` over results whose value
     is not None. Never raises.
+
+    `sandbox` selects the custom-code execution mode; `allow_subprocess` is the
+    explicit opt-in required before sandbox="subprocess" will run.
     """
     specs = list(case.assertions) + list(extra_specs or [])
     sims = await _similarities(specs, resp, embedder)
     results = [
-        _eval_one(s, case, resp, similarity=sims.get(i), sandbox=sandbox)
+        _eval_one(
+            s,
+            case,
+            resp,
+            similarity=sims.get(i),
+            sandbox=sandbox,
+            allow_subprocess=allow_subprocess,
+        )
         for i, s in enumerate(specs)
     ]
     all_passed = all(r.passed for r in results)

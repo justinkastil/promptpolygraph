@@ -55,10 +55,18 @@ as containing whatever the target returned, and run locally for sensitive
 targets.
 
 ### R4 — Custom-code execution (assertions)
-`python`/`callable` assertion scorers can run user code. They are **disabled by
-default** (`scorers.sandbox: disabled`); `expr` restricts to an AST-checked
-expression, and `subprocess` isolates with a timeout. Never enable an untrusted
-config's custom-code scorers.
+`python`/`callable` assertion scorers can run user code, so the config that
+declares them is a trust boundary. They are **disabled by default**
+(`scorers.sandbox: disabled`); `expr` restricts to an AST-checked expression
+with no builtins/imports/I/O.
+
+`subprocess` runs an unrestricted interpreter and is a privilege escalation. It
+requires a **second explicit opt-in** beyond selecting the mode —
+`scorers.allow_subprocess: true` or `POLYGRAPH_ALLOW_SUBPROCESS=1` — so loading
+a config alone can never trigger arbitrary execution. When it does run, the
+child gets a **secret-stripped environment** (provider keys and any
+`*_API_KEY`/`*_TOKEN`/`*_SECRET`/`*_KEY`/`*_PASSWORD` var removed) plus a hard
+timeout. Never enable an untrusted config's custom-code scorers.
 
 ### R5 — Backend credentials
 API keys are read from the environment (`${VAR}` indirection in adapter config),
