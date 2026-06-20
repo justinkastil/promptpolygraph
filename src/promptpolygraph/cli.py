@@ -1044,10 +1044,25 @@ def build_parser() -> argparse.ArgumentParser:
                           help="seal a run's artifacts into a tamper-evident .tar.gz with a checksum manifest")
     pbun.add_argument("--run", required=True)
     pbun.add_argument("--out", help="archive path (default: <run_dir>.polygraph.tar.gz)")
+    pbun.add_argument("--sign-key", dest="sign_key", help="Ed25519 private key (PEM) for public-key signing")
+    pbun.add_argument("--hmac-key", dest="hmac_key", help="HMAC shared secret (or set POLYGRAPH_SIGNING_KEY)")
 
     pver = sub.add_parser("verify", parents=[common],
                           help="verify a sealed run bundle against its manifest (refuses on tamper)")
     pver.add_argument("path", help="path to a .polygraph.tar.gz bundle")
+    pver.add_argument("--pub-key", dest="pub_key", help="Ed25519 public key (PEM) to verify the signature")
+    pver.add_argument("--hmac-key", dest="hmac_key", help="HMAC shared secret to verify the signature")
+
+    pkg = sub.add_parser("keygen", parents=[common],
+                         help="generate an Ed25519 keypair for signing run bundles (needs the [crypto] extra)")
+    pkg.add_argument("--key-dir", dest="key_out_dir", default=".", help="where to write the key files")
+    pkg.add_argument("--name", default="polygraph_ed25519", help="base filename for the keypair")
+
+    pal = sub.add_parser("audit-log", parents=[common],
+                         help="verify a hash-chained audit log")
+    alsub = pal.add_subparsers(dest="audit_cmd", required=True)
+    palv = alsub.add_parser("verify", parents=[common], help="verify the chain is intact")
+    palv.add_argument("path", help="path to an audit_log.jsonl")
 
     pcal = sub.add_parser("calibrate", parents=[common],
                           help="score the breach judge against the labeled ground-truth set")
@@ -1128,16 +1143,52 @@ def cmd_bundle(cfg: Config, args) -> int:
     if not rd.is_dir():
         print(_color(f"no artifacts for run {args.run} at {rd}", "red"))
         return 1
-    path = bundle_dir(rd, args.out)
+    path = bundle_dir(rd, args.out, key=getattr(args, "hmac_key", None),
+                      sign_key=getattr(args, "sign_key", None))
     print(_color(f"sealed bundle: {path}", "green"))
-    print(_color("  contains a SHA-256 manifest of every file; set POLYGRAPH_SIGNING_KEY to also sign", "dim"))
+    if getattr(args, "sign_key", None):
+        print(_color("  signed with Ed25519 — verify with: polygraph verify <bundle> --pub-key <pub.pem>", "dim"))
+    else:
+        print(_color("  SHA-256 manifest of every file; --sign-key (Ed25519) or --hmac-key to sign", "dim"))
     return 0
+
+
+def cmd_keygen(cfg: Config, args) -> int:
+    from . import signing
+
+    if not signing.ed25519_available():
+        print(_color("Ed25519 signing needs the [crypto] extra: pip install 'promptpolygraph[crypto]'", "red"))
+        return 1
+    priv, pub = signing.generate_keypair()
+    out = Path(args.key_out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    priv_path, pub_path = out / f"{args.name}.key", out / f"{args.name}.pub"
+    priv_path.write_text(priv)
+    try:
+        os.chmod(priv_path, 0o600)
+    except OSError:
+        pass
+    pub_path.write_text(pub)
+    print(_color(f"wrote {priv_path} (keep private) and {pub_path} (share for verification)", "green"))
+    return 0
+
+
+def cmd_audit_log(cfg: Config, args) -> int:
+    from .audit_log import AuditLog
+
+    res = AuditLog(args.path).verify_chain()
+    if res["ok"]:
+        print(_color(f"audit log OK — {res['reason']}", "green"))
+        return 0
+    print(_color(f"audit log TAMPERED — {res['reason']}", "red"))
+    return 1
 
 
 def cmd_verify(cfg: Config, args) -> int:
     from .reproducibility import verify_bundle
 
-    res = verify_bundle(args.path)
+    res = verify_bundle(args.path, key=getattr(args, "hmac_key", None),
+                        pub_key=getattr(args, "pub_key", None))
     if res["ok"]:
         print(_color(f"verify OK — {res['reason']} ({res['files_checked']} files)", "green"))
         return 0
@@ -1247,6 +1298,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_references(Config(), args)
     if args.cmd == "validate":
         return cmd_validate(Config(), args)
+    if args.cmd == "keygen":
+        return cmd_keygen(Config(), args)
+    if args.cmd == "audit-log":
+        return cmd_audit_log(Config(), args)
     cfg = _load_cfg(args)
     if args.cmd == "init":
         return cmd_init(cfg, args)

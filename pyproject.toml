@@ -25,6 +25,9 @@ dependencies = [
 [project.optional-dependencies]
 llm = ["openai>=1.40"]
 pdf = ["reportlab>=4.0"]
+# Ed25519 public-key signing of run bundles / report attestations. Optional:
+# HMAC signing (stdlib) is the default; this adds verifiable public-key signing.
+crypto = ["cryptography>=42.0"]
 service = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",

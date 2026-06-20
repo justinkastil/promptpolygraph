@@ -178,6 +178,7 @@ class Persona(BaseModel):
 
 class RunMeta(BaseModel):
     run_id: str = Field(default_factory=new_id)
+    schema_version: int = 1  # record-format version; see migrations.py
     name: str = "polygraph-run"
     created_at: str = Field(default_factory=now_iso)
     completed_at: str | None = None

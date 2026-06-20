@@ -12,7 +12,6 @@ hashes; both use only the standard library, no crypto dependency.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import io
 import json
 import os
@@ -29,12 +28,6 @@ _ENV_KEY = "POLYGRAPH_SIGNING_KEY"
 
 def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
-
-
-def _sign(manifest_bytes: bytes, key: str | None) -> str | None:
-    if not key:
-        return None
-    return hmac.new(key.encode("utf-8"), manifest_bytes, hashlib.sha256).hexdigest()
 
 
 def build_manifest(src_dir: str | Path, *, timestamp: str | None = None) -> dict[str, Any]:
@@ -57,16 +50,28 @@ def build_manifest(src_dir: str | Path, *, timestamp: str | None = None) -> dict
 
 
 def bundle_dir(src_dir: str | Path, out_path: str | Path | None = None, *,
-               key: str | None = None, timestamp: str | None = None) -> str:
-    """Pack `src_dir` into a sealed .tar.gz with a checksum manifest (+ optional
-    HMAC signature). Returns the archive path."""
+               key: str | None = None, sign_key: str | Path | None = None,
+               timestamp: str | None = None) -> str:
+    """Pack `src_dir` into a sealed .tar.gz with a checksum manifest and an
+    optional signature. `sign_key` is a path to (or PEM text of) an Ed25519
+    private key for public-key signing; otherwise `key` (or
+    ``POLYGRAPH_SIGNING_KEY``) gives an HMAC shared secret. Returns the archive
+    path."""
+    from . import signing
+
     src = Path(src_dir)
     if not src.is_dir():
         raise NotADirectoryError(f"not a directory: {src}")
     out = Path(out_path) if out_path else src.with_suffix(".polygraph.tar.gz")
     manifest = build_manifest(src, timestamp=timestamp)
     manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    sig = _sign(manifest_bytes, key if key is not None else os.environ.get(_ENV_KEY))
+
+    ed_priv = None
+    if sign_key is not None:
+        p = Path(sign_key)
+        ed_priv = p.read_text() if p.exists() else str(sign_key)
+    hmac_key = key if key is not None else os.environ.get(_ENV_KEY)
+    sig_record = signing.sign(manifest_bytes, hmac_key=hmac_key, ed25519_private_pem=ed_priv)
 
     def _add_bytes(tar: tarfile.TarFile, name: str, data: bytes) -> None:
         info = tarfile.TarInfo(name)
@@ -78,15 +83,19 @@ def bundle_dir(src_dir: str | Path, out_path: str | Path | None = None, *,
         for rel in sorted(manifest["files"]):
             tar.add(src / rel, arcname=rel)
         _add_bytes(tar, _MANIFEST, manifest_bytes)
-        if sig:
-            _add_bytes(tar, _SIG, (sig + "\n").encode("utf-8"))
+        if sig_record:
+            _add_bytes(tar, _SIG, (json.dumps(sig_record) + "\n").encode("utf-8"))
     return str(out)
 
 
-def verify_bundle(path: str | Path, *, key: str | None = None) -> dict[str, Any]:
+def verify_bundle(path: str | Path, *, key: str | None = None,
+                  pub_key: str | Path | None = None) -> dict[str, Any]:
     """Re-hash a bundle's contents against its manifest. Returns
     {ok, reason, files_checked, mismatches, signed, signature_ok}. `ok` is False
-    on any missing/extra/mismatched file or a bad signature."""
+    on any missing/extra/mismatched file or a bad signature. `pub_key` is an
+    Ed25519 public key (path or PEM) for public-key verification; `key` is an
+    HMAC secret."""
+    from . import signing
     p = Path(path)
     if not p.exists():
         return {"ok": False, "reason": f"no such bundle: {p}", "files_checked": 0,
@@ -117,12 +126,21 @@ def verify_bundle(path: str | Path, *, key: str | None = None) -> dict[str, Any]
             signed = _SIG in members
             signature_ok: bool | None = None
             eff_key = key if key is not None else os.environ.get(_ENV_KEY)
+            ed_pub = None
+            if pub_key is not None:
+                pp = Path(pub_key)
+                ed_pub = pp.read_text() if pp.exists() else str(pub_key)
             if signed:
                 stored = tar.extractfile(_SIG).read().decode("utf-8").strip()
-                if eff_key:
-                    signature_ok = hmac.compare_digest(stored, _sign(manifest_bytes, eff_key) or "")
-                else:
-                    signature_ok = None  # present but no key to check it
+                try:
+                    record = json.loads(stored)
+                    if not isinstance(record, dict) or "alg" not in record:
+                        raise ValueError
+                except (ValueError, json.JSONDecodeError):
+                    # legacy bundles stored a bare HMAC-SHA256 hex string
+                    record = {"alg": signing.ALG_HMAC, "sig": stored}
+                signature_ok = signing.verify(manifest_bytes, record,
+                                              hmac_key=eff_key, ed25519_public_pem=ed_pub)
     except (tarfile.TarError, OSError, json.JSONDecodeError) as e:
         return {"ok": False, "reason": f"unreadable bundle: {e}", "files_checked": 0,
                 "mismatches": [], "signed": False, "signature_ok": None}

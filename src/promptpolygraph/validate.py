@@ -73,6 +73,16 @@ def run_iq() -> list[dict[str, Any]]:
         checks.append(_check("reference integrity (OWASP/ATLAS pinned)", res["ok"], res["reason"]))
     except Exception as e:  # noqa: BLE001
         checks.append(_check("reference integrity (OWASP/ATLAS pinned)", False, str(e)))
+
+    # run record schema is current
+    try:
+        from .migrations import CURRENT_RUN_SCHEMA
+        from .models import RunMeta
+        checks.append(_check("run record schema is current",
+                             RunMeta().schema_version == CURRENT_RUN_SCHEMA,
+                             f"v{CURRENT_RUN_SCHEMA}"))
+    except Exception as e:  # noqa: BLE001
+        checks.append(_check("run record schema is current", False, str(e)))
     return checks
 
 
@@ -197,6 +207,36 @@ def run_oq() -> list[dict[str, Any]]:
                                  intact and build_manifest(src)["file_count"] == 1))
     except Exception as e:  # noqa: BLE001
         checks.append(_check("sealed bundle verifies + is tamper-evident", False, str(e)))
+
+    # 9. signing (HMAC always; Ed25519 when the [crypto] extra is present)
+    try:
+        from . import signing
+        rec = signing.sign(b"x", hmac_key="k")
+        ok = signing.verify(b"x", rec, hmac_key="k") and not signing.verify(b"x", rec, hmac_key="bad")
+        detail = "hmac" + (" + ed25519" if signing.ed25519_available() else " (ed25519: install [crypto])")
+        if signing.ed25519_available():
+            priv, pub = signing.generate_keypair()
+            erec = signing.sign(b"x", ed25519_private_pem=priv)
+            ok = ok and signing.verify(b"x", erec, ed25519_public_pem=pub)
+        checks.append(_check("artifact signing (sign/verify)", bool(ok), detail))
+    except Exception as e:  # noqa: BLE001
+        checks.append(_check("artifact signing (sign/verify)", False, str(e)))
+
+    # 10. hash-chained audit log detects tampering
+    try:
+        import tempfile
+        from .audit_log import AuditLog
+        with tempfile.TemporaryDirectory() as td:
+            log = AuditLog(Path(td) / "al.jsonl")
+            log.append("a", ts="t1")
+            log.append("b", ts="t2")
+            intact = log.verify_chain()["ok"]
+            p = Path(td) / "al.jsonl"
+            p.write_text(p.read_text().replace('"action": "a"', '"action": "x"'))
+            tampered_caught = not log.verify_chain()["ok"]
+            checks.append(_check("audit log is tamper-evident", intact and tampered_caught))
+    except Exception as e:  # noqa: BLE001
+        checks.append(_check("audit log is tamper-evident", False, str(e)))
 
     return checks
 
