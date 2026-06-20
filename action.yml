@@ -1,0 +1,126 @@
+name: PromptPolygraph
+description: Run the PromptPolygraph evaluation gate (run -> analyze --ci -> report) and emit JUnit/SARIF.
+author: PromptPolygraph
+
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  config:
+    description: Path to the config.yaml under test.
+    required: true
+  mode:
+    description: Corpus mode passed to `polygraph all` (fixed, varied, adversarial, hybrid). Empty uses the config default.
+    required: false
+    default: ""
+  format:
+    description: Comma list of report formats for the human-facing render.
+    required: false
+    default: "md,html"
+  baseline:
+    description: Baseline for the regression check (run id, rolling:N, or HEAD). Empty disables it.
+    required: false
+    default: ""
+  mock:
+    description: Offline deterministic mode (no API calls). Set "true" for key-free runs.
+    required: false
+    default: "false"
+  python-version:
+    description: Python version for actions/setup-python.
+    required: false
+    default: "3.12"
+  extras:
+    description: Optional pip extras to install with the package, e.g. "llm,pdf". Empty installs core only.
+    required: false
+    default: ""
+  source:
+    description: Install source for the package. The PyPI name "promptpolygraph" by default, or "." to install the checked-out repo.
+    required: false
+    default: "promptpolygraph"
+
+outputs:
+  verdict:
+    description: Gate result, "pass" or "fail".
+    value: ${{ steps.gate.outputs.verdict }}
+  report-dir:
+    description: Directory holding the run artifacts (reports, JUnit, SARIF, summary.json).
+    value: ${{ steps.gate.outputs.report-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install PromptPolygraph
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        spec='${{ inputs.source }}'
+        extras='${{ inputs.extras }}'
+        if [ -n "$extras" ]; then
+          spec="${spec}[${extras}]"
+        fi
+        # Quote so shells do not glob the bracketed extras.
+        pip install "$spec"
+
+    - name: Run gate
+      id: gate
+      shell: bash
+      env:
+        PG_CONFIG: ${{ inputs.config }}
+        PG_MODE: ${{ inputs.mode }}
+        PG_FORMAT: ${{ inputs.format }}
+        PG_BASELINE: ${{ inputs.baseline }}
+        PG_MOCK: ${{ inputs.mock }}
+      run: |
+        set -euo pipefail
+        out_dir="${RUNNER_TEMP:-/tmp}/polygraph-out"
+
+        mock_flag=""
+        if [ "${PG_MOCK}" = "true" ]; then
+          mock_flag="--mock"
+        fi
+
+        mode_flag=""
+        if [ -n "${PG_MODE}" ]; then
+          mode_flag="--mode ${PG_MODE}"
+        fi
+
+        baseline_flag=""
+        if [ -n "${PG_BASELINE}" ]; then
+          baseline_flag="--baseline ${PG_BASELINE}"
+        fi
+
+        # `all` prints "run_id: <id>" on its last line; capture it to drive the
+        # follow-on analyze/report against the same run.
+        all_log="$(mktemp)"
+        polygraph all --config "${PG_CONFIG}" --out-dir "${out_dir}" \
+          ${mock_flag} ${mode_flag} --format "${PG_FORMAT}" | tee "${all_log}"
+        run_id="$(grep '^run_id:' "${all_log}" | tail -n1 | awk '{print $2}')"
+        if [ -z "${run_id}" ]; then
+          echo "could not determine run_id from 'polygraph all' output" >&2
+          exit 1
+        fi
+
+        report_dir="${out_dir}/${run_id}"
+        echo "report-dir=${report_dir}" >> "${GITHUB_OUTPUT}"
+
+        # analyze --ci exits non-zero when the gate fails. Capture that as the
+        # verdict but defer failing the step until the reports are written.
+        verdict="pass"
+        if ! polygraph analyze --config "${PG_CONFIG}" --out-dir "${out_dir}" \
+          --run "${run_id}" ${mock_flag} --ci ${baseline_flag}; then
+          verdict="fail"
+        fi
+        echo "verdict=${verdict}" >> "${GITHUB_OUTPUT}"
+
+        polygraph report --config "${PG_CONFIG}" --out-dir "${out_dir}" \
+          --run "${run_id}" ${mock_flag} --format junit,sarif
+
+        if [ "${verdict}" = "fail" ]; then
+          exit 1
+        fi
