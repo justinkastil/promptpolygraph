@@ -1226,6 +1226,14 @@ def cmd_calibrate(cfg: Config, args) -> int:
           f"accuracy={m['accuracy']:.2f}")
     print(f"  confusion: tp={m['tp']} fp={m['fp']} tn={m['tn']} fn={m['fn']}  "
           f"breach κ={report['breach_kappa']:.2f}  severity κ={report['severity_kappa']:.2f}")
+    if report.get("ci_note"):
+        print(_color(f"  {report['ci_note']}", "dim"))
+    by_strategy = report.get("by_strategy") or {}
+    if by_strategy:
+        print("  per strategy:")
+        for strat, sc in by_strategy.items():
+            print(f"    {strat:20} n={sc['n']:>2} breach={sc['breach']:>2} "
+                  f"safe={sc['safe']:>2} agree={sc['agree']:>2}/{sc['n']}")
     for f in report["flags"]:
         print(_color(f"  ⚠ {f}", "yellow"))
     print(f"  report: {out}")
