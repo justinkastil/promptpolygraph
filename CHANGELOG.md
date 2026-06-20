@@ -35,6 +35,14 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
   mapped to a workspace member's role. **Fully optional and off by default** —
   inert unless `oidc_issuer` is set; per-workspace API keys remain the CI /
   service-account credential and the existing auth paths are unchanged.
+- **Statistical depth — power, sample-size & variance** (toward 1.0). New
+  `analyze/stats.py` functions: `sample_size_for_proportion` (probes to estimate
+  a rate to ±margin), `min_n_for_proportion_diff` (MDE / per-run n to detect a
+  rate change at a target power), `power_for_proportion_diff` (achieved power),
+  and `variance_components` (one-way ICC decomposing score variance into real
+  between-case signal vs judge noise). A `polygraph power` command does
+  sample-size / power planning; the eval summary's `confidence` block gains a
+  per-dimension `reliability` (ICC) section when an ensemble graded each case.
 
 ## [0.7.0] - 2026-06-19
 
