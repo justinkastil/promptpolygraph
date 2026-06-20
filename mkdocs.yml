@@ -1,0 +1,67 @@
+site_name: PromptPolygraph
+site_description: Synthetic-prompt evaluation and persona-audit harness for web and API AI systems.
+repo_url: https://github.com/justinkastil/promptpolygraph
+repo_name: justinkastil/promptpolygraph
+edit_uri: edit/main/docs/
+
+# docs/ holds the hand-written guides; existing top-level docs (ARCHITECTURE.md,
+# SERVICE.md, ...) are referenced by the nav below rather than duplicated.
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_source: false
+            members_order: source
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - CLI: cli.md
+  - Service: SERVICE.md
+  - Red-team: REDTEAM_LOCAL.md
+  - Validation: VALIDATION.md
+  - Architecture: ARCHITECTURE.md
+  - Threat model: THREAT_MODEL.md
+  - Contributing: contributing.md
+  - Reference:
+      - Providers: PROVIDERS.md
+      - Plugins: PLUGINS.md
+      - CI: CI.md
+      - Supply chain: SUPPLY_CHAIN.md
+      - API Reference: reference.md

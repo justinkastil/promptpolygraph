@@ -63,6 +63,9 @@ redteam = [
 ]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 types = ["mypy>=1.10"]
+# Hosted documentation site (mkdocs-material + API reference via mkdocstrings).
+# Build-time only; not needed to run the harness.
+docs = ["mkdocs-material>=9.5", "mkdocstrings[python]>=0.25"]
 
 [project.scripts]
 polygraph = "promptpolygraph.cli:main"
