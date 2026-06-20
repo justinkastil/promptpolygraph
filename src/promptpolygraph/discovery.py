@@ -130,7 +130,7 @@ def discover_providers(*, ollama_base: str | None = None, probe_local: bool = Tr
         elif creds_present:
             reason = "litellm installed; credentials detected"
         else:
-            reason = spec["creds_hint"]
+            reason = str(spec["creds_hint"])
         out.append({
             "id": spec["id"], "label": spec["label"],
             "available": has_litellm and creds_present, "reason": reason,
