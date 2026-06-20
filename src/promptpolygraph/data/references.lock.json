@@ -1,0 +1,123 @@
+{
+  "atlas_techniques": [
+    "AML.T0051",
+    "AML.T0053",
+    "AML.T0054",
+    "AML.T0056",
+    "AML.T0057"
+  ],
+  "count": 13,
+  "mapping_hash": "43a05a487c0aa96fb588b74289233a0ec429ae0e6ee866d82cd504f4a11b2af4",
+  "owasp_categories": [
+    "LLM01:Prompt Injection",
+    "LLM02:Sensitive Information Disclosure",
+    "LLM06:Excessive Agency",
+    "LLM07:System Prompt Leakage"
+  ],
+  "techniques": [
+    {
+      "atlas": "AML.T0051",
+      "id": "base64_evasion",
+      "name": "Encoding evasion",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "fe62524ae11fadcb",
+      "strategy": "obfuscation"
+    },
+    {
+      "atlas": "AML.T0054",
+      "id": "crescendo",
+      "name": "Crescendo (gradual escalation)",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "bf0735987d8b13c8",
+      "strategy": "refusal_robustness"
+    },
+    {
+      "atlas": "AML.T0057",
+      "id": "cross_user",
+      "name": "Cross-user access",
+      "owasp": "LLM02:Sensitive Information Disclosure",
+      "probe_checksum": "d5f4db3c13efd04f",
+      "strategy": "pii_extraction"
+    },
+    {
+      "atlas": "AML.T0054",
+      "id": "dan_roleplay",
+      "name": "DAN / unrestricted role-play",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "3f22d391cd2baec1",
+      "strategy": "jailbreak"
+    },
+    {
+      "atlas": "AML.T0057",
+      "id": "data_exfil",
+      "name": "Sensitive-data extraction",
+      "owasp": "LLM02:Sensitive Information Disclosure",
+      "probe_checksum": "5397fbe205cb19b2",
+      "strategy": "pii_extraction"
+    },
+    {
+      "atlas": "AML.T0051",
+      "id": "direct_injection",
+      "name": "Direct instruction override",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "122435ec5ac3969f",
+      "strategy": "prompt_injection"
+    },
+    {
+      "atlas": "AML.T0053",
+      "id": "excessive_agency",
+      "name": "Unauthorized tool/action",
+      "owasp": "LLM06:Excessive Agency",
+      "probe_checksum": "056ca6188f66f4fc",
+      "strategy": "tool_abuse"
+    },
+    {
+      "atlas": "AML.T0051",
+      "id": "indirect_injection",
+      "name": "Indirect / embedded injection",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "03b553d0894e32c6",
+      "strategy": "prompt_injection"
+    },
+    {
+      "atlas": "AML.T0054",
+      "id": "many_shot",
+      "name": "Many-shot pressure",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "8146a2376253fa56",
+      "strategy": "obfuscation"
+    },
+    {
+      "atlas": "AML.T0051",
+      "id": "payload_splitting",
+      "name": "Payload splitting",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "f2182d953e91a323",
+      "strategy": "prompt_injection"
+    },
+    {
+      "atlas": "AML.T0054",
+      "id": "persona_override",
+      "name": "Persona / system override",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "3f307f5044a60e72",
+      "strategy": "jailbreak"
+    },
+    {
+      "atlas": "AML.T0054",
+      "id": "social_pressure",
+      "name": "Social-engineering pressure",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "6ae5b891b87e26cc",
+      "strategy": "refusal_robustness"
+    },
+    {
+      "atlas": "AML.T0056",
+      "id": "sys_prompt_leak",
+      "name": "System-prompt extraction",
+      "owasp": "LLM07:System Prompt Leakage",
+      "probe_checksum": "a97f55b611b0a83a",
+      "strategy": "system_prompt_leak"
+    }
+  ]
+}

@@ -6,6 +6,81 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-19
+
+A CI/CD-integration release plus the first of the 1.0 validation/trust spine.
+
+### Added
+- **Validation package** (`validate.py`, `polygraph validate`): a regenerable
+  IQ/OQ/PQ evidence bundle. IQ qualifies the install (Python, dependencies,
+  packaged data, reference integrity); OQ exercises each component on golden
+  inputs (stats, corpus+gate, report renderers incl. valid JUnit/SARIF,
+  red-team ASR+CI, calibration); PQ confirms a mock run reproduces byte-for-byte.
+  Writes `evidence.json` + `evidence.md`, exits non-zero on any failure, runs in
+  CI. New `docs/VALIDATION.md`.
+- **Statistical rigor** (`analyze/stats.py`): Wilson-score confidence intervals
+  on proportions (the red-team **ASR now ships with a 95% CI**; assertion pass
+  rate too), a seeded/deterministic percentile bootstrap on continuous
+  aggregates (per-category dimension means), Student-t mean intervals, two-
+  proportion and Welch tests, exact McNemar, and Benjamini-Hochberg FDR. The
+  eval summary gains a `confidence` block (per-(category,dimension) CIs + a
+  small-sample warning) and a `gate_band` verdict. New `analyze.respect_ci`
+  makes the gate return *inconclusive* — not fail — when the threshold falls
+  inside a metric's CI band (default off; the strict point gate is unchanged).
+- **Significance testing for regressions**: `diff_baseline` reports a
+  statistical verdict (two-sample test on each per-dimension delta, BH-corrected
+  across dimensions) alongside the heuristic dead-band, so a multi-dimension
+  sweep does not manufacture false regressions. New `significant_regressions` /
+  `significant_improvements` with q-values; gracefully unavailable against a
+  baseline that predates the CI layer.
+- **Machine-readable CI output**: JUnit XML and SARIF 2.1.0 renderers for both
+  eval and red-team runs (`--format junit,sarif`). SARIF findings render inline
+  on a PR via GitHub/GitLab code scanning; a code-grounded red-team trace
+  attaches a `file:line` location.
+- **One-step regression gate + PR feedback**: `analyze --ci` gains `--baseline`
+  (run id / `rolling:N` / `HEAD`), `--github-annotations` (emit
+  `::error`/`::warning` + a `$GITHUB_STEP_SUMMARY` job summary), and
+  `--pr-comment PATH` (a markdown summary with the per-category table, the
+  assertion-pass-rate CI, and baseline movement).
+- **Config validation + schemas**: `polygraph validate-config` fails fast on a
+  malformed config/rubric with a precise dotted path per error (and warns on
+  unknown keys the tolerant loader would ignore); `polygraph schema` writes
+  config + rubric JSON Schemas for editor autocomplete.
+- **CI scaffolding**: `polygraph scaffold-ci {github,gitlab,jenkins,precommit}`
+  writes a working starter pipeline (validate → gate → JUnit/SARIF → PR
+  feedback → red-team). New `docs/CI.md`.
+- **Rubric-vs-persona discordance scatter** in the HTML report: per-case rubric
+  score vs persona-perceived value with threshold quadrants; the lower-right
+  quadrant (high score, low trust) is highlighted as the actionable off-diagonal.
+- **Provenance + reference integrity** (`provenance.py`): a per-run provenance
+  manifest (tool/version/deps, fingerprints, and — for red-team — probe sources
+  with their package versions and the pinned standards mapping); auto-written
+  beside red-team runs and via `polygraph manifest --run <id>`. The
+  technique→OWASP/ATLAS mapping is pinned behind a checksummed lock
+  (`data/references.lock.json`); `polygraph references --check` (run in CI)
+  fails on drift or any unmapped technique. The wheel now ships the lock.
+- **Judge calibration** (`calibrate.py`, `polygraph calibrate`): scores the
+  breach judge against a bundled, human-labeled ground-truth set
+  (`data/ground_truth_breaches.json`) and reports precision/recall/F1/accuracy,
+  the confusion matrix, and Cohen's κ on the breach decision + severity, with a
+  reliability verdict and the disagreement list. `--min-f1` gates CI on judge
+  reliability; `--guard` calibrates the Llama-Guard judge. New κ /
+  classification primitives in `analyze/stats.py` (`cohen_kappa`,
+  `fleiss_kappa`, `binary_classification_metrics`).
+- **Sealed run bundles** (`reproducibility.py`, `polygraph bundle` /
+  `polygraph verify`): pack a run's artifacts into a `.tar.gz` with a SHA-256
+  manifest of every file plus tool/dependency provenance; `verify` re-hashes the
+  contents and refuses (non-zero) on any tampered/missing/extra file. An
+  optional HMAC signature (`POLYGRAPH_SIGNING_KEY`) adds origin authentication
+  (stdlib only, no crypto dependency). `unbundle` re-inflates for offline replay.
+- **Trust docs**: `docs/THREAT_MODEL.md` (trust boundaries, assets, risks +
+  controls: adversarial content, code-dive egress, the assertion sandbox,
+  integrity/signing, reference drift, supply chain) and `SECURITY.md`
+  (disclosure + safe use).
+
+### Changed
+- `__version__` now reads from the installed package metadata (was hardcoded).
+
 ## [0.6.7] - 2026-06-15
 
 ### Fixed
@@ -200,7 +275,14 @@ Initial public release.
 - Deployable service: FastAPI API + worker + Postgres job queue + scheduler + webhooks
   + dashboard; one Docker image, AWS/GCP deploy guides; CI workflow.
 
-[Unreleased]: https://github.com/justinkastil/promptpolygraph/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/justinkastil/promptpolygraph/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/justinkastil/promptpolygraph/compare/v0.6.7...v0.7.0
+[0.6.6]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.6.6
+[0.6.5]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.6.5
+[0.6.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.6.0
+[0.5.1]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.5.1
+[0.5.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.5.0
+[0.4.1]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.4.1
 [0.4.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.4.0
 [0.3.0]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.3.0
 [0.1.1]: https://github.com/justinkastil/promptpolygraph/releases/tag/v0.1.1

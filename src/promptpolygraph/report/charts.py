@@ -334,6 +334,162 @@ def persona_radar(audit: dict, *, accent: str = _DEFAULT_ACCENT, vmax: float = _
     return "".join(parts)
 
 
+# ─── 3b. rubric-vs-persona discordance scatter ───────────────────────────────
+
+
+def _discordance_points(scores: Sequence[Any], audit: dict, vmax: float) -> list[dict]:
+    """Per-case (rubric_mean, persona_mean) pairs.
+
+    x = mean of the case's non-None rubric dimensions; y = mean of the personas'
+    trust/usefulness/clarity for that case (0–vmax). Only cases scored on *both*
+    axes contribute — the scatter exists to expose where the two disagree.
+    """
+    rubric_by_case: dict[str, float] = {}
+    for s in scores or []:
+        dims = getattr(s, "dimensions", None) or {}
+        vals = [float(v) for v in dims.values() if v is not None]
+        if vals:
+            rubric_by_case[getattr(s, "case_id", "")] = sum(vals) / len(vals)
+
+    persona_vals: dict[str, list[float]] = {}
+    persona = (audit or {}).get("persona") or {}
+    for r in persona.get("reactions") or []:
+        if not isinstance(r, dict):
+            continue
+        for cr in r.get("reactions") or []:
+            if not isinstance(cr, dict):
+                continue
+            cid = cr.get("case_id")
+            if not cid:
+                continue
+            comp = [_num(cr.get(k)) for k in ("trust", "usefulness", "clarity")]
+            comp = [c for c in comp if c is not None]
+            if comp:
+                persona_vals.setdefault(cid, []).append(sum(comp) / len(comp))
+
+    out: list[dict] = []
+    for cid, rx in rubric_by_case.items():
+        ys = persona_vals.get(cid)
+        if not ys:
+            continue
+        out.append({"case_id": cid, "rubric": _clamp(rx, 0, vmax),
+                    "persona": _clamp(sum(ys) / len(ys), 0, vmax)})
+    return out
+
+
+def discordance_scatter(
+    scores: Sequence[Any],
+    audit: dict,
+    *,
+    threshold: float,
+    accent: str = _DEFAULT_ACCENT,
+    vmax: float = _DEFAULT_MAX,
+) -> str:
+    """Scatter of rubric score (x) vs persona-perceived value (y), per case.
+
+    Threshold lines split the plane into quadrants. The point of the chart is
+    the *off-diagonal*: cases the rubric passes but personas distrust (lower-
+    right) are the actionable discordance — a high score that does not land with
+    real users — and are drawn in red. The agreeing diagonal is muted.
+    """
+    pts = _discordance_points(scores, audit, vmax)
+    if len(pts) < 1:
+        return _empty("No rubric/persona overlap")
+
+    pad_l, pad_r, pad_t, pad_b = 46, 18, 18, 40
+    plot = 300
+    w = pad_l + plot + pad_r + 150  # room for a legend
+    h = pad_t + plot + pad_b
+
+    def xpos(v: float) -> float:
+        return pad_l + plot * _clamp(v / vmax, 0, 1)
+
+    def ypos(v: float) -> float:
+        return pad_t + plot * (1 - _clamp(v / vmax, 0, 1))
+
+    thr = threshold if threshold and threshold > 0 else vmax / 2
+    tx, ty = xpos(thr), ypos(thr)
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" '
+        f'height="{h}" font-family="sans-serif" role="img" '
+        f'aria-label="Rubric vs persona discordance scatter">',
+    ]
+    # discordant quadrant shading (rubric>=thr, persona<thr): lower-right.
+    parts.append(
+        f'<rect x="{tx:.1f}" y="{ty:.1f}" width="{pad_l + plot - tx:.1f}" '
+        f'height="{pad_t + plot - ty:.1f}" fill="{_RED}" fill-opacity="0.06"/>'
+    )
+    # plot frame + grid at 0/thr/max on both axes
+    parts.append(
+        f'<rect x="{pad_l}" y="{pad_t}" width="{plot}" height="{plot}" fill="none" stroke="{_GRID}"/>'
+    )
+    parts.append(
+        f'<line x1="{tx:.1f}" y1="{pad_t}" x2="{tx:.1f}" y2="{pad_t + plot}" stroke="{_AMBER}" '
+        f'stroke-width="1" stroke-dasharray="4 3"/>'
+        f'<line x1="{pad_l}" y1="{ty:.1f}" x2="{pad_l + plot}" y2="{ty:.1f}" stroke="{_AMBER}" '
+        f'stroke-width="1" stroke-dasharray="4 3"/>'
+    )
+    # identity diagonal (agreement)
+    parts.append(
+        f'<line x1="{xpos(0):.1f}" y1="{ypos(0):.1f}" x2="{xpos(vmax):.1f}" y2="{ypos(vmax):.1f}" '
+        f'stroke="{_AXIS}" stroke-width="1" stroke-dasharray="2 4" opacity="0.7"/>'
+    )
+    # axis labels
+    parts.append(
+        f'<text x="{pad_l + plot / 2:.1f}" y="{h - 8}" text-anchor="middle" font-size="11" '
+        f'fill="{_TEXT}">Rubric score →</text>'
+        f'<text x="14" y="{pad_t + plot / 2:.1f}" text-anchor="middle" font-size="11" '
+        f'fill="{_TEXT}" transform="rotate(-90 14 {pad_t + plot / 2:.1f})">Persona value →</text>'
+    )
+    for gv in (0.0, thr, vmax):
+        parts.append(
+            f'<text x="{xpos(gv):.1f}" y="{pad_t + plot + 14}" text-anchor="middle" font-size="9" '
+            f'fill="{_MUTED}">{_fmt(gv, 0)}</text>'
+            f'<text x="{pad_l - 6}" y="{ypos(gv) + 3:.1f}" text-anchor="end" font-size="9" '
+            f'fill="{_MUTED}">{_fmt(gv, 0)}</text>'
+        )
+
+    discordant = 0
+    for p in pts:
+        rx, ry = p["rubric"], p["persona"]
+        disc = rx >= thr and ry < thr  # passes rubric, personas distrust
+        if disc:
+            discordant += 1
+            col, r = _RED, 4.2
+        elif rx < thr and ry < thr:
+            col, r = _MUTED, 3.0
+        else:
+            col, r = _GREEN, 3.0
+        parts.append(
+            f'<circle cx="{xpos(rx):.1f}" cy="{ypos(ry):.1f}" r="{r}" fill="{col}" '
+            f'fill-opacity="0.72" stroke="#fff" stroke-width="0.6"/>'
+        )
+
+    # legend
+    lx = pad_l + plot + 24
+    parts.append(
+        f'<text x="{lx}" y="{pad_t + 6}" font-size="10.5" font-weight="600" fill="{_TEXT}">'
+        f'{len(pts)} cases</text>'
+    )
+    legend = [(_RED, f"discordant ({discordant})"), (_GREEN, "both pass"), (_MUTED, "both low")]
+    for i, (col, lab) in enumerate(legend):
+        yy = pad_t + 26 + i * 20
+        parts.append(
+            f'<circle cx="{lx + 5}" cy="{yy - 3}" r="4" fill="{col}"/>'
+            f'<text x="{lx + 16}" y="{yy}" font-size="10" fill="{_TEXT}">{_esc(lab)}</text>'
+        )
+    parts.append(
+        f'<text x="{lx}" y="{pad_t + 26 + 3 * 20 + 8}" font-size="9" fill="{_MUTED}">'
+        f'lower-right = high</text>'
+        f'<text x="{lx}" y="{pad_t + 26 + 3 * 20 + 20}" font-size="9" fill="{_MUTED}">'
+        f'score, low trust</text>'
+    )
+    _ = accent
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 # ─── 4. trend line ───────────────────────────────────────────────────────────
 
 

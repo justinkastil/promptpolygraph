@@ -186,6 +186,9 @@ code { font-family: var(--mono); background: #ececed; padding: .05rem .3rem; bor
   {% if charts and charts.persona_radar %}
   <div class="chart-card"><p class="chart-title">Persona experience (avg trust · usefulness · clarity · would-return)</p>{{ charts.persona_radar | safe }}</div>
   {% endif %}
+  {% if charts and charts.discordance %}
+  <div class="chart-card"><p class="chart-title">Rubric vs persona discordance (lower-right = high score, low trust)</p>{{ charts.discordance | safe }}</div>
+  {% endif %}
   {% for p in personas %}
   <div class="persona">
     <h3>{{ p.persona }}</h3>

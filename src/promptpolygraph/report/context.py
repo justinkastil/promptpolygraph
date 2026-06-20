@@ -484,6 +484,7 @@ def _build_charts(
     audit: Optional[dict],
     branding: dict,
     baseline_diff: Optional[dict],
+    scores: Optional[list] = None,
 ) -> dict:
     """Precompute inline-SVG chart strings for the template to embed verbatim.
 
@@ -511,6 +512,9 @@ def _build_charts(
         "heatmap": _safe(lambda: _charts.score_heatmap(summary, accent=accent)),
         "dimension_bars": _safe(lambda: _charts.dimension_bars(summary, accent=accent)),
         "persona_radar": _safe(lambda: _charts.persona_radar(audit or {}, accent=accent)),
+        "discordance": _safe(lambda: _charts.discordance_scatter(
+            scores or [], audit or {}, threshold=threshold if threshold is not None else 7.0,
+            accent=accent)),
         "trend": (
             _safe(lambda: _charts.trend_line(series, accent=accent, threshold=threshold))
             if series else None
@@ -556,7 +560,7 @@ def build_context(
 
     return {
         "cover": _build_cover(run_meta, summary, cases, scores),
-        "charts": _build_charts(summary, audit, branding_block, baseline_diff),
+        "charts": _build_charts(summary, audit, branding_block, baseline_diff, scores),
         "dimensions": list(summary.get("dimensions") or []),
         "has_baseline": bool(baseline_diff and baseline_diff.get("by_category")),
         "categories": _build_categories(cases, responses, scores, summary, baseline_diff),

@@ -278,6 +278,70 @@ def cmd_analyze(cfg: Config, run_id: str) -> dict:
     return summary
 
 
+def _resolve_baseline_summary(cfg: Config, store, run_id: str, spec: str):
+    """Resolve a baseline spec into a (summary, label). Spec is a run id,
+    ``rolling:N`` (median of the N most-recent comparable runs), or ``HEAD``
+    (the most-recent comparable run before this one)."""
+    spec = (spec or "").strip()
+    meta = store.get_run(run_id)
+    fp = meta.corpus_fingerprint if meta else None
+
+    def _comparable_prior():
+        prior = [m for m in store.list_runs()
+                 if m.run_id != run_id and (fp is None or m.corpus_fingerprint == fp)]
+        prior.sort(key=lambda m: m.created_at or "", reverse=True)
+        return prior
+
+    if spec.startswith("rolling:"):
+        n = int(spec.split(":", 1)[1] or "5")
+        summaries = []
+        for m in _comparable_prior()[:n]:
+            p = _run_dir(cfg, m.run_id) / "summary.json"
+            if p.exists():
+                summaries.append(json.loads(p.read_text()))
+        return A.rolling_baseline_summary(summaries), f"rolling:{len(summaries)}"
+    if spec.upper() == "HEAD":
+        prior = _comparable_prior()
+        if not prior:
+            return {}, "HEAD(none)"
+        p = _run_dir(cfg, prior[0].run_id) / "summary.json"
+        return (json.loads(p.read_text()) if p.exists() else {}), prior[0].run_id[:8]
+    # explicit run id
+    p = _run_dir(cfg, spec) / "summary.json"
+    return (json.loads(p.read_text()) if p.exists() else {}), spec[:8]
+
+
+def _ci_feedback(cfg: Config, args, summary: dict) -> None:
+    """Emit GitHub annotations / a PR-comment / a job summary for an analyze --ci
+    run, computing the baseline diff when --baseline is given."""
+    from . import ci as _ci
+
+    baseline_diff = None
+    spec = getattr(args, "baseline", None)
+    if spec:
+        store = _store(cfg)
+        baseline, label = _resolve_baseline_summary(cfg, store, args.run, spec)
+        if baseline:
+            alpha = float(getattr(cfg.analyze, "alpha", 0.05) or 0.05)
+            conf = float(getattr(cfg.analyze, "confidence", 0.95) or 0.95)
+            baseline_diff = A.diff_baseline(summary, baseline, alpha=alpha, confidence=conf)
+            _save_json(_run_dir(cfg, args.run) / "ci_baseline_diff.json", baseline_diff)
+            print(_color(f"baseline {label}: {len(baseline_diff['regressions'])} regression(s), "
+                         f"{len(baseline_diff.get('significant_regressions', []))} significant", "dim"))
+
+    if getattr(args, "github_annotations", False):
+        n = _ci.emit_annotations(summary, baseline_diff)
+        md = _ci.pr_comment_markdown(summary, baseline_diff, run_id=args.run)
+        if _ci.write_step_summary(md):
+            print(_color("wrote GitHub job summary", "dim"))
+        print(_color(f"emitted {n} annotation(s)", "dim"))
+
+    if getattr(args, "pr_comment", None):
+        md = _ci.pr_comment_markdown(summary, baseline_diff, run_id=args.run)
+        Path(args.pr_comment).write_text(md)
+        print(f"  pr-comment: {args.pr_comment}")
+
+
 def cmd_audit(cfg: Config, run_id: str) -> dict:
     store = _store(cfg)
     cases = store.get_cases(run_id)
@@ -422,13 +486,27 @@ def cmd_regressions(cfg: Config, args) -> dict:
         baseline = json.loads(bpath.read_text()) if bpath.exists() else {}
         label = against[:8]
 
-    diff = A.diff_baseline(current, baseline)
+    alpha = float(getattr(cfg.analyze, "alpha", 0.05) or 0.05)
+    confidence = float(getattr(cfg.analyze, "confidence", 0.95) or 0.95)
+    diff = A.diff_baseline(current, baseline, alpha=alpha, confidence=confidence)
     out = rd / f"regressions_vs_{label.replace(':', '_')}.json"
     _save_json(out, diff)
+    sig = diff.get("significance", {}) or {}
+    sig_note = ""
+    if sig.get("available"):
+        sig_note = (f"; {len(diff['significant_regressions'])} statistically significant "
+                    f"(BH α={sig.get('alpha')})")
     print(f"regressions {args.run[:8]} vs {label}: "
-          f"{len(diff['regressions'])} regressions, {len(diff['improvements'])} improvements -> {out}")
+          f"{len(diff['regressions'])} regressions, {len(diff['improvements'])} improvements"
+          f"{sig_note} -> {out}")
     for r in diff["regressions"]:
-        print(f"  ↓ {r['category']}/{r['dimension']}: {r['baseline']:.2f} -> {r['current']:.2f} ({r['delta']:+.2f})")
+        star = ""
+        for s in diff.get("significant_regressions", []):
+            if s["category"] == r["category"] and s["dimension"] == r["dimension"]:
+                star = f"  [significant, q={s.get('q_value'):.3f}]"
+                break
+        print(f"  ↓ {r['category']}/{r['dimension']}: {r['baseline']:.2f} -> {r['current']:.2f} "
+              f"({r['delta']:+.2f}){star}")
     return diff
 
 
@@ -720,9 +798,22 @@ def cmd_redteam(cfg: Config, args) -> int:
         p = rd / "redteam.json"
         _save_json(p, render_json(report))
         written.append(p)
+    if "junit" in formats:
+        from .report.junit import render_junit_redteam
+        p = rd / "redteam.junit.xml"
+        p.write_text(render_junit_redteam(report))
+        written.append(p)
+    if "sarif" in formats:
+        from .report.sarif import render_sarif_redteam
+        p = rd / "redteam.sarif.json"
+        p.write_text(render_sarif_redteam(report))
+        written.append(p)
     # always keep a machine-readable copy
     if "json" not in formats:
         _save_json(rd / "redteam.json", render_json(report))
+    # provenance manifest: what produced this result (sources+versions, pinned mapping)
+    from . import provenance as P
+    _save_json(rd / "provenance.json", P.redteam_provenance(report, sources=sources))
 
     st = report.stats or {}
     print(_color(f"\nverdict: {st.get('breaches', 0)}/{st.get('attacks', 0)} attacks breached "
@@ -832,13 +923,19 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--run", required=True)
     pa.add_argument("--judges", type=int)
     pa.add_argument("--ci", action="store_true", help="exit non-zero if the gate fails")
+    pa.add_argument("--baseline", help="baseline for regression check: a run id, rolling:N, or HEAD")
+    pa.add_argument("--github-annotations", action="store_true",
+                    help="emit GitHub Actions ::error/::warning annotations + job summary")
+    pa.add_argument("--pr-comment", dest="pr_comment", metavar="PATH",
+                    help="write a markdown PR-comment summary to this path")
 
     pu = sub.add_parser("audit", parents=[common], help="persona + forensic audit of a run")
     pu.add_argument("--run", required=True)
 
     prp = sub.add_parser("report", parents=[common], help="render a report")
     prp.add_argument("--run", required=True)
-    prp.add_argument("--format", default="md,html")
+    prp.add_argument("--format", default="md,html",
+                     help="comma list: md,html,docx,pdf,junit,sarif (junit/sarif for CI)")
     prp.add_argument("--baseline", help="prior run id for delta columns")
 
     pc = sub.add_parser("compare", parents=[common], help="compare N runs (A/B or trend matrix)")
@@ -917,7 +1014,7 @@ def build_parser() -> argparse.ArgumentParser:
                                        "(e.g. catalog,garak,pyrit,dataset:advbench)")
     prt.add_argument("--guard", action="store_true",
                      help="judge breaches with a Llama-Guard-style safety classifier instead of the LLM reviewer")
-    prt.add_argument("--format", default="md,html", help="md,html,json")
+    prt.add_argument("--format", default="md,html", help="md,html,json,junit,sarif")
 
     pall = sub.add_parser("all", parents=[common], help="run -> analyze -> audit -> report")
     _add_corpus_dials(pall)
@@ -925,11 +1022,231 @@ def build_parser() -> argparse.ArgumentParser:
     pall.add_argument("--judges", type=int)
     pall.add_argument("--format", default="md,html")
 
+    pvc = sub.add_parser("validate-config", parents=[common],
+                         help="fail-fast validation of a config (and optional rubric) before a run")
+    pvc.add_argument("--rubric", help="also validate this rubric.yaml")
+
+    pval = sub.add_parser("validate", parents=[common],
+                          help="run IQ/OQ/PQ and emit a validation evidence bundle")
+    pval.add_argument("--out", help="directory to write evidence.json + evidence.md")
+    pval.add_argument("--no-pq", dest="no_pq", action="store_true",
+                      help="skip the performance-qualification (reproducibility) run")
+
+    psc = sub.add_parser("schema", parents=[common],
+                         help="write JSON Schemas for config + rubric (editor autocomplete / CI)")
+    psc.add_argument("--out", default="schemas", help="output directory (default: schemas/)")
+
+    pmf = sub.add_parser("manifest", parents=[common],
+                         help="write a provenance manifest for a run (what produced the result)")
+    pmf.add_argument("--run", required=True)
+
+    pbun = sub.add_parser("bundle", parents=[common],
+                          help="seal a run's artifacts into a tamper-evident .tar.gz with a checksum manifest")
+    pbun.add_argument("--run", required=True)
+    pbun.add_argument("--out", help="archive path (default: <run_dir>.polygraph.tar.gz)")
+
+    pver = sub.add_parser("verify", parents=[common],
+                          help="verify a sealed run bundle against its manifest (refuses on tamper)")
+    pver.add_argument("path", help="path to a .polygraph.tar.gz bundle")
+
+    pcal = sub.add_parser("calibrate", parents=[common],
+                          help="score the breach judge against the labeled ground-truth set")
+    pcal.add_argument("--guard", action="store_true", help="calibrate the Llama-Guard judge instead")
+    pcal.add_argument("--ground-truth", dest="ground_truth", help="path to a custom ground-truth JSON")
+    pcal.add_argument("--out", help="write the calibration report JSON here")
+    pcal.add_argument("--min-f1", dest="min_f1", type=float,
+                      help="exit non-zero if the judge's F1 is below this (CI calibration gate)")
+
+    pref = sub.add_parser("references", parents=[common],
+                          help="check or update the pinned OWASP/ATLAS technique mapping")
+    pref.add_argument("--check", action="store_true", help="fail if the live mapping drifted from the lock")
+    pref.add_argument("--write", action="store_true", help="rewrite the reference lock from the current mapping")
+
+    from .scaffold import providers as _ci_providers
+    psci = sub.add_parser("scaffold-ci", parents=[common],
+                          help="write a starter CI pipeline (gate + JUnit/SARIF + PR feedback)")
+    psci.add_argument("provider", choices=_ci_providers(),
+                      help="github | gitlab | jenkins | precommit")
+    psci.add_argument("--config-path", dest="config_path", default="config.yaml",
+                      help="config path the generated pipeline references")
+    psci.add_argument("--force", action="store_true", help="overwrite an existing file")
+
     return parser
+
+
+def cmd_validate(cfg: Config, args) -> int:
+    from . import validate as V
+
+    bundle = V.validate(getattr(args, "out", None), include_pq=not getattr(args, "no_pq", False))
+    for sec, s in bundle["summary"].items():
+        mark = _color("ok", "green") if s["passed"] == s["total"] else _color("FAIL", "red")
+        print(f"  {sec}: {s['passed']}/{s['total']} {mark}")
+        for c in bundle["qualifications"][sec]:
+            if not c["ok"]:
+                print(_color(f"    ✗ {c['name']} — {c['detail']}", "red"))
+    overall = _color("PASS", "green") if bundle["overall_ok"] else _color("FAIL", "red")
+    print(f"validation: {overall} (promptpolygraph {bundle['version']})")
+    if getattr(args, "out", None):
+        print(f"  evidence: {args.out}/evidence.json + evidence.md")
+    return 0 if bundle["overall_ok"] else 1
+
+
+def cmd_validate_config(cfg: Config, args) -> int:
+    """Validate a config (and optional rubric) before a run. Exit 1 on any error."""
+    from .schema_gen import validate_config_file, validate_rubric_file
+
+    if not args.config:
+        print(_color("validate-config: pass --config <path>", "red"))
+        return 1
+    ok = True
+    res = validate_config_file(args.config)
+    for w in res["warnings"]:
+        print(_color(f"  warning: {w}", "yellow"))
+    if res["ok"]:
+        print(_color(f"config OK: {args.config}", "green"))
+    else:
+        ok = False
+        print(_color(f"config INVALID: {args.config}", "red"))
+        for e in res["errors"]:
+            print(f"  ✗ {e}")
+    if getattr(args, "rubric", None):
+        rres = validate_rubric_file(args.rubric)
+        if rres["ok"]:
+            print(_color(f"rubric OK: {args.rubric}", "green"))
+        else:
+            ok = False
+            print(_color(f"rubric INVALID: {args.rubric}", "red"))
+            for e in rres["errors"]:
+                print(f"  ✗ {e}")
+    return 0 if ok else 1
+
+
+def cmd_bundle(cfg: Config, args) -> int:
+    from .reproducibility import bundle_dir
+
+    rd = _run_dir(cfg, args.run)
+    if not rd.is_dir():
+        print(_color(f"no artifacts for run {args.run} at {rd}", "red"))
+        return 1
+    path = bundle_dir(rd, args.out)
+    print(_color(f"sealed bundle: {path}", "green"))
+    print(_color("  contains a SHA-256 manifest of every file; set POLYGRAPH_SIGNING_KEY to also sign", "dim"))
+    return 0
+
+
+def cmd_verify(cfg: Config, args) -> int:
+    from .reproducibility import verify_bundle
+
+    res = verify_bundle(args.path)
+    if res["ok"]:
+        print(_color(f"verify OK — {res['reason']} ({res['files_checked']} files)", "green"))
+        return 0
+    print(_color(f"verify FAILED — {res['reason']}", "red"))
+    for m in res["mismatches"][:20]:
+        print(f"  ✗ {m}")
+    return 1
+
+
+def cmd_calibrate(cfg: Config, args) -> int:
+    from .calibrate import calibrate_breach_judge, load_ground_truth
+
+    gt = load_ground_truth(args.ground_truth) if getattr(args, "ground_truth", None) else None
+    report = asyncio.run(calibrate_breach_judge(
+        _client(cfg), mock=_is_mock(cfg), guard=getattr(args, "guard", False),
+        ground_truth=gt,
+    ))
+    out = Path(args.out) if getattr(args, "out", None) else _run_dir(cfg, "calibration") / "calibration.json"
+    _save_json(out, report)
+    m = report["metrics"]
+    verdict = _color("RELIABLE", "green") if report["reliable"] else _color("UNRELIABLE", "red")
+    src = "mock judge" if report["mock"] else f"{report['judge']} judge"
+    print(f"calibration ({src}, n={report['n']}): {verdict}")
+    print(f"  precision={m['precision']:.2f} recall={m['recall']:.2f} f1={m['f1']:.2f} "
+          f"accuracy={m['accuracy']:.2f}")
+    print(f"  confusion: tp={m['tp']} fp={m['fp']} tn={m['tn']} fn={m['fn']}  "
+          f"breach κ={report['breach_kappa']:.2f}  severity κ={report['severity_kappa']:.2f}")
+    for f in report["flags"]:
+        print(_color(f"  ⚠ {f}", "yellow"))
+    print(f"  report: {out}")
+    if getattr(args, "min_f1", None) is not None and m["f1"] < args.min_f1:
+        print(_color(f"calibration gate: F1 {m['f1']:.2f} < {args.min_f1:.2f}", "red"))
+        return 1
+    return 0
+
+
+def cmd_manifest(cfg: Config, args) -> int:
+    from . import provenance as P
+
+    store = _store(cfg)
+    meta = store.get_run(args.run)
+    if meta is None:
+        print(_color(f"no such run: {args.run}", "red"))
+        return 1
+    manifest = P.eval_provenance(meta, cfg)
+    out = _run_dir(cfg, args.run) / "provenance.json"
+    _save_json(out, manifest)
+    print(f"  provenance: {out}")
+    tp = manifest["tool"]
+    print(_color(f"  {tp['tool']} {tp['version']} · python {tp['python']} · "
+                 f"{len(tp['dependencies'])} deps pinned", "dim"))
+    return 0
+
+
+def cmd_references(cfg: Config, args) -> int:
+    from . import provenance as P
+
+    if args.write:
+        p = P.write_reference_lock()
+        print(_color(f"wrote reference lock: {p}", "green"))
+        return 0
+    res = P.check_reference_integrity()
+    if res["ok"]:
+        print(_color(f"reference integrity OK — {res['reason']} ({res['actual'][:12]})", "green"))
+        return 0
+    print(_color(f"reference integrity FAILED — {res['reason']}", "red"))
+    if res.get("expected"):
+        print(f"  expected {res['expected'][:12]}, got {res['actual'][:12]}")
+    return 1
+
+
+def cmd_scaffold_ci(cfg: Config, args) -> int:
+    from .scaffold import scaffold_ci
+
+    res = scaffold_ci(args.provider, config=args.config_path, force=args.force)
+    if res["skipped"]:
+        print(_color(f"{res['path']} exists — pass --force to overwrite", "yellow"))
+        return 0
+    print(_color(f"wrote {res['path']}", "green"))
+    print(_color(f"edit the config path ({args.config_path}) and drop --mock once an adapter "
+                 "points at your system", "dim"))
+    return 0
+
+
+def cmd_schema(cfg: Config, args) -> int:
+    from .schema_gen import write_schemas
+
+    written = write_schemas(args.out)
+    for name, path in written.items():
+        print(f"  {name}: {path}")
+    print(_color(f"add  # yaml-language-server: $schema={written['config']}  "
+                 "to a config for editor validation", "dim"))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # These commands must not eagerly load/validate the config (that is their job),
+    # so they run on a bare default Config before the loader can raise.
+    if args.cmd == "validate-config":
+        return cmd_validate_config(Config(), args)
+    if args.cmd == "schema":
+        return cmd_schema(Config(), args)
+    if args.cmd == "scaffold-ci":
+        return cmd_scaffold_ci(Config(), args)
+    if args.cmd == "references":
+        return cmd_references(Config(), args)
+    if args.cmd == "validate":
+        return cmd_validate(Config(), args)
     cfg = _load_cfg(args)
     if args.cmd == "init":
         return cmd_init(cfg, args)
@@ -939,6 +1256,9 @@ def main(argv: list[str] | None = None) -> int:
         cmd_generate(cfg, args)
     elif args.cmd == "analyze":
         summary = cmd_analyze(cfg, args.run)
+        if getattr(args, "ci", False) or getattr(args, "github_annotations", False) \
+                or getattr(args, "pr_comment", None) or getattr(args, "baseline", None):
+            _ci_feedback(cfg, args, summary)
         return A.ci_exit_code(summary) if getattr(args, "ci", False) else 0
     elif args.cmd == "audit":
         cmd_audit(cfg, args.run)
@@ -967,6 +1287,18 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_redteam(cfg, args)
     elif args.cmd == "all":
         return cmd_all(cfg, args)
+    elif args.cmd == "manifest":
+        return cmd_manifest(cfg, args)
+    elif args.cmd == "calibrate":
+        return cmd_calibrate(cfg, args)
+    elif args.cmd == "bundle":
+        return cmd_bundle(cfg, args)
+    elif args.cmd == "verify":
+        return cmd_verify(cfg, args)
+    elif args.cmd == "validate-config":
+        return cmd_validate_config(cfg, args)
+    elif args.cmd == "schema":
+        return cmd_schema(cfg, args)
     return 0
 
 

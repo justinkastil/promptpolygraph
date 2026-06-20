@@ -31,7 +31,11 @@ Evaluating an AI system well means more than a single accuracy number. PromptPol
 - **Forensic audit** — per-category agents trace low scores to failure modes and emit a concrete
   **suggested fix** (the `file:line` to change + a diff) for systems whose source you provide.
 - **Comparison & trends** — comparability-gated N-run comparison, per-dimension trends, and regression
-  detection vs a pinned or rolling baseline.
+  detection vs a pinned or rolling baseline, with **statistical significance** (a two-sample test,
+  Benjamini-Hochberg-corrected across dimensions) so noise is not flagged as a regression.
+- **Statistical rigor** — proportions (red-team **ASR**, pass/assertion rates) carry **confidence
+  intervals**, continuous aggregates carry seeded bootstrap intervals, and the gate can decline to fail
+  inside the noise band — so the numbers a report stakes a claim on are defensible.
 - **Visuals & reports** — a local dashboard (score heatmaps, compare matrix, trend lines, persona radar,
   root-cause→fix view) and presentation-grade markdown / docx / pdf / html reports with inline charts.
 
@@ -278,6 +282,45 @@ The report leads with the **attack success rate (ASR)**, an OWASP coverage table
 (tested vs breached), and OWASP/ATLAS tags on every finding. See
 [`docs/REDTEAM_LOCAL.md`](docs/REDTEAM_LOCAL.md) for running attacker/judge
 models locally (Ollama / HuggingFace, Mac Studio / NVIDIA DGX Spark / cloud).
+
+## Continuous integration (CI gate)
+
+PromptPolygraph drops into a pipeline as a gate — validate the config, score a run, fail on a
+regression, and emit reports the CI renders natively. Generate a starter pipeline:
+
+```bash
+polygraph scaffold-ci github      # or: gitlab | jenkins | precommit
+```
+
+```bash
+polygraph validate-config --config config.yaml           # fail fast on a bad config (precise error path)
+polygraph analyze --config config.yaml --run <id> --ci \
+    --baseline rolling:5 --github-annotations --pr-comment pr.md
+polygraph report  --config config.yaml --run <id> --format junit,sarif
+```
+
+`--ci` exits non-zero on gate failure. `--baseline` (a run id / `rolling:N` / `HEAD`) adds a
+**statistically-tested** regression check. `--github-annotations` emits `::error`/`::warning` workflow
+commands + a job summary; `--pr-comment` writes a markdown summary. **JUnit XML** lands in the CI's test
+tab; **SARIF 2.1.0** renders findings inline on the PR via GitHub/GitLab code scanning (a code-grounded
+red-team trace carries the `file:line`). `polygraph schema` writes JSON Schemas for editor autocomplete.
+See [docs/CI.md](docs/CI.md).
+
+## Validation & audit (toward 1.0)
+
+For institutions that need to defend the *evaluation itself*, PromptPolygraph ships an evidence layer:
+
+```bash
+polygraph validate --out evidence/   # IQ/OQ/PQ evidence bundle (install, components, reproducibility)
+polygraph references --check         # the OWASP/MITRE-ATLAS technique mapping is pinned (CI-enforced)
+polygraph calibrate --min-f1 0.7     # score the breach judge vs labeled ground truth (precision/recall/F1/κ)
+polygraph manifest --run <id>        # provenance: tool/deps/fingerprints/sources that produced a result
+polygraph bundle --run <id>          # seal artifacts into a tamper-evident .tar.gz (checksum manifest)
+polygraph verify run.polygraph.tar.gz   # re-hash + refuse on any tampered/missing file (HMAC-signable)
+```
+
+These make a run's numbers defensible: provenance-tracked probes, a calibrated judge, reproducible runs,
+confidence intervals, and a self-checking evidence bundle. See [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Architecture
 

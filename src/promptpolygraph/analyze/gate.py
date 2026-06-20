@@ -108,11 +108,17 @@ def summarize(
 
     gate_mode = "strict"
     dim_weights: dict[str, float] = {}
+    confidence = 0.95
+    respect_ci = False
+    min_sample_warn = 30
     if config is not None:
         analyze_cfg = getattr(config, "analyze", None)
         if analyze_cfg is not None:
             gate_mode = getattr(analyze_cfg, "gate_mode", "strict") or "strict"
             dim_weights = dict(getattr(analyze_cfg, "dimension_weights", {}) or {})
+            confidence = float(getattr(analyze_cfg, "confidence", 0.95) or 0.95)
+            respect_ci = bool(getattr(analyze_cfg, "respect_ci", False))
+            min_sample_warn = int(getattr(analyze_cfg, "min_sample_warn", 30) or 30)
 
     # Group scores by category.
     cats: dict[str, list[Score]] = {}
@@ -121,11 +127,20 @@ def summarize(
         cat = c.category if c is not None else "default"
         cats.setdefault(cat, []).append(s)
 
+    from .stats import bootstrap_ci, gate_band_decision
+
     category_scores: dict[str, dict[str, Any]] = {}
     categories_passing = 0
+    # Additive confidence layer: per-(category,dimension) bootstrap CIs + a
+    # band-aware verdict. Existing keys are untouched so prior consumers/tests
+    # keep working; the CI data lives under new keys.
+    conf_by_category: dict[str, dict[str, Any]] = {}
+    band_by_category: dict[str, str] = {}
+    sample_warnings: list[str] = []
     for cat, cat_scores in cats.items():
         entry: dict[str, Any] = {"count": len(cat_scores)}
         cat_dim_means: dict[str, float] = {}
+        cat_dim_ci: dict[str, Any] = {}
         for dim in dim_names:
             vals = [
                 s.dimensions.get(dim)
@@ -136,6 +151,7 @@ def summarize(
                 m = float(mean(vals))
                 entry[dim] = m
                 cat_dim_means[dim] = m
+                cat_dim_ci[dim] = bootstrap_ci(vals, confidence=confidence)
             else:
                 entry[dim] = None
         if gate_mode == "weighted":
@@ -149,15 +165,41 @@ def summarize(
         if cat_pass:
             categories_passing += 1
 
+        # Band verdict for the category: fail only if some dimension's whole CI
+        # is below threshold; inconclusive if any dimension's CI straddles it.
+        verdicts = [
+            gate_band_decision(ci.get("ci_lower"), ci.get("ci_upper"), rubric.threshold, direction="above")
+            for ci in cat_dim_ci.values()
+        ]
+        if "fail" in verdicts:
+            band_by_category[cat] = "fail"
+        elif "inconclusive" in verdicts:
+            band_by_category[cat] = "inconclusive"
+        elif verdicts:
+            band_by_category[cat] = "pass"
+        else:
+            band_by_category[cat] = "inconclusive"
+        conf_by_category[cat] = {"dimensions": cat_dim_ci}
+        if len(cat_scores) < min_sample_warn:
+            sample_warnings.append(
+                f"category '{cat}' graded on {len(cat_scores)} cases (< {min_sample_warn}); "
+                "interpret its scores with caution"
+            )
+
     categories_total = len(category_scores)
     overall_pass = categories_total > 0 and categories_passing == categories_total
 
     # Assertion pass rate over cases that declared assertions.
     asserted = [s for s in scores if s.assertions_passed is not None]
     if asserted:
-        assertion_pass_rate = sum(1 for s in asserted if s.assertions_passed) / len(asserted)
+        from .stats import proportion_ci
+        _passed = sum(1 for s in asserted if s.assertions_passed)
+        assertion_pass_rate = _passed / len(asserted)
+        assertion_pass_rate_ci = proportion_ci(_passed, len(asserted), confidence)
     else:
         assertion_pass_rate = 1.0
+        assertion_pass_rate_ci = {"value": 1.0, "ci_lower": 1.0, "ci_upper": 1.0,
+                                  "n": 0, "method": "wilson", "confidence": confidence}
 
     # Assertion score (continuous, weighted) aggregate over scored cases.
     ascores = [s.assertion_score for s in scores if s.assertion_score is not None]
@@ -200,6 +242,24 @@ def summarize(
     # touch score_by_id so it is part of the contract surface
     _ = score_by_id
 
+    # Band-aware overall verdict. "fail" if any category's CI is wholly below
+    # threshold; "inconclusive" if any straddles it; else "pass".
+    band_vals = list(band_by_category.values())
+    if "fail" in band_vals:
+        overall_band = "fail"
+    elif "inconclusive" in band_vals:
+        overall_band = "inconclusive"
+    elif band_vals:
+        overall_band = "pass"
+    else:
+        overall_band = "inconclusive"
+
+    # `respect_ci`: don't fail CI on a difference that sits inside the noise band.
+    # The build only goes red when the evidence is strong enough (a wholly-below
+    # CI), preserving the strict point gate when respect_ci is off (the default).
+    if respect_ci:
+        overall_pass = overall_band != "fail"
+
     return {
         "threshold": float(rubric.threshold),
         "dimensions": list(dim_names),
@@ -213,6 +273,18 @@ def summarize(
         "cost": {"tokens_in": int(tokens_in), "tokens_out": int(tokens_out), "usd": usd},
         "latency": latency,
         "agreement_mean": agreement_mean,
+        # ── statistical-rigor layer (additive) ──────────────────────────────
+        "confidence": {
+            "level": confidence,
+            "respect_ci": respect_ci,
+            "assertion_pass_rate": assertion_pass_rate_ci,
+            "by_category": conf_by_category,
+            "warnings": sample_warnings,
+        },
+        "gate_band": {
+            "overall": overall_band,
+            "by_category": band_by_category,
+        },
     }
 
 
