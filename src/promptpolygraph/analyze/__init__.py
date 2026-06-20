@@ -8,7 +8,7 @@ pass/fail, and diffs against a stored baseline.
 
 from __future__ import annotations
 
-from .analyzer import analyze_run
+from .analyzer import analyze_run, judge_identity
 from .assertions import evaluate_assertions, score_assertions
 from .baseline import diff_baseline, rolling_baseline_summary
 from .embedders import MockEmbedder, OpenAIEmbedder, make_embedder
@@ -22,6 +22,7 @@ __all__ = [
     "evaluate_assertions",
     "score_assertions",
     "analyze_run",
+    "judge_identity",
     "summarize",
     "case_pass",
     "ci_exit_code",

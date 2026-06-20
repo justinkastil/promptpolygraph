@@ -10,6 +10,6 @@ from __future__ import annotations
 
 from .matrix import comparability, compare_runs
 from .pairwise import pairwise
-from .trend import trend
+from .trend import trend, trend_judge_drift
 
-__all__ = ["pairwise", "comparability", "compare_runs", "trend"]
+__all__ = ["pairwise", "comparability", "compare_runs", "trend", "trend_judge_drift"]

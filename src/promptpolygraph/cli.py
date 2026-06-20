@@ -35,6 +35,7 @@ from .adapters import build_adapter
 from .compare import compare_runs as compare_runs_fn
 from .compare import pairwise as pairwise_fn
 from .compare import trend as trend_fn
+from .compare import trend_judge_drift as trend_judge_drift_fn
 from .config import Config
 from .llm import make_client
 from .models import (
@@ -272,6 +273,12 @@ def cmd_analyze(cfg: Config, run_id: str) -> dict:
     )
     for s in scores:
         store.save_score(run_id, s)
+    # Pin the judge identity onto the run so a later compare/trend can attribute
+    # a score delta to the SUT rather than a silently changed judge.
+    meta = store.get_run(run_id)
+    if meta is not None:
+        meta.judge_meta = A.judge_identity(rubric, cfg, mock=_is_mock(cfg))
+        store.save_run(meta)
     summary = A.summarize(cases, responses, scores, rubric, config=cfg)
     _save_json(_run_dir(cfg, run_id) / "summary.json", summary)
     store.export_jsonl(run_id, _run_dir(cfg, run_id) / "cases.jsonl")
@@ -428,6 +435,9 @@ def cmd_compare(cfg: Config, args) -> dict:
             print(f"  {row['run_id'][:8]}  pass={row['overall_pass']}  "
                   f"{row['categories_passing']}/{row['categories_total']} categories")
     print(f"regressions={len(report['regressions'])}  improvements={len(report['improvements'])}")
+    jd = report.get("judge_drift") or {}
+    if jd.get("differs"):
+        print(_color(f"  ⚠ {jd['caveat']}", "yellow"))
     return report
 
 
@@ -450,6 +460,12 @@ def cmd_trend(cfg: Config, args) -> list:
                 continue
             arrow = "↑" if slope > 0 else ("↓" if slope < 0 else "→")
             print(f"  {blk['category']:<18} {dim['dimension']:<12} slope={slope:+.3f}/run {arrow}")
+    drift = trend_judge_drift_fn(
+        store, project=getattr(args, "project", None),
+        window=getattr(args, "window", 30) or 30,
+    )
+    if drift.get("differs"):
+        print(_color(f"  ⚠ {drift['caveat']}", "yellow"))
     return blocks
 
 
@@ -1083,6 +1099,14 @@ def build_parser() -> argparse.ArgumentParser:
     pcal.add_argument("--min-f1", dest="min_f1", type=float,
                       help="exit non-zero if the judge's F1 is below this (CI calibration gate)")
 
+    pcan = sub.add_parser("canary", parents=[common],
+                          help="run the breach judge over the drift-canary set and report pass-rate")
+    pcan.add_argument("--guard", action="store_true", help="run the Llama-Guard judge instead")
+    pcan.add_argument("--canary", dest="canary", help="path to a custom canary JSON")
+    pcan.add_argument("--out", help="write the canary report JSON here")
+    pcan.add_argument("--min-pass-rate", dest="min_pass_rate", type=float, default=1.0,
+                      help="exit non-zero (drift) below this pass-rate; default 1.0")
+
     pref = sub.add_parser("references", parents=[common],
                           help="check or update the pinned OWASP/ATLAS technique mapping")
     pref.add_argument("--check", action="store_true", help="fail if the live mapping drifted from the lock")
@@ -1247,6 +1271,30 @@ def cmd_calibrate(cfg: Config, args) -> int:
         print(_color(f"calibration gate: F1 {m['f1']:.2f} < {args.min_f1:.2f}", "red"))
         return 1
     return 0
+
+
+def cmd_canary(cfg: Config, args) -> int:
+    from .calibrate import judge_canary, load_canary
+
+    can = load_canary(args.canary) if getattr(args, "canary", None) else None
+    report = asyncio.run(judge_canary(
+        _client(cfg), mock=_is_mock(cfg), guard=getattr(args, "guard", False),
+        canary=can, min_pass_rate=getattr(args, "min_pass_rate", 1.0),
+    ))
+    out = Path(args.out) if getattr(args, "out", None) else _run_dir(cfg, "canary") / "canary.json"
+    _save_json(out, report)
+    src = "mock judge" if report["mock"] else f"{report['judge']} judge"
+    verdict = _color("DRIFT", "red") if report["drift"] else _color("OK", "green")
+    print(f"judge canary ({src}, n={report['n']}): {verdict}")
+    print(f"  pass-rate {report['pass_rate']:.2f} ({report['passed']}/{report['n']}) "
+          f"min {report['min_pass_rate']:.2f}")
+    for m in report["misses"]:
+        print(_color(f"    ✗ {m['id']} ({m['strategy']}): expected breached="
+                     f"{m['expected_breached']} got {m['judge_breached']}", "red"))
+    for f in report["flags"]:
+        print(_color(f"  ⚠ {f}", "yellow"))
+    print(f"  report: {out}")
+    return 1 if report["drift"] else 0
 
 
 def cmd_manifest(cfg: Config, args) -> int:
@@ -1440,6 +1488,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_manifest(cfg, args)
     elif args.cmd == "calibrate":
         return cmd_calibrate(cfg, args)
+    elif args.cmd == "canary":
+        return cmd_canary(cfg, args)
     elif args.cmd == "bundle":
         return cmd_bundle(cfg, args)
     elif args.cmd == "verify":

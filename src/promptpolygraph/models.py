@@ -196,6 +196,10 @@ class RunMeta(BaseModel):
     sut_git_sha: str | None = None      # git SHA of the system under test, if provided
     sut_ref: str | None = None          # branch / tag / PR ref of the SUT
     labels: dict[str, str] = Field(default_factory=dict)  # ci-run-id, actor, env, ...
+    # v1.1 (additive) — identity of the judge that graded this run, so a score
+    # delta between two runs can be attributed to the SUT rather than to a
+    # silently swapped judge. Populated best-effort; empty/None on mock paths.
+    judge_meta: dict[str, Any] = Field(default_factory=dict)
 
 
 def fingerprint(cases: list[Case]) -> str:
@@ -227,3 +231,31 @@ def config_fingerprint(config: dict[str, Any]) -> str:
     norm = {k: v for k, v in (config or {}).items() if k not in ("out_dir", "mock")}
     blob = json.dumps(norm, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+# ─── Judge identity ─────────────────────────────────────────────────────────
+
+# Fields of judge_meta that define grading identity. `mock` is excluded: the
+# heuristic-vs-real distinction is handled separately and a run with no judge
+# meta (older records) must not falsely compare-equal to a real-judge run only
+# because both lack a mock flag.
+_JUDGE_IDENTITY_KEYS = ("model", "provider", "temperature", "system_prompt_hash")
+
+
+def system_prompt_hash(text: str | None) -> str | None:
+    """Stable short hash of a judge's system prompt, or None for empty input."""
+    if not text:
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def judge_meta_differs(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
+    """Whether two runs were graded by a materially different judge.
+
+    Compares only the identity keys (model, provider, temperature,
+    system_prompt_hash). Two empty/absent judge_meta dicts compare equal so
+    pre-v1.1 runs do not raise a spurious drift flag against each other.
+    """
+    da = a or {}
+    db = b or {}
+    return any(da.get(k) != db.get(k) for k in _JUDGE_IDENTITY_KEYS)

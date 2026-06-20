@@ -26,6 +26,7 @@ from ..models import (
     Response,
     Rubric,
     Score,
+    system_prompt_hash,
 )
 from .assertions import score_assertions
 from .gate import case_pass
@@ -72,6 +73,35 @@ def _build_system_prompt(rubric: Rubric) -> str:
         "Do not include any prose outside the JSON object.",
     ]
     return "\n".join(lines)
+
+
+def judge_identity(rubric: Rubric, config: Any | None = None, *, mock: bool = False) -> dict[str, Any]:
+    """Identity of the judge that grades against `rubric`, for run lineage.
+
+    Read best-effort from `config` (model, provider, temperature); the
+    system_prompt_hash is derived from the rubric-built judge prompt so a rubric
+    change that alters grading instructions is detectable even when the backend
+    is unchanged. Safe with no config: returns the prompt hash plus mock flag.
+    """
+    model: str | None = None
+    provider: str | None = None
+    temperature: float | None = None
+    if config is not None:
+        analyze_cfg = getattr(config, "analyze", None)
+        if analyze_cfg is not None:
+            model = getattr(analyze_cfg, "judge_model", None)
+            temperature = getattr(analyze_cfg, "temperature", None)
+        model = model or getattr(config, "model", None)
+        llm_cfg = getattr(config, "llm", None)
+        if llm_cfg is not None:
+            provider = getattr(llm_cfg, "provider", None)
+    return {
+        "model": model,
+        "provider": provider,
+        "temperature": temperature,
+        "system_prompt_hash": system_prompt_hash(_build_system_prompt(rubric)),
+        "mock": bool(mock),
+    }
 
 
 def _build_user_prompt(case: Case, resp: Response, rubric: Rubric) -> str:
