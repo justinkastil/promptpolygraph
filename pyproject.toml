@@ -24,6 +24,10 @@ dependencies = [
 
 [project.optional-dependencies]
 llm = ["openai>=1.40"]
+# Universal multi-provider routing (Bedrock, Vertex AI, Azure, Gemini, Cohere,
+# and others) via the "litellm" provider. Optional: anthropic + the OpenAI-
+# compatible/local paths work without it.
+litellm = ["litellm>=1.40"]
 pdf = ["reportlab>=4.0"]
 # Ed25519 public-key signing of run bundles / report attestations. Optional:
 # HMAC signing (stdlib) is the default; this adds verifiable public-key signing.

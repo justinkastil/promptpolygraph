@@ -136,6 +136,63 @@ class OpenAICompatibleClient:
             return ""
 
 
+class LiteLLMClient:
+    """Universal catch-all backend routing through litellm.completion().
+
+    Reaches providers without a first-class path here (Bedrock, Vertex AI, Azure
+    OpenAI, Gemini, Cohere, and ~100 others). litellm is an optional dependency
+    [litellm extra]; the import is deferred so a bare install never breaks. Per-
+    cloud auth is via that cloud's own env vars (see docs/PROVIDERS.md); litellm
+    reads them directly. The model string carries the provider prefix litellm
+    expects (e.g. "bedrock/anthropic.claude-3-sonnet", "vertex_ai/gemini-1.5-pro").
+    """
+
+    def __init__(self, model: str, *, api_key: str | None = None):
+        try:
+            import litellm  # noqa: F401
+        except ImportError as exc:
+            raise ImportError(
+                "litellm is required for this provider; install with "
+                "'pip install promptpolygraph[litellm]'"
+            ) from exc
+
+        self.model = model
+        self._api_key = api_key
+
+    async def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> str:
+        import litellm
+
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": user})
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        }
+        # Some models (e.g. Opus 4.8) reject sampling params; gate as elsewhere.
+        if _accepts_sampling_params(self.model):
+            kwargs["temperature"] = temperature
+        if self._api_key:
+            kwargs["api_key"] = self._api_key
+        try:
+            resp = await litellm.acompletion(**kwargs)
+        except Exception:
+            return ""
+        try:
+            return resp["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError):
+            return ""
+
+
 class ScriptedClient:
     """Returns queued responses in FIFO order; used by unit tests."""
 
@@ -164,6 +221,19 @@ DEFAULT_OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.
 _OPENAI_COMPAT = {"openai", "openai-compatible", "compatible", "ollama", "vllm", "lmstudio", "local"}
 # Providers that run locally and therefore need no API key.
 _LOCAL_PROVIDERS = {"ollama", "vllm", "lmstudio", "local"}
+# Cloud providers routed through LiteLLM. "litellm" is the explicit catch-all;
+# the named aliases route through it too (each authenticates via its own cloud
+# env vars — see docs/PROVIDERS.md). Maps an alias to the litellm model prefix
+# prepended when the model string lacks one.
+_LITELLM_PREFIXES = {
+    "bedrock": "bedrock/",
+    "vertex": "vertex_ai/",
+    "vertex_ai": "vertex_ai/",
+    "azure": "azure/",
+    "gemini": "gemini/",
+    "cohere": "cohere/",
+}
+_LITELLM_PROVIDERS = {"litellm"} | set(_LITELLM_PREFIXES)
 
 
 def provider_needs_key(provider: str | None, api_key_env: str | None = None) -> str | None:
@@ -176,6 +246,12 @@ def provider_needs_key(provider: str | None, api_key_env: str | None = None) -> 
         return None
     if p in _OPENAI_COMPAT:
         return api_key_env or "OPENAI_API_KEY"
+    # LiteLLM-routed clouds authenticate via cloud-native env vars (AWS_*,
+    # GOOGLE_*, AZURE_*, GEMINI_API_KEY, COHERE_API_KEY) read by litellm itself,
+    # not a single POLYGRAPH-managed key. Return the explicit override if given,
+    # else None so the caller does not gate live calls on a key we cannot name.
+    if p in _LITELLM_PROVIDERS:
+        return api_key_env
     return None
 
 
@@ -188,15 +264,28 @@ def make_client(
 ) -> LLMClient:
     """Construct the grader/audit/generation client for the configured backend.
 
-    provider: anthropic (default) | openai | ollama | openai-compatible | vllm | lmstudio.
+    provider: anthropic (default) | openai | ollama | openai-compatible | vllm |
+    lmstudio | litellm | bedrock | vertex/vertex_ai | azure | gemini | cohere.
     For OpenAI-compatible providers, `base_url` defaults to the Ollama local
     endpoint for `ollama`, else the OpenAI endpoint; the key (if any) is read
-    from `api_key_env` or OPENAI_API_KEY. Default behavior (anthropic) is unchanged.
+    from `api_key_env` or OPENAI_API_KEY. The litellm/cloud aliases route through
+    litellm.completion() and authenticate via cloud-native env vars (see
+    docs/PROVIDERS.md). Default behavior (anthropic) is unchanged.
     """
     p = (provider or "anthropic").lower()
     if p == "anthropic":
         key = os.environ.get(api_key_env) if api_key_env else None
         return AnthropicClient(model=model, api_key=key)
+    if p in _LITELLM_PROVIDERS:
+        # Prepend the litellm provider prefix for the named aliases unless the
+        # caller already supplied a prefixed model string. Bare "litellm" passes
+        # the model through verbatim (caller owns the prefix).
+        m = model or ""
+        prefix = _LITELLM_PREFIXES.get(p)
+        if prefix and m and "/" not in m:
+            m = prefix + m
+        key = os.environ.get(api_key_env) if api_key_env else None
+        return LiteLLMClient(m, api_key=key)
     if p in _OPENAI_COMPAT:
         if base_url:
             bu = base_url
