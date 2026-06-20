@@ -6,6 +6,17 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-20
+
+### Fixed
+- Added Trove `classifiers` (Python 3.10–3.13, license, topics) to the package
+  metadata so the PyPI supported-Python-versions badge resolves.
+- CI: a root `conftest.py` puts the repo root on `sys.path` so the plugin tests
+  (whose entry points reference `tests.*`) pass under plain `pytest`, and
+  `discovery.py` no longer trips the mypy check.
+- The publish workflow uploads to PyPI before the SBOM/attestation steps, which
+  are now best-effort, and the SBOM uses the correct `--output-file` flag.
+
 ## [1.1.0] - 2026-06-20
 
 Market-acceptance follow-on to 1.0: lower-friction adoption, broader provider and
