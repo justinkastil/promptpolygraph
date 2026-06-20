@@ -9,6 +9,7 @@ Subcommands:
   compare   A/B two runs (pairwise win/loss/tie)
   personas  list the library / create one / generate a panel
   redteam   authorized adversarial red-team of the target -> vuln report
+  plugins   list built-in + installed third-party extensions
   all       run -> analyze -> audit -> report, end to end
 
 Everything is driven by a YAML config (see examples/support_bot/config.yaml)
@@ -1096,6 +1097,11 @@ def build_parser() -> argparse.ArgumentParser:
                       help="config path the generated pipeline references")
     psci.add_argument("--force", action="store_true", help="overwrite an existing file")
 
+    ppl = sub.add_parser("plugins", parents=[common],
+                         help="list built-in and installed third-party extensions")
+    plsub = ppl.add_subparsers(dest="plugins_cmd", required=True)
+    plsub.add_parser("list", parents=[common], help="show adapters/sources/judges/reporters")
+
     return parser
 
 
@@ -1328,6 +1334,46 @@ def cmd_power(cfg: Config, args) -> int:
     return 0
 
 
+_BUILTIN_ADAPTERS = ("http", "llm", "demo", "callable")
+
+
+def cmd_plugins(cfg: Config, args) -> int:
+    """List extensions, splitting first-party built-ins from discovered plugins."""
+    from . import plugins as PL
+
+    def _section(title: str, builtins: list[str], group: str) -> None:
+        print(_color(title, "bold"))
+        builtin_set = set(builtins)
+        # A built-in may also be declared as an entry point (the package dogfoods
+        # the mechanism); list it once, as a built-in, and show only genuine
+        # third-party entries under the discovered heading.
+        third_party = [
+            (n, v, d) for n, v, d in PL.discovered_entry_points(group)
+            if n not in builtin_set
+        ]
+        for name in builtins:
+            print(f"  {name} {_color('(built-in)', 'dim')}")
+        for name, value, dist in third_party:
+            origin = f" {_color(f'({dist})', 'dim')}" if dist else ""
+            print(f"  {name} {_color('->', 'dim')} {value}{origin}")
+        if not builtins and not third_party:
+            print(_color("  (none)", "dim"))
+
+    # Built-in sources come from the live registry so the list stays in sync.
+    # Names already in the registry (built-ins, including the dogfooded catalog
+    # entry point) are labelled built-in; _section then shows only entry points
+    # not in that set as third-party.
+    from .redteam.sources import list_sources
+
+    builtin_sources = sorted(list_sources())
+
+    _section("adapters", list(_BUILTIN_ADAPTERS), PL.GROUP_ADAPTERS)
+    _section("sources", builtin_sources, PL.GROUP_SOURCES)
+    _section("judges", [], PL.GROUP_JUDGES)
+    _section("reporters", [], PL.GROUP_REPORTERS)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # These commands must not eagerly load/validate the config (that is their job),
@@ -1348,6 +1394,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_keygen(Config(), args)
     if args.cmd == "audit-log":
         return cmd_audit_log(Config(), args)
+    if args.cmd == "plugins":
+        return cmd_plugins(Config(), args)
     cfg = _load_cfg(args)
     if args.cmd == "init":
         return cmd_init(cfg, args)

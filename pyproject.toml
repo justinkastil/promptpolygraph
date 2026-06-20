@@ -61,6 +61,20 @@ polygraph = "promptpolygraph.cli:main"
 polygraph-server = "promptpolygraph.service.server:main"
 polygraph-worker = "promptpolygraph.service.worker:main"
 
+# Built-in extensions are declared as entry points so the plugin-discovery path
+# is exercised by the package itself, not only by third parties. The built-in
+# adapter types are resolved directly in build_adapter and take precedence; the
+# entries below make them visible to `polygraph plugins list` and serve as the
+# reference contract for third-party packages.
+[project.entry-points."promptpolygraph.adapters"]
+http = "promptpolygraph.adapters.http:HTTPAdapter"
+llm = "promptpolygraph.adapters.llm:LLMAdapter"
+demo = "promptpolygraph.adapters.demo:DemoAdapter"
+callable = "promptpolygraph.adapters.callable:CallableAdapter"
+
+[project.entry-points."promptpolygraph.sources"]
+catalog = "promptpolygraph.redteam.sources.catalog_source:CatalogSource"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/promptpolygraph"]
 
