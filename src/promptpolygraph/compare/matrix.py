@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..analyze.baseline import DELTA_BAND
-from ..models import RunMeta
+from ..models import RunMeta, judge_meta_differs
 from .pairwise import pairwise
 
 # A regression past this many points (beyond the dead-band) is a hard fail
@@ -47,6 +47,35 @@ def comparability(meta_a: RunMeta, meta_b: RunMeta) -> str:
         and meta_a.rubric_fingerprint == meta_b.rubric_fingerprint
     )
     return "identical" if same_rubric else "same_dataset"
+
+
+def _judge_drift(metas: list[RunMeta]) -> dict[str, Any]:
+    """Whether the judge identity changed across the compared runs.
+
+    A score delta is only attributable to the system under test when the same
+    judge graded both ends. When judge_meta differs (or is missing on one side)
+    `differs` is True and the caller surfaces a caveat: the diff may reflect a
+    judge swap rather than a real regression/improvement. The baseline is the
+    first (chronologically earliest) run.
+    """
+    if len(metas) < 2:
+        return {"differs": False, "caveat": None, "per_run": []}
+    base = metas[0]
+    differs = any(
+        judge_meta_differs(base.judge_meta, m.judge_meta) for m in metas[1:]
+    )
+    caveat = None
+    if differs:
+        caveat = (
+            "judge identity differs between runs — a score delta may reflect a "
+            "changed judge (model/provider/temperature/rubric prompt), not the "
+            "system under test"
+        )
+    per_run = [
+        {"run_id": m.run_id, "judge_meta": dict(m.judge_meta or {})}
+        for m in metas
+    ]
+    return {"differs": differs, "caveat": caveat, "per_run": per_run}
 
 
 def _group_comparability(metas: list[RunMeta]) -> str:
@@ -350,6 +379,7 @@ def compare_runs(
         )
 
     overall = _build_overall(store, metas, summ_by_id, ordered_ids)
+    judge_drift = _judge_drift(metas)
 
     return {
         "project": project,
@@ -360,6 +390,7 @@ def compare_runs(
         "case_movements": case_movements,
         "regressions": regressions,
         "improvements": improvements,
+        "judge_drift": judge_drift,
         "overall": overall,
     }
 

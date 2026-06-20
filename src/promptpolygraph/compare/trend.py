@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from ..models import RunMeta
+from ..models import RunMeta, judge_meta_differs
 from .matrix import build_category_trends, _load_summary
 
 
@@ -79,3 +79,34 @@ def trend(
                     dimensions.append(d)
 
     return build_category_trends(summaries, dimensions)
+
+
+def trend_judge_drift(
+    store,
+    *,
+    project: Optional[str] = None,
+    corpus_fingerprint: Optional[str] = None,
+    window: int = 30,
+) -> dict[str, Any]:
+    """Whether judge identity changed across the same window `trend` plots.
+
+    Kept separate from `trend` so its list contract is unchanged. `differs` is
+    True (with a caveat) when any run in the window was graded by a different
+    judge than the earliest run, meaning a plotted slope may reflect a judge
+    swap rather than the system under test.
+    """
+    selected = _select_runs(
+        store.list_runs(),
+        project=project,
+        corpus_fingerprint=corpus_fingerprint,
+        window=window,
+    )
+    if len(selected) < 2:
+        return {"differs": False, "caveat": None}
+    base = selected[0]
+    differs = any(judge_meta_differs(base.judge_meta, m.judge_meta) for m in selected[1:])
+    caveat = (
+        "judge identity differs across the trend window — a plotted slope may "
+        "reflect a changed judge, not the system under test"
+    ) if differs else None
+    return {"differs": differs, "caveat": caveat}

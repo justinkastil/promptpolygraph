@@ -141,6 +141,7 @@ async def run_pipeline(
     emit("analyze", {"judges": cfg.analyze.judges})
     rubric = A.load_rubric(cfg.resolve(cfg.analyze.rubric)) if cfg.analyze.rubric else A.default_rubric()
     meta.rubric_fingerprint = rubric_fingerprint(rubric)
+    meta.judge_meta = A.judge_identity(rubric, cfg, mock=mock)
     store.save_run(meta)
     scores = await A.analyze_run(
         cases, responses, rubric, client=client, judges=cfg.analyze.judges,
