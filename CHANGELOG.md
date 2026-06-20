@@ -17,6 +17,17 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
   append-only, hash-chained log of privileged actions with `verify_chain`
   pinpointing any break; `polygraph audit-log verify` gates on it. `polygraph
   validate` now exercises signing, schema versioning, and the audit-log chain.
+- **Service-mode hardening — multi-tenant RBAC** (toward 1.0). `service/tenancy.py`
+  adds **workspaces** as the isolation boundary, **RBAC** (admin > editor >
+  viewer), and **per-workspace API keys hashed at rest** (shown once on
+  creation). Runs are stamped to a workspace and a request only sees its own
+  workspace's runs — cross-workspace reads return **404** (existence is not
+  leaked). New admin endpoints: `/api/workspaces`, `/api/members`, `/api/keys`
+  (create/list/revoke), `/api/audit-log` (a per-workspace hash-chained log of
+  privileged actions + chain verification), and `/api/whoami`. Backward
+  compatible: a legacy flat `POLYGRAPH_API_KEYS` value resolves to admin of the
+  `default` workspace, and an auth-disabled dev server to the same — existing
+  deployments are unchanged. (OIDC/SSO is the next PR.)
 
 ## [0.7.0] - 2026-06-19
 
