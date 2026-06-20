@@ -25,7 +25,7 @@ try:  # keep in sync with the installed distribution rather than hand-editing
 
     __version__ = _pkg_version("promptpolygraph")
 except Exception:  # not installed (e.g. running from a source tree) — fall back
-    __version__ = "0.7.0"
+    __version__ = "1.0.0"
 
 __all__ = [
     "AssertionResult",

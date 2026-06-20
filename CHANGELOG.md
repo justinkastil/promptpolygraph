@@ -6,8 +6,15 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-06-20
+
+The validation-ready release: the trust and auditability layer institutions need
+to defend the evaluation itself — provenance, reference integrity, reproducibility,
+judge calibration, statistical rigor, integrity of record, multi-tenant service
+hardening, and a regenerable validation evidence bundle.
+
 ### Added
-- **Integrity of record** (toward 1.0). Public-key signing for run bundles:
+- **Integrity of record.** Public-key signing for run bundles:
   `signing.py` adds Ed25519 (optional `[crypto]` extra) alongside the existing
   HMAC; `polygraph keygen` writes a keypair, `polygraph bundle --sign-key`
   signs, and `polygraph verify --pub-key` verifies (HMAC stays the no-dep
@@ -17,7 +24,7 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
   append-only, hash-chained log of privileged actions with `verify_chain`
   pinpointing any break; `polygraph audit-log verify` gates on it. `polygraph
   validate` now exercises signing, schema versioning, and the audit-log chain.
-- **Service-mode hardening — multi-tenant RBAC** (toward 1.0). `service/tenancy.py`
+- **Service-mode hardening — multi-tenant RBAC**. `service/tenancy.py`
   adds **workspaces** as the isolation boundary, **RBAC** (admin > editor >
   viewer), and **per-workspace API keys hashed at rest** (shown once on
   creation). Runs are stamped to a workspace and a request only sees its own
@@ -28,14 +35,14 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
   compatible: a legacy flat `POLYGRAPH_API_KEYS` value resolves to admin of the
   `default` workspace, and an auth-disabled dev server to the same — existing
   deployments are unchanged.
-- **Service-mode hardening — OIDC/SSO** (toward 1.0; `service/oidc.py`, optional
+- **Service-mode hardening — OIDC/SSO** (`service/oidc.py`, optional
   `[oidc]` extra). Human login via an IdP (Okta/Entra/Keycloak/Auth0): a bearer
   JWT is verified against the IdP's JWKS (issuer/audience/expiry checked, MFA
   optionally required via the `amr`/`acr` claim) and the token's identity is
   mapped to a workspace member's role. **Fully optional and off by default** —
   inert unless `oidc_issuer` is set; per-workspace API keys remain the CI /
   service-account credential and the existing auth paths are unchanged.
-- **Statistical depth — power, sample-size & variance** (toward 1.0). New
+- **Statistical depth — power, sample-size & variance**. New
   `analyze/stats.py` functions: `sample_size_for_proportion` (probes to estimate
   a rate to ±margin), `min_n_for_proportion_diff` (MDE / per-run n to detect a
   rate change at a target power), `power_for_proportion_diff` (achieved power),
@@ -43,7 +50,7 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
   between-case signal vs judge noise). A `polygraph power` command does
   sample-size / power planning; the eval summary's `confidence` block gains a
   per-dimension `reliability` (ICC) section when an ensemble graded each case.
-- **Governance & responsible use** (toward 1.0). New `RESPONSIBLE_USE.md`
+- **Governance & responsible use**. New `RESPONSIBLE_USE.md`
   (authorized-use boundaries), `CONTRIBUTING.md`, and `GOVERNANCE.md`.
   Adversarial datasets are now **opt-in**: the live fetch of a harmful-behaviour
   dataset (`dataset:advbench` / `harmbench` / `jailbreakbench`) is gated behind
