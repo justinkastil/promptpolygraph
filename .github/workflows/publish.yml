@@ -12,7 +12,7 @@ jobs:
   pypi:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write        # PyPI trusted publishing (OIDC)
+      id-token: write        # PyPI trusted publishing (OIDC) + PEP 740 attestations
       contents: write        # attach the SBOM to the GitHub release
       attestations: write    # build provenance attestation for the artifacts
     steps:
@@ -23,29 +23,31 @@ jobs:
       - run: python -m pip install --upgrade build
       - run: python -m build
 
-      # CycloneDX SBOM over the resolved install set, attached to the release.
-      - name: Generate CycloneDX SBOM
-        run: |
-          pip install -e . cyclonedx-bom
-          cyclonedx-py environment --output-format JSON --outfile sbom.cdx.json
-
-      # Build provenance for the wheel/sdist. Verifiable with `gh attestation
-      # verify <artifact> --repo <owner>/<repo>`.
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-path: "dist/*"
-
-      # pypi-publish emits PEP 740 attestations for the uploaded artifacts.
+      # Publish first: this is the critical path. The SBOM/attestation steps
+      # below are best-effort and must never block a release upload.
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           attestations: true
 
-      # Attach the SBOM to the GitHub release so consumers can fetch it without
-      # re-running the build. Only on release events (no-op for workflow_dispatch).
+      - name: Attest build provenance
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "dist/*"
+
+      # CycloneDX SBOM over the resolved install set, attached to the release.
+      - name: Generate CycloneDX SBOM
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          pip install -e . cyclonedx-bom
+          cyclonedx-py environment --output-format JSON --output-file sbom.cdx.json
+
       - name: Attach SBOM to release
-        if: github.event_name == 'release'
+        if: ${{ github.event_name == 'release' && !cancelled() }}
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.event.release.tag_name }}" sbom.cdx.json --clobber
