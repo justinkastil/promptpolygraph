@@ -1036,6 +1036,16 @@ def build_parser() -> argparse.ArgumentParser:
                          help="write JSON Schemas for config + rubric (editor autocomplete / CI)")
     psc.add_argument("--out", default="schemas", help="output directory (default: schemas/)")
 
+    ppw = sub.add_parser("power", parents=[common],
+                         help="sample-size / statistical-power planning for a run")
+    ppw.add_argument("--margin", type=float, help="probes to estimate a proportion to ±margin")
+    ppw.add_argument("--confidence", type=float, default=0.95)
+    ppw.add_argument("--from", dest="p_from", type=float, help="baseline rate for an MDE/power calc")
+    ppw.add_argument("--to", dest="p_to", type=float, help="changed rate to detect")
+    ppw.add_argument("--power", type=float, default=0.8)
+    ppw.add_argument("--alpha", type=float, default=0.05)
+    ppw.add_argument("--n", type=int, help="per-run n to report the achieved power for --from/--to")
+
     pmf = sub.add_parser("manifest", parents=[common],
                          help="write a provenance manifest for a run (what produced the result)")
     pmf.add_argument("--run", required=True)
@@ -1284,6 +1294,32 @@ def cmd_schema(cfg: Config, args) -> int:
     return 0
 
 
+def cmd_power(cfg: Config, args) -> int:
+    from .analyze import stats
+
+    did = False
+    if args.margin is not None:
+        n = stats.sample_size_for_proportion(args.margin, confidence=args.confidence)
+        print(f"to estimate a proportion to ±{args.margin:.3f} at {args.confidence:.0%} confidence: "
+              f"{_color(str(n), 'bold')} probes")
+        did = True
+    if args.p_from is not None and args.p_to is not None:
+        if args.n:
+            pw = stats.power_for_proportion_diff(args.p_from, args.p_to, args.n, args.n, alpha=args.alpha)
+            print(f"power to detect {args.p_from:.0%}→{args.p_to:.0%} at n={args.n}/run "
+                  f"(α={args.alpha}): {_color(f'{pw:.0%}', 'bold')}")
+        else:
+            n = stats.min_n_for_proportion_diff(args.p_from, args.p_to, power=args.power, alpha=args.alpha)
+            print(f"to detect {args.p_from:.0%}→{args.p_to:.0%} at {args.power:.0%} power "
+                  f"(α={args.alpha}): {_color(str(n), 'bold')} probes per run")
+        did = True
+    if not did:
+        print(_color("usage: polygraph power --margin 0.05   |   "
+                     "polygraph power --from 0.1 --to 0.2 [--power 0.8 | --n 200]", "yellow"))
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # These commands must not eagerly load/validate the config (that is their job),
@@ -1292,6 +1328,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_validate_config(Config(), args)
     if args.cmd == "schema":
         return cmd_schema(Config(), args)
+    if args.cmd == "power":
+        return cmd_power(Config(), args)
     if args.cmd == "scaffold-ci":
         return cmd_scaffold_ci(Config(), args)
     if args.cmd == "references":

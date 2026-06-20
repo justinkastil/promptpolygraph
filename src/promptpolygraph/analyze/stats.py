@@ -42,6 +42,10 @@ __all__ = [
     "binary_classification_metrics",
     "cohen_kappa",
     "fleiss_kappa",
+    "sample_size_for_proportion",
+    "min_n_for_proportion_diff",
+    "power_for_proportion_diff",
+    "variance_components",
 ]
 
 
@@ -460,3 +464,87 @@ def gate_band_decision(
     if ci_upper < threshold:
         return "fail"
     return "inconclusive"
+
+
+# ── sample-size / power planning ──────────────────────────────────────────────
+
+def sample_size_for_proportion(margin: float, *, confidence: float = 0.95,
+                               p: float = 0.5) -> int:
+    """How many probes to estimate a proportion (e.g. ASR) to ±`margin`.
+
+    Uses the worst-case p=0.5 by default; pass a planning `p` if you expect a
+    rate far from 0.5. Returns a rounded-up sample size.
+    """
+    if margin <= 0:
+        raise ValueError("margin must be > 0")
+    z = z_for_confidence(confidence)
+    return int(math.ceil(z * z * p * (1 - p) / (margin * margin)))
+
+
+def min_n_for_proportion_diff(p1: float, p2: float, *, power: float = 0.8,
+                              alpha: float = 0.05) -> int:
+    """Per-group sample size to detect a rate change p1→p2 (the MDE) at a target
+    power. Two-sided. Returns probes *per run* (current and baseline)."""
+    if p1 == p2:
+        return 0
+    za = norm_ppf(1 - alpha / 2)
+    zb = norm_ppf(power)
+    pbar = (p1 + p2) / 2
+    num = za * math.sqrt(2 * pbar * (1 - pbar)) + zb * math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
+    return int(math.ceil((num / (p2 - p1)) ** 2))
+
+
+def power_for_proportion_diff(p1: float, p2: float, n1: int, n2: int,
+                              *, alpha: float = 0.05) -> float:
+    """Achieved power to detect p1 vs p2 at the given per-group sizes (two-sided)."""
+    if n1 <= 0 or n2 <= 0 or p1 == p2:
+        return 0.0
+    za = norm_ppf(1 - alpha / 2)
+    se = math.sqrt(p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2)
+    if se == 0:
+        return 1.0
+    z = abs(p2 - p1) / se
+    return round(max(0.0, min(1.0, norm_cdf(z - za) + norm_cdf(-z - za))), 6)
+
+
+# ── variance decomposition (judge noise vs real signal) ───────────────────────
+
+def variance_components(per_item_ratings: Sequence[Sequence[float]]) -> dict:
+    """One-way random-effects decomposition of score variance.
+
+    `per_item_ratings[i]` is the list of each judge's score for item i (a fixed
+    number of judges per item). Splits total variance into a between-item
+    component (real differences between cases) and a within-item component (judge
+    disagreement = measurement noise), and reports **ICC(1)** — the fraction of
+    variance that is real signal. A low ICC means the ensemble is noisy and the
+    per-case numbers should be read with caution.
+    """
+    items = [[float(x) for x in row if x is not None] for row in per_item_ratings]
+    items = [row for row in items if row]
+    n = len(items)
+    if n < 2:
+        return {"icc": None, "between_var": None, "within_var": None,
+                "n_items": n, "n_raters": (len(items[0]) if items else 0),
+                "reason": "need >= 2 items"}
+    k = len(items[0])
+    if k < 2 or any(len(row) != k for row in items):
+        return {"icc": None, "between_var": None, "within_var": None,
+                "n_items": n, "n_raters": k, "reason": "need a fixed >= 2 raters per item"}
+    grand = _mean([v for row in items for v in row])
+    item_means = [_mean(row) for row in items]
+    # one-way ANOVA mean squares
+    ss_between = k * sum((m - grand) ** 2 for m in item_means)
+    ss_within = sum((v - im) ** 2 for row, im in zip(items, item_means) for v in row)
+    ms_between = ss_between / (n - 1)
+    ms_within = ss_within / (n * (k - 1)) if (n * (k - 1)) else 0.0
+    denom = ms_between + (k - 1) * ms_within
+    icc = (ms_between - ms_within) / denom if denom > 0 else 0.0
+    icc = max(-1.0, min(1.0, icc))
+    return {
+        "icc": round(icc, 6),
+        "between_var": round(ms_between, 6),
+        "within_var": round(ms_within, 6),
+        "n_items": n, "n_raters": k,
+        "interpretation": ("excellent" if icc >= 0.9 else "good" if icc >= 0.75
+                           else "moderate" if icc >= 0.5 else "poor"),
+    }

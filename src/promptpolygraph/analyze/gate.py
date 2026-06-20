@@ -242,6 +242,26 @@ def summarize(
     # touch score_by_id so it is part of the contract surface
     _ = score_by_id
 
+    # Judge reliability (ICC) per dimension, when an ensemble graded each case.
+    # Splits score variance into real between-case signal vs judge noise; a low
+    # ICC means the per-case numbers carry a lot of judge disagreement.
+    from .stats import variance_components
+
+    reliability: dict[str, Any] = {}
+    judged_scores = [s for s in scores if len(getattr(s, "judges", []) or []) >= 2]
+    if judged_scores:
+        for dim in dim_names:
+            vectors: list[list[float]] = []
+            for s in judged_scores:
+                vals = [j.get(dim) for j in s.judges if isinstance(j, dict) and j.get(dim) is not None]
+                vectors.append([float(v) for v in vals])
+            # keep cases that all carry the same (>=2) number of judge ratings
+            ks = {len(v) for v in vectors if v}
+            if len(ks) == 1 and next(iter(ks)) >= 2:
+                vc = variance_components([v for v in vectors if v])
+                if vc.get("icc") is not None:
+                    reliability[dim] = vc
+
     # Band-aware overall verdict. "fail" if any category's CI is wholly below
     # threshold; "inconclusive" if any straddles it; else "pass".
     band_vals = list(band_by_category.values())
@@ -279,6 +299,7 @@ def summarize(
             "respect_ci": respect_ci,
             "assertion_pass_rate": assertion_pass_rate_ci,
             "by_category": conf_by_category,
+            "reliability": reliability,
             "warnings": sample_warnings,
         },
         "gate_band": {
