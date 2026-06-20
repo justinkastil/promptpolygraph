@@ -92,13 +92,20 @@ class SQLiteStore:
         row = self._conn().execute(
             "SELECT data FROM runs WHERE run_id = ?", (run_id,)
         ).fetchone()
-        return RunMeta.model_validate_json(row[0]) if row else None
+        return self._load_run(row[0]) if row else None
 
     def list_runs(self) -> list[RunMeta]:
         rows = self._conn().execute(
             "SELECT data FROM runs ORDER BY created_at DESC"
         ).fetchall()
-        return [RunMeta.model_validate_json(r[0]) for r in rows]
+        return [self._load_run(r[0]) for r in rows]
+
+    @staticmethod
+    def _load_run(blob: str) -> RunMeta:
+        """Deserialize a run record, migrating an older schema forward on read."""
+        from ..migrations import migrate_run_dict
+
+        return RunMeta.model_validate(migrate_run_dict(json.loads(blob)))
 
     # ─── cases ────────────────────────────────────────────────────────────
     def save_cases(self, run_id: str, cases: Iterable[Case]) -> None:

@@ -6,6 +6,18 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+### Added
+- **Integrity of record** (toward 1.0). Public-key signing for run bundles:
+  `signing.py` adds Ed25519 (optional `[crypto]` extra) alongside the existing
+  HMAC; `polygraph keygen` writes a keypair, `polygraph bundle --sign-key`
+  signs, and `polygraph verify --pub-key` verifies (HMAC stays the no-dep
+  default; legacy HMAC bundles still verify). Versioned run records: `RunMeta`
+  gains `schema_version` and `migrations.py` upgrades older records forward on
+  read (the store migrates transparently). Tamper-evident `audit_log.py`: an
+  append-only, hash-chained log of privileged actions with `verify_chain`
+  pinpointing any break; `polygraph audit-log verify` gates on it. `polygraph
+  validate` now exercises signing, schema versioning, and the audit-log chain.
+
 ## [0.7.0] - 2026-06-19
 
 A CI/CD-integration release plus the first of the 1.0 validation/trust spine.

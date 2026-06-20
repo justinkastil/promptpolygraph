@@ -67,9 +67,15 @@ never written to run records or reports. Local providers need no key.
 ### R6 — Report/record tampering
 Reports and run records are the basis for decisions, so integrity matters.
 Controls: a sealed bundle (`polygraph bundle`) carries a SHA-256 manifest of
-every file and **`polygraph verify` refuses on any tampered/missing/extra file**;
-an optional HMAC signature (`POLYGRAPH_SIGNING_KEY`) adds origin authentication.
-Provenance manifests record what produced each result.
+every file and **`polygraph verify` refuses on any tampered/missing/extra file**.
+Signatures add origin authentication: an HMAC shared secret
+(`POLYGRAPH_SIGNING_KEY` / `--hmac-key`) within one trust domain, or — with the
+`[crypto]` extra — an **Ed25519 keypair** (`polygraph keygen`, `bundle
+--sign-key`, `verify --pub-key`) so an external auditor verifies with the public
+key alone. Run records are schema-versioned and migrated forward on read.
+Privileged actions can be written to a **hash-chained audit log** (`audit_log`)
+whose `verify_chain` makes any alteration or deletion detectable. Provenance
+manifests record what produced each result.
 
 ### R7 — Reference / standards drift
 A finding cites OWASP/MITRE-ATLAS categories. The mapping is pinned behind a

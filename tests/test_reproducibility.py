@@ -114,3 +114,23 @@ def test_cli_bundle_verify(tmp_path):
     assert main(["bundle", "--out-dir", str(tmp_path / "polygraph_out"),
                  "--run", "abc123", "--out", str(arc)]) == 0
     assert main(["verify", str(arc)]) == 0
+
+
+def test_ed25519_signed_bundle(tmp_path):
+    import pytest
+    from promptpolygraph import signing
+    if not signing.ed25519_available():
+        pytest.skip("cryptography not installed")
+    d = _make_run(tmp_path)
+    priv, pub = signing.generate_keypair()
+    (tmp_path / "k.key").write_text(priv)
+    arc = R.bundle_dir(d, tmp_path / "run.tar.gz", sign_key=str(tmp_path / "k.key"))
+    ok = R.verify_bundle(arc, pub_key=pub)
+    assert ok["ok"] is True and ok["signed"] is True and ok["signature_ok"] is True
+    # a different public key fails
+    _, other = signing.generate_keypair()
+    bad = R.verify_bundle(arc, pub_key=other)
+    assert bad["ok"] is False and bad["signature_ok"] is False
+    # no key -> integrity holds, signature unverified
+    nokey = R.verify_bundle(arc)
+    assert nokey["ok"] is True and nokey["signature_ok"] is None
