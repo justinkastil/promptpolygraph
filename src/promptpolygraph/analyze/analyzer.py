@@ -270,8 +270,9 @@ async def analyze_run(
     """Grade every case/response pair, returning one Score each (input order).
 
     `config` (a Config) is read best-effort for `scorers.sandbox`,
-    `scorers.shared`, and `embedders.*`; absent or partial config is safe and
-    reproduces prior behavior (sandbox disabled, mock embedder, no shared specs).
+    `scorers.allow_subprocess`, `scorers.shared`, and `embedders.*`; absent or
+    partial config is safe and reproduces prior behavior (sandbox disabled,
+    mock embedder, no shared specs).
     """
     resp_by_id: dict[str, Response] = {r.case_id: r for r in responses}
     use_mock = mock or client is None
@@ -281,6 +282,7 @@ async def analyze_run(
 
     # Resolve scoring extras from config (all optional / safe-default).
     sandbox = "disabled"
+    allow_subprocess = False
     shared_specs: list[AssertionSpec] = []
     embedder = None
     gate_mode = "strict"
@@ -293,6 +295,7 @@ async def analyze_run(
         scorers = getattr(config, "scorers", None)
         if scorers is not None:
             sandbox = getattr(scorers, "sandbox", "disabled") or "disabled"
+            allow_subprocess = bool(getattr(scorers, "allow_subprocess", False))
             for sm in getattr(scorers, "shared", []) or []:
                 try:
                     shared_specs.append(AssertionSpec(**sm.model_dump()))
@@ -325,7 +328,12 @@ async def analyze_run(
                 case.id, Response(case_id=case.id, error="no response")
             )
             assertion_results, assertions_passed, assertion_score = await score_assertions(
-                case, resp, embedder=embedder, sandbox=sandbox, extra_specs=shared_specs
+                case,
+                resp,
+                embedder=embedder,
+                sandbox=sandbox,
+                allow_subprocess=allow_subprocess,
+                extra_specs=shared_specs,
             )
             has_assertions = (len(case.assertions) + len(shared_specs)) > 0
 

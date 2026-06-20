@@ -64,9 +64,19 @@ class AssertionSpecModel(BaseModel):
 
 
 class ScorersConfig(BaseModel):
-    # Custom-code (python/callable) assertion sandbox: disabled (CI-safe default) |
-    # expr (AST-restricted expression) | subprocess (separate process, timeout).
-    sandbox: str = "disabled"
+    # TRUST BOUNDARY: a config file is untrusted input. Custom-code scorers run
+    # author-supplied code, so the sandbox mode gates how much capability that
+    # code gets. `expr` (the default) is the safe choice: AST-restricted, no
+    # builtins, no imports, no I/O. `disabled` refuses custom code entirely.
+    # `subprocess` is the only mode that runs an unrestricted Python interpreter
+    # and is therefore a privilege escalation; it stays off unless explicitly
+    # enabled via `allow_subprocess` (or the POLYGRAPH_ALLOW_SUBPROCESS env var)
+    # so that loading a config alone can never trigger arbitrary execution.
+    # Default `disabled` (CI-safe). `expr` is the recommended mode when custom
+    # code is needed; `subprocess` is the opt-in escape hatch below.
+    sandbox: str = "disabled"  # disabled | expr (AST-restricted) | subprocess (opt-in)
+    # Second opt-in required for sandbox=subprocess. Off by default; see above.
+    allow_subprocess: bool = False
     shared: list[AssertionSpecModel] = Field(default_factory=list)  # assertions applied to every case
 
 
