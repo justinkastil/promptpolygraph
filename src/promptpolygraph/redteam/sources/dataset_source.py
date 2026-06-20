@@ -22,9 +22,20 @@ logic maps ``"dataset:advbench"`` → ``make_dataset_source(variant="advbench")`
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .base import AttackSource, GeneratedProbe
+
+# Responsible-use opt-in: fetching a real harmful-behaviour dataset from the
+# network is gated behind explicit acknowledgement. Without it, the source stays
+# on the BENIGN placeholder probes (so a default run never silently pulls
+# harmful content). See RESPONSIBLE_USE.md.
+_OPTIN_ENV = "POLYGRAPH_ACCEPT_DATASET_TERMS"
+
+
+def dataset_optin() -> bool:
+    return os.environ.get(_OPTIN_ENV, "").strip().lower() in ("1", "true", "yes", "on")
 
 # ---------------------------------------------------------------------------
 # Strategy families
@@ -244,6 +255,18 @@ class DatasetSource:
         The static path always succeeds and never raises.
         """
         if mock or not self.available():
+            return _static_probes(self._variant, strategies, count)
+
+        # Responsible-use gate: do not fetch a real harmful-content dataset over
+        # the network unless the operator has explicitly accepted the terms.
+        if not dataset_optin():
+            import warnings
+            warnings.warn(
+                f"dataset:{self._variant} live fetch skipped — set {_OPTIN_ENV}=1 to "
+                "acknowledge the responsible-use terms (see RESPONSIBLE_USE.md); "
+                "using benign placeholder probes instead.",
+                stacklevel=2,
+            )
             return _static_probes(self._variant, strategies, count)
 
         try:
