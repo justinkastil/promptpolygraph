@@ -40,6 +40,30 @@ _try_register("pyrit_source", "make_pyrit_source", "pyrit")
 _try_register("deepteam_source", "make_deepteam_source", "deepteam")
 _try_register("dataset_source", "make_dataset_source", "dataset", "datasets")
 
+
+def _register_plugin_sources() -> None:
+    """Register attack sources contributed by installed third-party plugins.
+
+    Runs after built-ins so a plugin name does not silently shadow one of them
+    unless it is registered last; built-in names above are stable. Failure to
+    discover (no metadata, broken plugin) is a no-op.
+    """
+    try:
+        from ...plugins import GROUP_SOURCES, load_plugins
+
+        discovered = load_plugins(GROUP_SOURCES)
+    except Exception:
+        return
+    for name, factory in discovered.items():
+        if name in _SOURCES:
+            continue  # built-ins win
+        register_source(name, factory)
+
+
+from .base import _SOURCES  # noqa: E402  registry dict, for the shadow check above
+
+_register_plugin_sources()
+
 __all__ = [
     "AttackSource",
     "GeneratedProbe",

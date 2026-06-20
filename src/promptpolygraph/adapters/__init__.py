@@ -40,8 +40,24 @@ def _resolve_callable(ref: str) -> Any:
     return getattr(importlib.import_module(mod_name), attr)
 
 
+def _plugin_adapters() -> dict[str, Any]:
+    """Adapter types contributed by installed third-party plugins.
+
+    Built-in types take precedence (resolved before this is consulted), so a
+    plugin cannot shadow `http`/`llm`/`demo`/`callable`.
+    """
+    from ..plugins import GROUP_ADAPTERS, load_plugins
+
+    return load_plugins(GROUP_ADAPTERS)
+
+
 def build_adapter(cfg: AdapterConfig, **extra: Any) -> Adapter:
-    """Construct an adapter from config. `extra` lets callers inject a callable."""
+    """Construct an adapter from config. `extra` lets callers inject a callable.
+
+    Resolution order: built-in types first, then any adapter type registered by
+    an installed plugin under the `promptpolygraph.adapters` entry-point group.
+    A plugin entry point loads to a factory/class called `(name=..., **options)`.
+    """
     options = {**cfg.options, **extra}
     kind = cfg.type.lower()
     if kind == "http":
@@ -57,4 +73,7 @@ def build_adapter(cfg: AdapterConfig, **extra: Any) -> Adapter:
         if fn is None and isinstance(ref, str) and ref.strip():
             fn = _resolve_callable(ref.strip())
         return CallableAdapter(name=cfg.name or "callable", fn=fn, **options)
+    factory = _plugin_adapters().get(kind)
+    if factory is not None:
+        return factory(name=cfg.name or kind, **options)
     raise ValueError(f"unknown adapter type: {cfg.type!r}")
