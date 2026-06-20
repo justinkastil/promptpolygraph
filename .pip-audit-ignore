@@ -1,0 +1,4 @@
+# Triaged CVE ignore list for the CI pip-audit step (see docs/SUPPLY_CHAIN.md).
+# One OSV/PYSEC/GHSA vulnerability ID per line. Lines starting with # are
+# comments. Each entry must justify why the finding is accepted (no fix
+# available, not reachable, etc.). Empty by default: nothing is ignored.

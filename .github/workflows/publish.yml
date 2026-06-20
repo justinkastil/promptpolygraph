@@ -12,7 +12,9 @@ jobs:
   pypi:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
+      id-token: write        # PyPI trusted publishing (OIDC)
+      contents: write        # attach the SBOM to the GitHub release
+      attestations: write    # build provenance attestation for the artifacts
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,4 +22,30 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade build
       - run: python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+
+      # CycloneDX SBOM over the resolved install set, attached to the release.
+      - name: Generate CycloneDX SBOM
+        run: |
+          pip install -e . cyclonedx-bom
+          cyclonedx-py environment --output-format JSON --outfile sbom.cdx.json
+
+      # Build provenance for the wheel/sdist. Verifiable with `gh attestation
+      # verify <artifact> --repo <owner>/<repo>`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "dist/*"
+
+      # pypi-publish emits PEP 740 attestations for the uploaded artifacts.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
+
+      # Attach the SBOM to the GitHub release so consumers can fetch it without
+      # re-running the build. Only on release events (no-op for workflow_dispatch).
+      - name: Attach SBOM to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" sbom.cdx.json --clobber
