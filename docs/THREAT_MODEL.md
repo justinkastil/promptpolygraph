@@ -97,7 +97,9 @@ prefer `verify` first.
 ## Out of scope
 
 The security of the system under test; network transport security to the target
-(use TLS endpoints). The shared service deployment now enforces **multi-tenant
+(use TLS endpoints). The shared service deployment enforces **multi-tenant
 isolation + RBAC** with hashed per-workspace API keys and a hash-chained audit
-log (`service/tenancy.py`); **OIDC/SSO** for human authentication is the
-remaining 1.0 item (the API-key path is the current credential).
+log (`service/tenancy.py`). **OIDC/SSO** (optional `[oidc]` extra) verifies an
+IdP bearer JWT (signature / issuer / audience / expiry, optional MFA) and maps it
+to a workspace member's role; it is off unless configured, with the API-key path
+as the CI / service-account credential.

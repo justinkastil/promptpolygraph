@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # Optional global webhook fired on every run completion.
     webhook_url: str | None = None
 
+    # Optional OIDC/OAuth2 SSO (human login). Unset -> disabled; API-key auth is
+    # unchanged. Needs the [oidc] extra. The IdP issues a bearer JWT we verify
+    # against its JWKS and map (by email/sub) to a workspace member's role.
+    oidc_issuer: str = ""
+    oidc_audience: str = ""
+    oidc_jwks_url: str = ""          # optional; derived from the issuer when blank
+    oidc_email_claim: str = "email"
+    oidc_require_mfa: bool = False   # enforce an MFA amr/acr claim
+
     # Presentation.
     title: str = "PromptPolygraph"
 

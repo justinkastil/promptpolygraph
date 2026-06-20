@@ -198,3 +198,26 @@ curl       $URL/api/audit-log -H "X-API-Key: $ADMIN"                            
 admin of the `default` workspace, and an auth-disabled dev server to the same —
 existing single-tenant deployments are unchanged. OIDC/SSO (human login) is the
 next addition; the API-key path covers CI/service accounts today.
+
+## SSO (OIDC/OAuth2) — optional
+
+Human login can be delegated to an IdP (Okta, Entra ID, Keycloak, Auth0). It is
+**optional and off by default**: install the `[oidc]` extra and set the issuer to
+enable it; per-workspace API keys remain the credential for CI / service accounts.
+
+```bash
+pip install 'promptpolygraph[oidc]'
+export POLYGRAPH_OIDC_ISSUER=https://your-idp.example.com
+export POLYGRAPH_OIDC_AUDIENCE=promptpolygraph        # the token's aud
+# export POLYGRAPH_OIDC_JWKS_URL=...                  # optional; derived from the issuer otherwise
+# export POLYGRAPH_OIDC_EMAIL_CLAIM=email             # identity claim (default: email)
+# export POLYGRAPH_OIDC_REQUIRE_MFA=1                 # require an MFA amr/acr claim
+```
+
+Clients send the IdP-issued JWT as `Authorization: Bearer <token>`. The service
+verifies the signature against the IdP's JWKS (with issuer/audience/expiry
+checks), then maps the token's identity (its `email`/`sub`) to a **workspace
+member's role** — so add users with `POST /api/members` first. A user who is a
+member of several workspaces selects one with an `X-Workspace: <id>` header
+(otherwise the first is used). An authenticated user who is not a member of any
+workspace is denied (`403`).
