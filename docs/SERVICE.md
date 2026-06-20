@@ -170,3 +170,31 @@ Payload shape:
 See [`deploy/README.md`](../deploy/README.md) for AWS/GCP deployment guidance
 (image build, Postgres provisioning, worker/API replica topology, shared volume
 for `OUT_DIR`).
+
+## Multi-tenant access control (RBAC)
+
+The service is multi-tenant: **workspaces** are the isolation boundary, and every
+run is stamped to the workspace that created it. A request only sees its own
+workspace's runs — a cross-workspace read returns `404` (existence is not leaked).
+
+**Roles** are `admin` > `editor` > `viewer`:
+- *viewer* — read runs/reports/compare;
+- *editor* — also create + cancel runs, create personas;
+- *admin* — also manage members + API keys + read the audit log.
+
+**API keys** are minted per workspace and **stored hashed** — the plaintext is
+shown once at creation and is not recoverable. Manage them as an admin:
+
+```bash
+curl -XPOST $URL/api/keys     -H "X-API-Key: $ADMIN" -d '{"role":"editor","label":"ci"}'   # mint (returns api_key once)
+curl       $URL/api/keys      -H "X-API-Key: $ADMIN"                                          # list (metadata only)
+curl -XDELETE $URL/api/keys/<prefix> -H "X-API-Key: $ADMIN"                                   # revoke
+curl -XPOST $URL/api/workspaces -H "X-API-Key: $ADMIN" -d '{"name":"acme"}'                   # new workspace (+ bootstrap admin key)
+curl       $URL/api/whoami    -H "X-API-Key: $KEY"                                            # your workspace + role
+curl       $URL/api/audit-log -H "X-API-Key: $ADMIN"                                          # hash-chained log + chain check
+```
+
+**Backward compatible:** a legacy flat `POLYGRAPH_API_KEYS` value resolves to an
+admin of the `default` workspace, and an auth-disabled dev server to the same —
+existing single-tenant deployments are unchanged. OIDC/SSO (human login) is the
+next addition; the API-key path covers CI/service accounts today.
