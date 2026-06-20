@@ -97,5 +97,7 @@ prefer `verify` first.
 ## Out of scope
 
 The security of the system under test; network transport security to the target
-(use TLS endpoints); multi-tenant isolation and authn/z for the shared service
-deployment (tracked for 1.0 — see the v1.0 epic).
+(use TLS endpoints). The shared service deployment now enforces **multi-tenant
+isolation + RBAC** with hashed per-workspace API keys and a hash-chained audit
+log (`service/tenancy.py`); **OIDC/SSO** for human authentication is the
+remaining 1.0 item (the API-key path is the current credential).
