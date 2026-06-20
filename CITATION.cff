@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use PromptPolygraph in your work, please cite it."
+title: PromptPolygraph
+abstract: >-
+  A local-first, cloud-agnostic harness for evaluating and red-teaming web/API/LLM
+  systems: synthetic-prompt generation, rubric + assertion scoring with a
+  multi-judge ensemble, a persona reaction panel, a forensic audit, an
+  OWASP/MITRE-ATLAS-mapped red-team engine, and a validation/trust layer
+  (provenance, calibration, statistical rigor, signing, reproducibility).
+type: software
+license: Apache-2.0
+repository-code: "https://github.com/justinkastil/promptpolygraph"
+url: "https://github.com/justinkastil/promptpolygraph"
+keywords:
+  - llm
+  - evaluation
+  - red-teaming
+  - testing
+  - prompt
+authors:
+  - name: PromptPolygraph contributors
