@@ -6,6 +6,29 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+### Added
+- Provider coverage: a `litellm` backend (optional `[litellm]` extra) routes the
+  judge/audit/generation backend to Bedrock, Vertex, Azure OpenAI, Gemini,
+  Cohere, and others; the existing Anthropic / OpenAI-compatible / local paths
+  are unchanged. (#36)
+- Plugin system: adapters, sources, judges, and reporters can register via
+  `importlib.metadata` entry points, so third-party packages extend the tool
+  without a fork; `polygraph plugins list` shows built-in + installed plugins. (#34)
+- Larger judge-calibration set (16 → 56 stratified cases) with a small-sample
+  warning and a per-strategy breakdown in the calibrate report. (#37)
+- Supply chain: CI runs a `pip-audit` CVE scan and emits a CycloneDX SBOM
+  artifact; releases carry build-provenance attestations. New `docs/SUPPLY_CHAIN.md`. (#39)
+- `py.typed` marker (PEP 561) so downstream consumers and plugin authors get the
+  package's type information; a scoped mypy check runs in CI. (#33)
+- README badges, a 30-second quickstart callout, and a Colab quickstart notebook. (#31)
+- Community files: `CODE_OF_CONDUCT.md`, issue/PR templates, and `CITATION.cff`. (#32)
+
+### Changed
+- Hardened the custom-code assertion scorer: the `subprocess` mode is refused
+  unless explicitly enabled (`scorers.allow_subprocess` / `POLYGRAPH_ALLOW_SUBPROCESS`)
+  and runs with provider secrets stripped from its environment. `expr` remains
+  the safe mode; the default is unchanged. (#40)
+
 ## [1.0.0] - 2026-06-20
 
 The validation-ready release: the trust and auditability layer institutions need
