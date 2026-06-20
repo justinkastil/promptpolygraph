@@ -25,8 +25,9 @@ from .. import analyze as A
 from .. import persona as P
 from ..compare import pairwise as pairwise_fn
 from ..config import Config
-from .auth import require_api_key
+from .auth import get_principal, require_api_key, require_role
 from .db import SqlStore, make_store
+from .tenancy import ROLES, Principal, get_tenancy
 from .jobspec import payload_from_request
 from .schemas import (
     CreatePersonaRequest,
@@ -244,56 +245,80 @@ async def ws_redteam(
 # ─── runs ─────────────────────────────────────────────────────────────────
 
 
-@app.post("/api/runs", response_model=CreateRunResponse, dependencies=[Depends(require_api_key)])
-def create_run(req: CreateRunRequest) -> CreateRunResponse:
+def _require_run_access(run_id: str, principal: Principal) -> None:
+    """404 if the run is not in the caller's workspace (don't leak existence)."""
+    if not get_tenancy().owns_run(run_id, principal.workspace_id):
+        raise HTTPException(404, "run not found")
+
+
+@app.post("/api/runs", response_model=CreateRunResponse)
+def create_run(req: CreateRunRequest,
+               principal: Principal = Depends(require_role("editor"))) -> CreateRunResponse:
     payload = payload_from_request(req, settings)
     if payload.get("webhook_url") is None and settings.webhook_url:
         payload["webhook_url"] = settings.webhook_url
     ids = store.enqueue_job(payload, priority=req.priority)
+    tenancy = get_tenancy()
+    tenancy.claim_run(ids["run_id"], principal.workspace_id)
+    tenancy.audit(principal.workspace_id, "run_created", actor=principal.subject,
+                  run_id=ids["run_id"], job_id=ids["job_id"])
     return CreateRunResponse(run_id=ids["run_id"], job_id=ids["job_id"], status="queued")
 
 
-@app.get("/api/runs", dependencies=[Depends(require_api_key)])
-def list_runs(limit: int = Query(100, ge=1, le=500)) -> list[RunStatus]:
+@app.get("/api/runs")
+def list_runs(limit: int = Query(100, ge=1, le=500),
+              principal: Principal = Depends(require_role("viewer"))) -> list[RunStatus]:
+    tenancy = get_tenancy()
     out: list[RunStatus] = []
     runs = {r.run_id: r for r in store.list_runs(limit=limit)}
     jobs = store.list_jobs(limit=limit)
     job_by_run = {j["run_id"]: j for j in jobs}
+
+    def visible(run_id: str) -> bool:
+        return tenancy.owns_run(run_id, principal.workspace_id)
+
     # include queued/running runs that have no run row yet
     for jid, job in job_by_run.items():
-        if jid not in runs:
+        if jid not in runs and visible(jid):
             out.append(_status_from_job(job))
     for run_id, meta in runs.items():
-        out.append(_status(meta, job_by_run.get(run_id)))
+        if visible(run_id):
+            out.append(_status(meta, job_by_run.get(run_id)))
     out.sort(key=lambda s: s.created_at or "", reverse=True)
     return out[:limit]
 
 
-@app.get("/api/runs/{run_id}", response_model=RunStatus, dependencies=[Depends(require_api_key)])
-def get_run(run_id: str) -> RunStatus:
+@app.get("/api/runs/{run_id}", response_model=RunStatus)
+def get_run(run_id: str, principal: Principal = Depends(require_role("viewer"))) -> RunStatus:
     meta = store.get_run(run_id)
     job = store.get_job_for_run(run_id)
     if not meta and not job:
         raise HTTPException(404, "run not found")
+    _require_run_access(run_id, principal)
     return _status(meta, job) if meta else _status_from_job(job)
 
 
-@app.post("/api/runs/{run_id}/cancel", dependencies=[Depends(require_api_key)])
-def cancel_run(run_id: str) -> dict:
+@app.post("/api/runs/{run_id}/cancel")
+def cancel_run(run_id: str, principal: Principal = Depends(require_role("editor"))) -> dict:
     job = store.get_job_for_run(run_id)
     if not job:
         raise HTTPException(404, "run not found")
+    _require_run_access(run_id, principal)
     ok = store.cancel_job(job["job_id"])
+    get_tenancy().audit(principal.workspace_id, "run_canceled", actor=principal.subject,
+                        run_id=run_id)
     return {"run_id": run_id, "canceled": ok}
 
 
-@app.get("/api/runs/{run_id}/summary", dependencies=[Depends(require_api_key)])
-def get_summary(run_id: str) -> dict:
+@app.get("/api/runs/{run_id}/summary")
+def get_summary(run_id: str, principal: Principal = Depends(require_role("viewer"))) -> dict:
+    _require_run_access(run_id, principal)
     return _summary(run_id)
 
 
-@app.get("/api/runs/{run_id}/cases", dependencies=[Depends(require_api_key)])
-def get_cases(run_id: str) -> list[dict]:
+@app.get("/api/runs/{run_id}/cases")
+def get_cases(run_id: str, principal: Principal = Depends(require_role("viewer"))) -> list[dict]:
+    _require_run_access(run_id, principal)
     cases = store.get_cases(run_id)
     rmap = {r.case_id: r for r in store.get_responses(run_id)}
     smap = {s.case_id: s for s in store.get_scores(run_id)}
@@ -307,16 +332,19 @@ def get_cases(run_id: str) -> list[dict]:
     ]
 
 
-@app.get("/api/runs/{run_id}/audit", dependencies=[Depends(require_api_key)])
-def get_audit(run_id: str) -> dict:
+@app.get("/api/runs/{run_id}/audit")
+def get_audit(run_id: str, principal: Principal = Depends(require_role("viewer"))) -> dict:
+    _require_run_access(run_id, principal)
     path = _run_dir(run_id) / "audit.json"
     if not path.exists():
         raise HTTPException(404, "no audit for this run")
     return json.loads(path.read_text())
 
 
-@app.get("/api/runs/{run_id}/report", dependencies=[Depends(require_api_key)])
-def get_report(run_id: str, format: str = Query("html")):
+@app.get("/api/runs/{run_id}/report")
+def get_report(run_id: str, format: str = Query("html"),
+               principal: Principal = Depends(require_role("viewer"))):
+    _require_run_access(run_id, principal)
     fmt = format.lower()
     rd = _run_dir(run_id)
     disk = rd / f"report.{fmt}"
@@ -336,16 +364,22 @@ def get_report(run_id: str, format: str = Query("html")):
 # ─── jobs ─────────────────────────────────────────────────────────────────
 
 
-@app.get("/api/jobs", dependencies=[Depends(require_api_key)])
-def list_jobs(status: str | None = None, limit: int = Query(100, ge=1, le=500)) -> list[dict]:
-    return [_job_public(j) for j in store.list_jobs(status=status, limit=limit)]
+@app.get("/api/jobs")
+def list_jobs(status: str | None = None, limit: int = Query(100, ge=1, le=500),
+              principal: Principal = Depends(require_role("viewer"))) -> list[dict]:
+    tenancy = get_tenancy()
+    return [_job_public(j) for j in store.list_jobs(status=status, limit=limit)
+            if tenancy.owns_run(j["run_id"], principal.workspace_id)]
 
 
 # ─── compare ────────────────────────────────────────────────────────────────
 
 
-@app.get("/api/compare", dependencies=[Depends(require_api_key)])
-def compare(run_a: str, run_b: str) -> dict:
+@app.get("/api/compare")
+def compare(run_a: str, run_b: str,
+            principal: Principal = Depends(require_role("viewer"))) -> dict:
+    _require_run_access(run_a, principal)
+    _require_run_access(run_b, principal)
     cases = store.get_cases(run_a)
     pw = pairwise_fn(cases, store.get_scores(run_a), store.get_scores(run_b))
     pw["run_a"], pw["run_b"] = run_a, run_b
@@ -360,8 +394,9 @@ def list_personas() -> list[dict]:
     return [p.model_dump() for p in P.load_library()]
 
 
-@app.post("/api/personas", dependencies=[Depends(require_api_key)])
-async def create_persona(req: CreatePersonaRequest) -> dict:
+@app.post("/api/personas")
+async def create_persona(req: CreatePersonaRequest,
+                         principal: Principal = Depends(require_role("editor"))) -> dict:
     mock = settings.default_mock if req.mock is None else req.mock
     client = None
     if not mock:
@@ -370,6 +405,84 @@ async def create_persona(req: CreatePersonaRequest) -> dict:
         client = make_client()
     persona = await P.create_persona(client, req.description, mock=mock)
     return persona.model_dump()
+
+
+# ─── admin: workspaces, members, API keys, audit log ─────────────────────────
+
+
+@app.get("/api/whoami")
+def whoami(principal: Principal = Depends(get_principal)) -> dict:
+    return {"workspace_id": principal.workspace_id, "role": principal.role,
+            "subject": principal.subject, "via": principal.via}
+
+
+@app.get("/api/workspaces")
+def list_workspaces(principal: Principal = Depends(require_role("admin"))) -> list[dict]:
+    return get_tenancy().list_workspaces()
+
+
+@app.post("/api/workspaces")
+def create_workspace(body: dict, principal: Principal = Depends(require_role("admin"))) -> dict:
+    name = (body or {}).get("name")
+    if not name:
+        raise HTTPException(400, "name is required")
+    t = get_tenancy()
+    ws = t.create_workspace(name)
+    # bootstrap: mint an initial admin key for the new workspace (returned once).
+    key = t.create_api_key(ws["workspace_id"], "admin", label="bootstrap-admin")
+    t.audit(principal.workspace_id, "workspace_created", actor=principal.subject,
+            new_workspace_id=ws["workspace_id"], name=ws["name"])
+    return {**ws, "admin_api_key": key["api_key"]}
+
+
+@app.get("/api/members")
+def list_members(principal: Principal = Depends(require_role("admin"))) -> list[dict]:
+    return get_tenancy().list_members(principal.workspace_id)
+
+
+@app.post("/api/members")
+def add_member(body: dict, principal: Principal = Depends(require_role("admin"))) -> dict:
+    subject, role = (body or {}).get("subject"), (body or {}).get("role")
+    if not subject or role not in ROLES:
+        raise HTTPException(400, f"subject + role required (role in {ROLES})")
+    out = get_tenancy().add_member(principal.workspace_id, subject, role)
+    get_tenancy().audit(principal.workspace_id, "member_added", actor=principal.subject,
+                        subject=subject, role=role)
+    return out
+
+
+@app.get("/api/keys")
+def list_keys(principal: Principal = Depends(require_role("admin"))) -> list[dict]:
+    return get_tenancy().list_api_keys(principal.workspace_id)
+
+
+@app.post("/api/keys")
+def create_key(body: dict, principal: Principal = Depends(require_role("admin"))) -> dict:
+    role = (body or {}).get("role", "viewer")
+    if role not in ROLES:
+        raise HTTPException(400, f"role must be one of {ROLES}")
+    out = get_tenancy().create_api_key(principal.workspace_id, role, (body or {}).get("label", ""))
+    get_tenancy().audit(principal.workspace_id, "api_key_created", actor=principal.subject,
+                        role=role, label=out["label"])
+    return out  # plaintext returned once
+
+
+@app.delete("/api/keys/{key_prefix}")
+def revoke_key(key_prefix: str, principal: Principal = Depends(require_role("admin"))) -> dict:
+    ok = get_tenancy().revoke_api_key(principal.workspace_id, key_prefix)
+    if not ok:
+        raise HTTPException(404, "no such key in this workspace")
+    get_tenancy().audit(principal.workspace_id, "api_key_revoked", actor=principal.subject,
+                        key_prefix=key_prefix)
+    return {"revoked": True, "key_prefix": key_prefix}
+
+
+@app.get("/api/audit-log")
+def get_audit_log(limit: int = Query(200, ge=1, le=1000),
+                  principal: Principal = Depends(require_role("admin"))) -> dict:
+    t = get_tenancy()
+    return {"entries": t.list_audit(principal.workspace_id, limit=limit),
+            "chain": t.verify_audit_chain(principal.workspace_id)}
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────
