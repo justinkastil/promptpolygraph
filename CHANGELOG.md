@@ -6,6 +6,12 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-20
+
+Market-acceptance follow-on to 1.0: lower-friction adoption, broader provider and
+framework reach, an extensibility plugin system, supply-chain controls, and
+deeper measurement trust.
+
 ### Added
 - Provider coverage: a `litellm` backend (optional `[litellm]` extra) routes the
   judge/audit/generation backend to Bedrock, Vertex, Azure OpenAI, Gemini,
@@ -22,6 +28,15 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
   package's type information; a scoped mypy check runs in CI. (#33)
 - README badges, a 30-second quickstart callout, and a Colab quickstart notebook. (#31)
 - Community files: `CODE_OF_CONDUCT.md`, issue/PR templates, and `CITATION.cff`. (#32)
+- Reusable composite GitHub Action (`uses: justinkastil/promptpolygraph@v1`):
+  runs the gate, emits JUnit/SARIF, and surfaces the verdict as an output. (#35)
+- Judge-drift detection: runs pin the judge identity (`RunMeta.judge_meta`); a
+  bundled canary set + `polygraph canary` flag a judge that has drifted, and
+  compare/trend warn when the judge changed between runs. (#38)
+- Framework adapters (optional `[frameworks]` extra): thin LangChain / LlamaIndex
+  / DSPy wrappers registered through the plugin system. (#42)
+- Hosted documentation site (mkdocs-material + mkdocstrings) with a generated API
+  reference, built and deployed to Pages in CI. (#41)
 
 ### Changed
 - Hardened the custom-code assertion scorer: the `subprocess` mode is refused
