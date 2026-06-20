@@ -68,11 +68,17 @@ def test_canary_passes_under_correct_judge():
     assert report["flags"] == []
 
 
-def test_canary_content_is_benign():
-    # Guard the constraint: no health/company/IP/competitor terms in the set.
+def test_canary_content_has_no_disallowed_terms():
+    """The bundled canary set must not surface any term from
+    POLYGRAPH_DISALLOWED_TERMS (a comma-separated list supplied by the
+    environment, e.g. internal CI). The list is intentionally not hardcoded so
+    the public source enumerates nothing; with no env var set this is a no-op."""
+    import os
+
     blob = json.dumps(load_canary()).lower()
-    for term in ("patient", "clinical", "diagnos", "blockhaven", "haven", "patent"):
-        assert term not in blob
+    terms = [t.strip().lower() for t in os.environ.get("POLYGRAPH_DISALLOWED_TERMS", "").split(",") if t.strip()]
+    for term in terms:
+        assert term not in blob, "disallowed term present in the canary set"
 
 
 def test_canary_detects_flipped_judge(monkeypatch):
