@@ -30,3 +30,6 @@ polygraph_out/
 # Local secrets / env
 .env
 *.local
+
+# MkDocs build output
+site/

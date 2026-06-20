@@ -167,7 +167,7 @@ Payload shape:
 
 ## Cloud deployment
 
-See [`deploy/README.md`](../deploy/README.md) for AWS/GCP deployment guidance
+See [`deploy/README.md`](https://github.com/justinkastil/promptpolygraph/blob/main/deploy/README.md) for AWS/GCP deployment guidance
 (image build, Postgres provisioning, worker/API replica topology, shared volume
 for `OUT_DIR`).
 
