@@ -43,6 +43,13 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
   between-case signal vs judge noise). A `polygraph power` command does
   sample-size / power planning; the eval summary's `confidence` block gains a
   per-dimension `reliability` (ICC) section when an ensemble graded each case.
+- **Governance & responsible use** (toward 1.0). New `RESPONSIBLE_USE.md`
+  (authorized-use boundaries), `CONTRIBUTING.md`, and `GOVERNANCE.md`.
+  Adversarial datasets are now **opt-in**: the live fetch of a harmful-behaviour
+  dataset (`dataset:advbench` / `harmbench` / `jailbreakbench`) is gated behind
+  `POLYGRAPH_ACCEPT_DATASET_TERMS=1` — without it the source stays on benign
+  placeholder probes (and warns), so a default run never pulls harmful content
+  silently.
 
 ## [0.7.0] - 2026-06-19
 
