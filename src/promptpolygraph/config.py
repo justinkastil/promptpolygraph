@@ -89,9 +89,12 @@ class EmbeddersConfig(BaseModel):
 class LLMBackendConfig(BaseModel):
     """Backend for the grader/judge, audit agents, and corpus generation.
     `anthropic` (default, needs ANTHROPIC_API_KEY) | `openai` | `ollama` |
-    `openai-compatible` | `vllm` | `lmstudio`. Local providers (ollama, …) need
-    no key, so the whole eval can run on a local model. The system *under test*
-    is configured separately via `adapter:`."""
+    `openai-compatible` | `vllm` | `lmstudio` | `litellm` (catch-all) |
+    `bedrock` | `vertex`/`vertex_ai` | `azure` | `gemini` | `cohere`. Local
+    providers (ollama, …) need no key, so the whole eval can run on a local
+    model; the LiteLLM-routed clouds need the [litellm] extra and their own
+    cloud env vars (see docs/PROVIDERS.md). The system *under test* is
+    configured separately via `adapter:`."""
 
     provider: str = "anthropic"
     base_url: str | None = None  # defaults: ollama -> http://localhost:11434/v1, else OpenAI

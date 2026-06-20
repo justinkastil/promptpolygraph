@@ -19,6 +19,48 @@ from .llm import DEFAULT_OLLAMA_BASE_URL
 _ANTHROPIC_MODELS = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
 _OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "o3-mini"]
 
+# Cloud providers routed through litellm. Each authenticates via its own env
+# vars (see docs/PROVIDERS.md); availability here means [litellm] is installed
+# and a credential signal is present. Model strings expect the litellm prefix.
+_LITELLM_PROVIDERS = [
+    {
+        "id": "bedrock", "label": "AWS Bedrock",
+        "models": ["anthropic.claude-3-5-sonnet-20241022-v2:0", "anthropic.claude-3-haiku-20240307-v1:0"],
+        "creds": ("AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_REGION_NAME"),
+        "creds_hint": "set AWS credentials (AWS_ACCESS_KEY_ID/AWS_PROFILE + region)",
+    },
+    {
+        "id": "vertex_ai", "label": "Google Vertex AI",
+        "models": ["gemini-1.5-pro", "gemini-1.5-flash"],
+        "creds": ("GOOGLE_APPLICATION_CREDENTIALS", "VERTEXAI_PROJECT"),
+        "creds_hint": "set GOOGLE_APPLICATION_CREDENTIALS + VERTEXAI_PROJECT/VERTEXAI_LOCATION",
+    },
+    {
+        "id": "azure", "label": "Azure OpenAI",
+        "models": ["gpt-4o", "gpt-4o-mini"],
+        "creds": ("AZURE_API_KEY",),
+        "creds_hint": "set AZURE_API_KEY + AZURE_API_BASE + AZURE_API_VERSION",
+    },
+    {
+        "id": "gemini", "label": "Google Gemini (AI Studio)",
+        "models": ["gemini-1.5-pro", "gemini-1.5-flash"],
+        "creds": ("GEMINI_API_KEY",),
+        "creds_hint": "set GEMINI_API_KEY",
+    },
+    {
+        "id": "cohere", "label": "Cohere",
+        "models": ["command-r-plus", "command-r"],
+        "creds": ("COHERE_API_KEY",),
+        "creds_hint": "set COHERE_API_KEY",
+    },
+]
+
+
+def _litellm_installed() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("litellm") is not None
+
 
 def _ollama_root(base_url: str | None = None) -> str:
     # The OpenAI-compat URL ends in /v1; the native tag list lives at the root.
@@ -79,5 +121,21 @@ def discover_providers(*, ollama_base: str | None = None, probe_local: bool = Tr
         "default_model": models[0] if models else None, "allow_custom": True,
         "base_url": _ollama_root(ollama_base) + "/v1",
     })
+
+    has_litellm = _litellm_installed()
+    for spec in _LITELLM_PROVIDERS:
+        creds_present = any(os.environ.get(v) for v in spec["creds"])
+        if not has_litellm:
+            reason = "install the [litellm] extra to enable"
+        elif creds_present:
+            reason = "litellm installed; credentials detected"
+        else:
+            reason = spec["creds_hint"]
+        out.append({
+            "id": spec["id"], "label": spec["label"],
+            "available": has_litellm and creds_present, "reason": reason,
+            "needs_key": None, "models": spec["models"],
+            "default_model": spec["models"][0], "allow_custom": True,
+        })
 
     return out
