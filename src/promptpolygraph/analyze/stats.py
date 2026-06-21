@@ -42,6 +42,10 @@ __all__ = [
     "min_n_for_proportion_diff",
     "power_for_proportion_diff",
     "variance_components",
+    "pearson",
+    "spearman",
+    "ks_two_sample",
+    "js_divergence",
 ]
 
 
@@ -501,6 +505,149 @@ def power_for_proportion_diff(p1: float, p2: float, n1: int, n2: int,
         return 1.0
     z = abs(p2 - p1) / se
     return round(max(0.0, min(1.0, norm_cdf(z - za) + norm_cdf(-z - za))), 6)
+
+
+# ── correlation + distribution shift ──────────────────────────────────────────
+
+def pearson(x: Sequence[float], y: Sequence[float]) -> float | None:
+    """Pearson product-moment correlation of paired samples.
+
+    Returns None when undefined (fewer than two pairs, or either side constant).
+    """
+    px = [float(v) for v in x]
+    py = [float(v) for v in y]
+    n = len(px)
+    if n != len(py) or n < 2:
+        return None
+    mx, my = _mean(px), _mean(py)
+    sxx = sum((v - mx) ** 2 for v in px)
+    syy = sum((v - my) ** 2 for v in py)
+    if sxx <= 0.0 or syy <= 0.0:
+        return None
+    sxy = sum((a - mx) * (b - my) for a, b in zip(px, py))
+    return round(sxy / math.sqrt(sxx * syy), 6)
+
+
+def _rank(values: Sequence[float]) -> list[float]:
+    """Fractional ranks (ties share the average rank), 1-based."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        avg = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg
+        i = j + 1
+    return ranks
+
+
+def spearman(x: Sequence[float], y: Sequence[float]) -> float | None:
+    """Spearman rank correlation of paired samples (Pearson on the ranks).
+
+    Rank-based so it captures any monotonic relationship and resists outliers and
+    scale differences between synthetic and real measures. Returns None when
+    undefined (fewer than two pairs, or either side constant after ranking).
+    """
+    px = [float(v) for v in x]
+    py = [float(v) for v in y]
+    n = len(px)
+    if n != len(py) or n < 2:
+        return None
+    return pearson(_rank(px), _rank(py))
+
+
+def ks_two_sample(a: Sequence[float], b: Sequence[float]) -> dict:
+    """Two-sample Kolmogorov-Smirnov statistic with an asymptotic p-value.
+
+    `statistic` is the maximum gap between the two empirical CDFs (0 = identical
+    shape, 1 = disjoint). The p-value uses the asymptotic Kolmogorov distribution
+    and is approximate for small samples. Returns a None statistic when either
+    side is empty.
+    """
+    sa = sorted(float(v) for v in a)
+    sb = sorted(float(v) for v in b)
+    na, nb = len(sa), len(sb)
+    if na == 0 or nb == 0:
+        return {"statistic": None, "p_value": None, "na": na, "nb": nb}
+    pooled = sorted(set(sa) | set(sb))
+    d = 0.0
+    for v in pooled:
+        fa = _ecdf(sa, v)
+        fb = _ecdf(sb, v)
+        d = max(d, abs(fa - fb))
+    en = math.sqrt(na * nb / (na + nb))
+    p = _kolmogorov_sf((en + 0.12 + 0.11 / en) * d)
+    return {"statistic": round(d, 6), "p_value": round(p, 6), "na": na, "nb": nb}
+
+
+def _ecdf(sorted_vals: Sequence[float], x: float) -> float:
+    """Empirical CDF F(x) for an already-sorted sample."""
+    n = len(sorted_vals)
+    lo, hi = 0, n
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if sorted_vals[mid] <= x:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo / n
+
+
+def _kolmogorov_sf(t: float) -> float:
+    """Survival function of the Kolmogorov distribution, Q(t) = P(K > t)."""
+    if t <= 0.0:
+        return 1.0
+    s = 0.0
+    for k in range(1, 101):
+        term = (-1) ** (k - 1) * math.exp(-2.0 * k * k * t * t)
+        s += term
+        if abs(term) < 1e-12:
+            break
+    return min(1.0, max(0.0, 2.0 * s))
+
+
+def js_divergence(a: Sequence[float], b: Sequence[float], *, bins: int = 10,
+                  lo: float | None = None, hi: float | None = None) -> float | None:
+    """Jensen-Shannon divergence between two samples, histogrammed to a shared grid.
+
+    Symmetric and bounded in [0, 1] (log base 2). 0 means identical distributions.
+    The grid spans the pooled range unless `lo`/`hi` pin it (use the rubric scale
+    so synthetic and real share an axis). Returns None when either side is empty.
+    """
+    va = [float(v) for v in a]
+    vb = [float(v) for v in b]
+    if not va or not vb:
+        return None
+    lo = min(min(va), min(vb)) if lo is None else lo
+    hi = max(max(va), max(vb)) if hi is None else hi
+    if hi <= lo:
+        return 0.0  # degenerate range: all mass in one bin, distributions coincide
+    width = (hi - lo) / bins
+
+    def hist(vals: Sequence[float]) -> list[float]:
+        counts = [0.0] * bins
+        for v in vals:
+            idx = min(bins - 1, max(0, int((v - lo) / width)))
+            counts[idx] += 1.0
+        total = sum(counts)
+        return [c / total for c in counts]
+
+    p, q = hist(va), hist(vb)
+    m = [(pi + qi) / 2.0 for pi, qi in zip(p, q)]
+    jsd = 0.5 * _kl(p, m) + 0.5 * _kl(q, m)
+    return round(max(0.0, min(1.0, jsd)), 6)
+
+
+def _kl(p: Sequence[float], q: Sequence[float]) -> float:
+    """KL(p || q) in bits; terms with p_i == 0 contribute nothing."""
+    total = 0.0
+    for pi, qi in zip(p, q):
+        if pi > 0.0 and qi > 0.0:
+            total += pi * math.log2(pi / qi)
+    return total
 
 
 # ── variance decomposition (judge noise vs real signal) ───────────────────────
