@@ -9,7 +9,8 @@ selecting fixed / varied / adversarial / hybrid behavior.
 
 from __future__ import annotations
 
+from .contamination import check_contamination
 from .generator import build_corpus, generate
 from .loader import load_corpus
 
-__all__ = ["load_corpus", "build_corpus", "generate"]
+__all__ = ["load_corpus", "build_corpus", "generate", "check_contamination"]
