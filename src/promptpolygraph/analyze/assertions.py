@@ -538,6 +538,18 @@ def _eval_one(
             passed = resp.error is None
             return _result(spec, passed, 1.0 if passed else 0.0, f"error: {resp.error}")
 
+        # RAG grounding: assert the retrieved-document ids (recorded by the rag
+        # adapter on resp.raw["retrieved"]) include the expected source(s) — a
+        # cite-your-sources check. `value` is an id or list of ids.
+        if kind == "retrieved_contains":
+            retrieved = [str(r) for r in (resp.raw.get("retrieved") or [])]
+            wanted = value if isinstance(value, (list, tuple)) else [value]
+            wanted = [str(w) for w in wanted]
+            missing = [w for w in wanted if w not in retrieved]
+            passed = not missing
+            return _result(spec, passed, 1.0 if passed else 0.0,
+                           f"expected retrieved ids missing: {missing!r}")
+
         return _result(spec, False, 0.0, f"unknown assertion kind: {kind!r}")
     except Exception as exc:  # noqa: BLE001 - defensive: never raise to the batch
         return _result(spec, False, 0.0, f"assertion error: {exc}")
