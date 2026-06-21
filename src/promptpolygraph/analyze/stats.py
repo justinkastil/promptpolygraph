@@ -1,19 +1,15 @@
-"""Statistical rigor for evaluation + red-team metrics.
+"""Confidence intervals, significance tests, and reliability for run metrics.
 
-Point estimates are not enough to stake a release on. This module turns counts
-and samples into *defensible* claims: a proportion (attack-success rate, pass
-rate, breach rate) carries a Wilson-score confidence interval; a continuous
-aggregate (mean dimension score, agreement) carries a bootstrap interval; and a
-run-over-run change is tested for significance with multiple-comparison
-correction rather than flagged off a fixed dead-band.
+Proportions (ASR, pass rate, breach rate) get a Wilson-score interval; continuous
+aggregates (mean dimension score, agreement) get a percentile bootstrap interval;
+run-over-run changes get a significance test with multiple-comparison correction.
 
-Everything here is pure-Python with deterministic output (the bootstrap is
-seeded) so it runs offline, needs no scientific stack, and reproduces byte-for-
-byte. The numerical pieces (inverse-normal, Student-t two-sided p via the
-regularized incomplete beta) are standard and unit-tested against known values.
+Pure-Python and deterministic (the bootstrap is seeded), so it runs offline with
+no scientific stack and reproduces byte-for-byte. The numerical helpers
+(inverse-normal, Student-t two-sided p via the regularized incomplete beta) are
+unit-tested against reference values.
 
-A metric-with-uncertainty is the small dict shape the rest of the engine
-consumes::
+Interval helpers return a metric-with-uncertainty dict::
 
     {"value": 0.12, "ci_lower": 0.055, "ci_upper": 0.235, "n": 50,
      "method": "wilson", "confidence": 0.95}

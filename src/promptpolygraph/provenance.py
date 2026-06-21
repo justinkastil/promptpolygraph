@@ -1,14 +1,12 @@
-"""Provenance + reference integrity.
+"""Provenance manifest + reference integrity.
 
-For a result to be auditable, a reviewer must be able to answer *what produced
-it*: which tool version and dependencies ran, which probe sources (and their
-versions) were used, and which standards mapping the OWASP/ATLAS tags came from.
-This module assembles that into a per-run **provenance manifest**, and pins the
-technique→standards mapping behind a checksum so a drift is caught in CI rather
-than silently changing what a finding claims.
+Records what produced a result: tool version and dependency versions, the probe
+sources used (and their versions), and the standards mapping the OWASP/ATLAS tags
+came from. The technique-to-standards mapping is pinned behind a checksum so CI
+catches drift instead of a finding's tags changing silently.
 
-All pure-Python and offline: versions come from ``importlib.metadata``, hashes
-from ``hashlib``; nothing is fetched.
+Pure-Python and offline: versions from ``importlib.metadata``, hashes from
+``hashlib``; nothing is fetched.
 """
 
 from __future__ import annotations

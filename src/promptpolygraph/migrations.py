@@ -1,13 +1,12 @@
 """Versioned run-record schema + forward migration.
 
-Run records are persisted as JSON. As the schema evolves, an old record must
-still load — so every record carries a ``schema_version`` and is migrated
-forward on read. This keeps historical runs comparable and the store readable
-across upgrades, which an audit of a long-lived project depends on.
+Run records are persisted as JSON. Each carries a ``schema_version`` and is
+migrated forward on read, so records written by older versions stay loadable and
+comparable across upgrades.
 
 A migration is a pure ``dict -> dict`` step keyed by the version it upgrades
-*from*. `migrate_run_dict` applies them in order up to ``CURRENT_RUN_SCHEMA``
-and is idempotent, so re-reading an already-current record is a no-op.
+from. `migrate_run_dict` applies them in order up to ``CURRENT_RUN_SCHEMA`` and is
+idempotent: re-reading an already-current record is a no-op.
 """
 
 from __future__ import annotations

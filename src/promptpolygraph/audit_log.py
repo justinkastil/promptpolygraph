@@ -2,11 +2,11 @@
 
 Every entry stores the hash of the previous entry, so the log forms a chain:
 altering or removing any past entry breaks every hash after it, and
-`verify_chain` pinpoints where. This gives a tamper-evident record of privileged
-actions (run created/deleted, config changed, gate overridden) for a shared
-deployment, without a database — a JSONL file is the store.
+`verify_chain` pinpoints where. The result is a tamper-evident record of
+privileged actions (run created/deleted, config changed, gate overridden) for a
+shared deployment, with a JSONL file as the store (no database).
 
-Pure stdlib. Genesis entry links to a fixed zero hash.
+Pure stdlib. The genesis entry links to a fixed zero hash.
 """
 
 from __future__ import annotations

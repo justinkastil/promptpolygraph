@@ -2,11 +2,11 @@
 
 A run's artifacts (cases, responses, scores, summary, reports, provenance) are
 packed into a single ``.tar.gz`` alongside a ``MANIFEST.json`` that records a
-SHA-256 of every file plus the tool/dependency provenance. ``verify`` re-hashes
-the contents and **refuses** (non-zero) on any mismatch — so an archive handed to
-an auditor is self-checking. An optional HMAC signature (keyed by
-``POLYGRAPH_SIGNING_KEY``) adds origin authentication on top of the integrity
-hashes; both use only the standard library, no crypto dependency.
+SHA-256 of every file plus the tool/dependency provenance. ``verify_bundle``
+re-hashes the contents and returns a non-zero/failed result on any mismatch, so
+the archive is self-checking. An optional signature (HMAC by default, or Ed25519
+via the ``[crypto]`` extra; see ``signing.py``) adds origin authentication on top
+of the integrity hashes.
 """
 
 from __future__ import annotations

@@ -1,20 +1,18 @@
-"""Validation package — a regenerable IQ/OQ/PQ evidence bundle.
+"""Regenerable IQ/OQ/PQ validation evidence bundle.
 
-Institutions adopting an evaluation tool need evidence it does what it claims,
-on demand — not a one-off assertion. `polygraph validate` runs three
-qualifications and emits a versioned, timestamped bundle (JSON + markdown):
+`polygraph validate` runs three qualifications and emits a versioned, timestamped
+bundle (JSON + markdown):
 
-- **IQ — installation qualification:** the right Python, the required
-  dependencies import, the bundled data (personas, the reference lock, the
-  calibration set) is present, and the pinned standards mapping is intact.
-- **OQ — operational qualification:** each component produces the expected
-  output on golden inputs — the statistics primitives, corpus generation,
-  scoring + gate, the red-team loop, the report renderers (incl. valid JUnit +
-  SARIF), and judge calibration.
-- **PQ — performance qualification:** a full in-process run reproduces a
-  reference result. Mock mode is byte-stable, so two runs must agree exactly.
+- IQ (installation): supported Python, required dependencies import, bundled data
+  (personas, reference lock, calibration set) present, pinned standards mapping
+  intact.
+- OQ (operational): each component produces the expected output on golden inputs
+  (statistics primitives, corpus generation, scoring + gate, red-team loop,
+  report renderers incl. valid JUnit/SARIF, judge calibration).
+- PQ (performance): a full in-process run reproduces a reference result; mock mode
+  is byte-stable, so two runs must agree exactly.
 
-The bundle is self-describing and offline-deterministic, so a reviewer can
+The bundle is self-describing and offline-deterministic: a reviewer can
 regenerate it and confirm the install behaves as specified.
 """
 
