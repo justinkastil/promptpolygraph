@@ -1,23 +1,20 @@
 """Multi-tenant workspaces + RBAC for the service.
 
-The tenancy layer lives at the request boundary, so the engine and its stores
-stay untouched. It owns four tables — ``workspaces``, ``members``, ``api_keys``,
-``resource_workspace`` — plus a per-workspace hash-chained audit log
+The tenancy layer sits at the request boundary; the engine and its stores are
+unchanged. It owns four tables (``workspaces``, ``members``, ``api_keys``,
+``resource_workspace``) plus a per-workspace hash-chained audit log
 (``audit_log.py``).
 
-Design decisions (matching what institutional security review expects):
-
-- **Workspaces** are the isolation boundary; every run is stamped to one and a
-  request can only see its own workspace's runs (cross-workspace reads 404, so
-  existence is not leaked).
-- **RBAC**: ``admin`` > ``editor`` > ``viewer``. Admin manages members + keys +
-  reads the audit log; editor creates/cancels runs; viewer is read-only.
-- **API keys are hashed at rest** (SHA-256); the plaintext is shown once at
-  creation and never recoverable. A key carries its workspace + role.
-- **Backward compatible**: a legacy flat ``POLYGRAPH_API_KEYS`` value maps to an
-  admin principal in an auto-provisioned ``default`` workspace, and an
-  auth-disabled dev server resolves to that same admin — so existing behavior is
-  preserved with zero config.
+- Workspaces are the isolation boundary. Every run is stamped to one; a request
+  sees only its own workspace's runs. Cross-workspace reads return 404 rather
+  than 403, so resource existence is not disclosed.
+- Roles are ordered ``admin`` > ``editor`` > ``viewer``: admin manages members,
+  keys, and the audit log; editor creates/cancels runs; viewer is read-only.
+- API keys are stored as a SHA-256 hash; the plaintext is returned once at
+  creation and is not recoverable. A key carries its workspace and role.
+- Backward compatible: a legacy flat ``POLYGRAPH_API_KEYS`` value maps to an
+  admin of an auto-provisioned ``default`` workspace, as does an auth-disabled
+  dev server, so existing single-tenant deployments work with no config.
 """
 
 from __future__ import annotations

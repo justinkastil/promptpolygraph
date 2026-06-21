@@ -387,10 +387,9 @@ def discordance_scatter(
 ) -> str:
     """Scatter of rubric score (x) vs persona-perceived value (y), per case.
 
-    Threshold lines split the plane into quadrants. The point of the chart is
-    the *off-diagonal*: cases the rubric passes but personas distrust (lower-
-    right) are the actionable discordance — a high score that does not land with
-    real users — and are drawn in red. The agreeing diagonal is muted.
+    Threshold lines split the plane into quadrants. Off-diagonal cases that the
+    rubric passes but personas distrust (lower-right: high score, low perceived
+    value) are drawn in red; the agreeing diagonal is muted.
     """
     pts = _discordance_points(scores, audit, vmax)
     if len(pts) < 1:

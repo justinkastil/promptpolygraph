@@ -1,16 +1,14 @@
 """Cryptographic signing for run artifacts.
 
-Two schemes, selected by what the operator provides:
+Two schemes, chosen by which credential the operator supplies:
 
-- **HMAC-SHA256** (default, stdlib only) — a shared secret authenticates the
-  manifest. Good for "did this come from our pipeline" inside one trust domain.
-- **Ed25519** (optional, needs the ``[crypto]`` extra) — a keypair gives
-  *public-key* verification: anyone can verify a report with the public key
-  without holding a secret that could itself forge one. This is what an external
-  auditor needs.
+- HMAC-SHA256 (default, stdlib only): a shared secret authenticates the manifest
+  within one trust domain.
+- Ed25519 (optional, needs the ``[crypto]`` extra): a keypair allows public-key
+  verification, so a third party can verify a report with the public key alone.
 
-The module degrades cleanly: ``ed25519_available()`` is False when the optional
-``cryptography`` dependency is absent, and the HMAC path always works.
+``ed25519_available()`` reports whether the optional ``cryptography`` dependency
+is installed; the HMAC path has no extra dependency.
 """
 
 from __future__ import annotations

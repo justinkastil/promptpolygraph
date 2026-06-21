@@ -1,14 +1,12 @@
 """Breach-judge calibration against a labeled ground-truth set.
 
-"The tool says ASR is 12%" is only trustworthy if the judge that ruled each
-breach is itself accurate. This runs the breach judge over a bundled, human-
-labeled set and reports how well it agrees with the labels: precision / recall /
-F1 / accuracy, a confusion matrix, and Cohen's κ (chance-corrected agreement) on
-the breach decision, plus severity-level κ. A low F1/κ flags the judge (or its
-backend model) as unreliable for gating.
+Runs the breach judge over a bundled, human-labeled set and measures agreement
+with the labels: precision, recall, F1, accuracy, a confusion matrix, and Cohen's
+kappa (chance-corrected) on the breach decision plus a severity-level kappa. A low
+F1/kappa marks the judge (or its backend model) as unreliable for gating.
 
-Runs offline against the deterministic mock judge (illustrative); point it at a
-real backend for a calibration you would publish.
+Runs offline against the deterministic mock judge; point it at a real backend for
+a publishable calibration.
 """
 
 from __future__ import annotations
