@@ -6,13 +6,14 @@
     "AML.T0056",
     "AML.T0057"
   ],
-  "count": 18,
-  "mapping_hash": "c9ca74f41d8488dd750bf22866473a4751983a2f912ceebbdbbad6604fc390b0",
+  "count": 21,
+  "mapping_hash": "8bdcade784c3df985899ab774a5021c607136b9908ffbf2ca8779cb74bbb33a6",
   "owasp_categories": [
     "LLM01:Prompt Injection",
     "LLM02:Sensitive Information Disclosure",
     "LLM06:Excessive Agency",
-    "LLM07:System Prompt Leakage"
+    "LLM07:System Prompt Leakage",
+    "LLM08:Vector and Embedding Weaknesses"
   ],
   "techniques": [
     {
@@ -126,6 +127,30 @@
       "owasp": "LLM06:Excessive Agency",
       "probe_checksum": "02d6492a6dc729ee",
       "strategy": "tool_abuse"
+    },
+    {
+      "atlas": "AML.T0051",
+      "id": "rag_context_override",
+      "name": "Retrieved-context instruction override",
+      "owasp": "LLM08:Vector and Embedding Weaknesses",
+      "probe_checksum": "b284b86ee54c9395",
+      "strategy": "rag_poisoning"
+    },
+    {
+      "atlas": "AML.T0051",
+      "id": "rag_indirect_injection",
+      "name": "Indirect injection via retrieved document",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "9dafefcdf804659d",
+      "strategy": "rag_poisoning"
+    },
+    {
+      "atlas": "AML.T0057",
+      "id": "rag_source_confusion",
+      "name": "Source / citation confusion",
+      "owasp": "LLM08:Vector and Embedding Weaknesses",
+      "probe_checksum": "c91ae1f6f33964f9",
+      "strategy": "rag_poisoning"
     },
     {
       "atlas": "AML.T0054",

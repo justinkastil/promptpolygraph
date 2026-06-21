@@ -18,6 +18,7 @@ from .demo import DemoAdapter
 from .frameworks import DSPyAdapter, LangChainAdapter, LlamaIndexAdapter
 from .http import HTTPAdapter
 from .llm import LLMAdapter
+from .rag import RagAdapter, make_rag_adapter
 
 __all__ = [
     "Adapter",
@@ -30,6 +31,7 @@ __all__ = [
     "LangChainAdapter",
     "LlamaIndexAdapter",
     "LLMAdapter",
+    "RagAdapter",
     "build_adapter",
 ]
 
@@ -92,6 +94,13 @@ def build_adapter(cfg: AdapterConfig, **extra: Any) -> Adapter:
         if fn is None and isinstance(ref, str) and ref.strip():
             fn = _resolve_callable(ref.strip())
         return make_agent_adapter(cfg.name or "agent", fn=fn, **options)
+    if kind == "rag":
+        # A live retrieve-then-generate callable, else a mock RAG target.
+        fn = options.pop("fn", None)
+        ref = options.pop("import", None) or options.pop("target", None) or options.pop("ref", None)
+        if fn is None and isinstance(ref, str) and ref.strip():
+            fn = _resolve_callable(ref.strip())
+        return make_rag_adapter(cfg.name or "rag", fn=fn, **options)
     factory = _plugin_adapters().get(kind)
     if factory is not None:
         return factory(name=cfg.name or kind, **options)
