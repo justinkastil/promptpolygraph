@@ -1129,6 +1129,17 @@ def build_parser() -> argparse.ArgumentParser:
     pref.add_argument("--check", action="store_true", help="fail if the live mapping drifted from the lock")
     pref.add_argument("--write", action="store_true", help="rewrite the reference lock from the current mapping")
 
+    pcc = sub.add_parser("check-contamination", parents=[common],
+                         help="flag train/test overlap, judge circularity, and seed-bank leakage")
+    pcc.add_argument("--run", help="check a stored run's corpus (reads gen/judge models from run meta)")
+    pcc.add_argument("--corpus", help="check a fixed corpus path instead of a run")
+    pcc.add_argument("--reference", help="newline-delimited file of reference prompt strings to overlap against")
+    pcc.add_argument("--threshold", type=float, default=0.8,
+                     help="token-set Jaccard above which two prompts are near-duplicates (default 0.8)")
+    pcc.add_argument("--out", help="write the contamination report JSON here")
+    pcc.add_argument("--strict", action="store_true",
+                     help="exit non-zero when any contamination signal fires")
+
     from .scaffold import providers as _ci_providers
     psci = sub.add_parser("scaffold-ci", parents=[common],
                           help="write a starter CI pipeline (gate + JUnit/SARIF + PR feedback)")
@@ -1373,6 +1384,70 @@ def cmd_canary(cfg: Config, args) -> int:
     return 1 if report["drift"] else 0
 
 
+def cmd_check_contamination(cfg: Config, args) -> int:
+    """Flag train/test contamination + judge circularity for a corpus or run.
+
+    Cases come from a stored run (--run) or a fixed corpus path (--corpus / the
+    config's corpus.path). Generation/judge models are read from run meta when
+    available, else from config. Non-zero exit only under --strict.
+    """
+    from .corpus import check_contamination, load_corpus
+
+    cases: list[Case]
+    gen_model: str | None = cfg.model
+    judge_model: str | None = cfg.analyze.judge_model or cfg.model
+    seed_bank: list[dict] | None = None
+
+    if getattr(args, "run", None):
+        store = _store(cfg)
+        meta = store.get_run(args.run)
+        if meta is None:
+            print(_color(f"no such run: {args.run}", "red"))
+            return 1
+        cases = store.get_cases(args.run)
+        gen_model = meta.model or gen_model
+        if meta.judge_meta.get("model"):
+            judge_model = meta.judge_meta["model"]
+    else:
+        corpus_path = getattr(args, "corpus", None) or cfg.resolve(cfg.corpus.path)
+        if not corpus_path:
+            print(_color("check-contamination: pass --run, --corpus, or set corpus.path", "red"))
+            return 1
+        cases = load_corpus(corpus_path)
+
+    from .corpus.generator import _load_seed_bank
+
+    seed_bank = _load_seed_bank(cfg.resolve(cfg.corpus.seed_bank))
+
+    report = check_contamination(
+        cases,
+        reference_path=getattr(args, "reference", None),
+        seed_bank=seed_bank,
+        generation_model=gen_model,
+        judge_model=judge_model,
+        threshold=getattr(args, "threshold", 0.8),
+    )
+    out = Path(args.out) if getattr(args, "out", None) else _run_dir(cfg, "contamination") / "contamination.json"
+    _save_json(out, report)
+
+    verdict = _color("CONTAMINATED", "red") if report["contaminated"] else _color("CLEAN", "green")
+    ov = report["reference_overlap"]
+    print(f"contamination check ({ov['checked']} cases): {verdict}")
+    print(f"  reference overlap {ov['overlap_count']}/{ov['checked']} "
+          f"({ov['overlap_rate']:.0%}, {ov['exact_count']} exact) vs {ov['reference_size']} refs")
+    seed = report["seed_leakage"]
+    print(f"  seed-bank leakage {seed['leak_count']}/{seed['checked']} "
+          f"vs {seed['seed_bank_size']} seeds")
+    circ = report["judge_circularity"]
+    if circ["same_model"]:
+        print(_color(f"  ⚠ generator == judge ({circ['judge_model']})", "yellow"))
+    print(_color(f"  {report['caveat']}", "dim"))
+    print(f"  report: {out}")
+    if getattr(args, "strict", False) and report["contaminated"]:
+        return 1
+    return 0
+
+
 def cmd_manifest(cfg: Config, args) -> int:
     from . import provenance as P
 
@@ -1601,6 +1676,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_redteam(cfg, args)
     elif args.cmd == "all":
         return cmd_all(cfg, args)
+    elif args.cmd == "check-contamination":
+        return cmd_check_contamination(cfg, args)
     elif args.cmd == "manifest":
         return cmd_manifest(cfg, args)
     elif args.cmd == "calibrate":
