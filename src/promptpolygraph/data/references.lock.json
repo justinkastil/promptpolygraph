@@ -6,8 +6,8 @@
     "AML.T0056",
     "AML.T0057"
   ],
-  "count": 13,
-  "mapping_hash": "43a05a487c0aa96fb588b74289233a0ec429ae0e6ee866d82cd504f4a11b2af4",
+  "count": 18,
+  "mapping_hash": "c9ca74f41d8488dd750bf22866473a4751983a2f912ceebbdbbad6604fc390b0",
   "owasp_categories": [
     "LLM01:Prompt Injection",
     "LLM02:Sensitive Information Disclosure",
@@ -22,6 +22,14 @@
       "owasp": "LLM01:Prompt Injection",
       "probe_checksum": "fe62524ae11fadcb",
       "strategy": "obfuscation"
+    },
+    {
+      "atlas": "AML.T0053",
+      "id": "confused_deputy",
+      "name": "Cross-user / confused-deputy tool use",
+      "owasp": "LLM06:Excessive Agency",
+      "probe_checksum": "7758419fb1709b77",
+      "strategy": "tool_abuse"
     },
     {
       "atlas": "AML.T0054",
@@ -54,6 +62,14 @@
       "owasp": "LLM02:Sensitive Information Disclosure",
       "probe_checksum": "5397fbe205cb19b2",
       "strategy": "pii_extraction"
+    },
+    {
+      "atlas": "AML.T0053",
+      "id": "destructive_tool_call",
+      "name": "Destructive tool call without confirmation",
+      "owasp": "LLM06:Excessive Agency",
+      "probe_checksum": "266ac3383e8be951",
+      "strategy": "tool_abuse"
     },
     {
       "atlas": "AML.T0051",
@@ -104,6 +120,14 @@
       "strategy": "jailbreak"
     },
     {
+      "atlas": "AML.T0053",
+      "id": "privilege_escalation_tool",
+      "name": "Privilege-escalation via tool",
+      "owasp": "LLM06:Excessive Agency",
+      "probe_checksum": "02d6492a6dc729ee",
+      "strategy": "tool_abuse"
+    },
+    {
       "atlas": "AML.T0054",
       "id": "social_pressure",
       "name": "Social-engineering pressure",
@@ -118,6 +142,22 @@
       "owasp": "LLM07:System Prompt Leakage",
       "probe_checksum": "a97f55b611b0a83a",
       "strategy": "system_prompt_leak"
+    },
+    {
+      "atlas": "AML.T0053",
+      "id": "tool_chain_abuse",
+      "name": "Multi-step destructive action chain",
+      "owasp": "LLM06:Excessive Agency",
+      "probe_checksum": "4faeb292ff8d6243",
+      "strategy": "tool_abuse"
+    },
+    {
+      "atlas": "AML.T0053",
+      "id": "tool_param_injection",
+      "name": "Tool-parameter injection",
+      "owasp": "LLM06:Excessive Agency",
+      "probe_checksum": "9d4c7a72bd9f7373",
+      "strategy": "tool_abuse"
     }
   ]
 }

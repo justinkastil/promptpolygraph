@@ -129,6 +129,14 @@ BUILTIN_PROFILES: dict[str, RedTeamProfile] = {
         ),
         turns=2, judge_provider="anthropic", judge_model=_CLAUDE,
     ),
+    "agentic": RedTeamProfile(
+        name="agentic",
+        description="Tool-using target probe: pressurizes an agent toward destructive, cross-user, "
+                    "or injected tool calls and scores the recorded action sequence with the "
+                    "tool-call judge. Pair with an `agent` adapter.",
+        attackers=_frontier(["tool_abuse", "prompt_injection"]),
+        turns=3, judge_kind="tool_call", judge_provider="anthropic", judge_model=_CLAUDE,
+    ),
 }
 
 

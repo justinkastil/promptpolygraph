@@ -78,6 +78,9 @@ class Response(BaseModel):
     model: str | None = None
     source: str | None = None  # adapter name
     error: str | None = None
+    # Tool/function calls the target chose to make, for agentic targets. Each
+    # entry is {"name": str, "args": dict}. Empty for plain text targets.
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=now_iso)
 

@@ -85,9 +85,13 @@ async def run_redteam(
     sem = asyncio.Semaphore(concurrency)
 
     async def _judge(attempt: AttackAttempt) -> "AttackAttempt":
-        """Score one attempt with the configured judge (LLM reviewer or Llama-Guard)."""
+        """Score one attempt with the configured judge (LLM reviewer, Llama-Guard,
+        or the tool-call judge for agentic targets)."""
         if profile.judge_kind == "llama_guard":
             attempt.verdict = await llama_guard_verdict(judge_client, attempt, target_desc=target_desc, mock=mock)
+        elif profile.judge_kind == "tool_call":
+            from .agentic import tool_call_judge
+            attempt.verdict = await tool_call_judge(judge_client, attempt, target_desc=target_desc, mock=mock)
         else:
             attempt.verdict = await breach_judge(judge_client, attempt, target_desc=target_desc, mock=mock)
         return attempt
@@ -140,9 +144,11 @@ async def run_redteam(
                 resp = await adapter.query(Case(prompt=probe, category=att.strategy))
                 latency = int((time.perf_counter() - start) * 1000)
                 _emit(RedTeamEvent(type="response", attacker_id=att.id, strategy=att.strategy,
-                                   turn=turn, text=resp.text, data={"error": resp.error}))
+                                   turn=turn, text=resp.text,
+                                   data={"error": resp.error, "tool_calls": resp.tool_calls}))
                 attempt = AttackAttempt(attacker_id=att.id, strategy=att.strategy, turn=turn,
-                                        prompt=probe, response=resp.text, latency_ms=latency)
+                                        prompt=probe, response=resp.text,
+                                        tool_calls=resp.tool_calls, latency_ms=latency)
                 await _judge(attempt)
                 _emit(RedTeamEvent(type="verdict", attacker_id=att.id, strategy=att.strategy, turn=turn,
                                    verdict=attempt.verdict.model_dump(),
@@ -162,9 +168,10 @@ async def run_redteam(
             resp = await adapter.query(Case(prompt=probe.prompt, category=probe.strategy))
             latency = int((time.perf_counter() - start) * 1000)
             _emit(RedTeamEvent(type="response", attacker_id=sid, strategy=probe.strategy, turn=1,
-                               text=resp.text, data={"error": resp.error}))
+                               text=resp.text, data={"error": resp.error, "tool_calls": resp.tool_calls}))
             attempt = AttackAttempt(attacker_id=sid, strategy=probe.strategy, turn=1,
-                                    prompt=probe.prompt, response=resp.text, latency_ms=latency)
+                                    prompt=probe.prompt, response=resp.text,
+                                    tool_calls=resp.tool_calls, latency_ms=latency)
             await _judge(attempt)
             _emit(RedTeamEvent(type="verdict", attacker_id=sid, strategy=probe.strategy, turn=1,
                                data={"root_cause": attempt_root_cause(attempt)},
