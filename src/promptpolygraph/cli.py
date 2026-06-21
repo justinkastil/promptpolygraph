@@ -1121,6 +1121,17 @@ def build_parser() -> argparse.ArgumentParser:
                       help="config path the generated pipeline references")
     psci.add_argument("--force", action="store_true", help="overwrite an existing file")
 
+    ptr = sub.add_parser("transfer", parents=[common],
+                         help="validate how well a run's synthetic scores predict real outcomes")
+    ptr.add_argument("run", help="stored run id to read synthetic scores from")
+    ptr.add_argument("--real", required=True,
+                     help="path to a real-outcomes file (JSON/CSV; per-case or per-category)")
+    ptr.add_argument("--out", help="write the transfer report JSON here")
+    ptr.add_argument("--low-corr", dest="low_corr", type=float, default=0.3,
+                     help="flag categories whose |rank correlation| is below this; default 0.3")
+    ptr.add_argument("--min-pairs", dest="min_pairs", type=int, default=5,
+                     help="minimum paired cases before a category's correlation is trusted; default 5")
+
     ppl = sub.add_parser("plugins", parents=[common],
                          help="list built-in and installed third-party extensions")
     plsub = ppl.add_subparsers(dest="plugins_cmd", required=True)
@@ -1270,6 +1281,54 @@ def cmd_calibrate(cfg: Config, args) -> int:
     if getattr(args, "min_f1", None) is not None and m["f1"] < args.min_f1:
         print(_color(f"calibration gate: F1 {m['f1']:.2f} < {args.min_f1:.2f}", "red"))
         return 1
+    return 0
+
+
+def cmd_transfer(cfg: Config, args) -> int:
+    from .analyze.transfer import load_real_outcomes, transfer_report, transfer_section
+
+    store = _store(cfg)
+    cases = store.get_cases(args.run)
+    scores = store.get_scores(args.run)
+    if not cases:
+        print(_color(f"no stored cases for run {args.run}", "red"))
+        return 1
+    real = load_real_outcomes(args.real)
+    report = transfer_report(
+        cases, scores, real,
+        low_corr=getattr(args, "low_corr", 0.3),
+        min_pairs=getattr(args, "min_pairs", 5),
+    )
+    out = Path(args.out) if getattr(args, "out", None) else _run_dir(cfg, args.run) / "transfer.json"
+    _save_json(out, report)
+
+    status = report["status"]
+    if status == "insufficient":
+        print(_color(f"transfer ({args.run[:8]}): INSUFFICIENT — no usable real-outcome overlap", "yellow"))
+    else:
+        ov = report["overall"] or {}
+        sp = ov.get("spearman")
+        tag = ("aggregate" if status == "aggregate"
+               else f"{report['matched_cases']} paired")
+        print(f"transfer ({args.run[:8]}, {tag}): overall Spearman="
+              f"{('—' if sp is None else f'{sp:+.2f}')} Pearson="
+              f"{('—' if ov.get('pearson') is None else f'{ov['pearson']:+.2f}')}")
+        cats = report.get("categories", {})
+        for cat in sorted(cats):
+            b = cats[cat]
+            mark = (_color("low", "red") if b["low_correlation"]
+                    else _color("sparse", "yellow") if b["sparse"] else _color("ok", "green"))
+            spc = b.get("spearman")
+            print(f"  {cat:<18} n={b['n']:>3} spearman="
+                  f"{('—' if spc is None else f'{spc:+.2f}'):>6}  {mark}")
+    for f in report.get("flags", []):
+        print(_color(f"  ⚠ {f}", "red"))
+    for c in report.get("caveats", []):
+        print(_color(f"  ⚠ {c}", "yellow"))
+    print(f"  report: {out}")
+    # Surface the section so it can be eyeballed alongside the run report.
+    if status != "insufficient":
+        print("\n".join(transfer_section(report)))
     return 0
 
 
@@ -1490,6 +1549,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_calibrate(cfg, args)
     elif args.cmd == "canary":
         return cmd_canary(cfg, args)
+    elif args.cmd == "transfer":
+        return cmd_transfer(cfg, args)
     elif args.cmd == "bundle":
         return cmd_bundle(cfg, args)
     elif args.cmd == "verify":
