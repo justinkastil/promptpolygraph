@@ -396,6 +396,45 @@ def _eval_custom(
     return _result(spec, v > 0.0, v)
 
 
+# ─── Streaming-aware scorers ─────────────────────────────────────────────────
+
+
+def _eval_stream(spec: AssertionSpec, resp: Response) -> AssertionResult:
+    """Inspect streamed chunks rather than the assembled text.
+
+    Two kinds share this path:
+      - stream_contains: substring search over the streamed prefix. By default
+        the whole stream is searched; options.first_n caps it to the first N
+        chunks so early-token leakage can be asserted in isolation.
+      - first_n_tokens: same first-N-chunk prefix, but the spec is framed as a
+        positive expectation on what the early output should contain.
+
+    With no recorded stream (`tokens_streamed` empty) the prefix falls back to
+    the assembled `text`, so a streaming assertion degrades to a plain content
+    check instead of misfiring on the non-streaming path.
+    """
+    chunks = list(resp.tokens_streamed or [])
+    first_n = spec.options.get("first_n", spec.options.get("n"))
+    if first_n is not None:
+        try:
+            first_n = int(first_n)
+        except (TypeError, ValueError):
+            return _result(spec, False, 0.0, f"invalid first_n: {first_n!r}")
+        if first_n >= 0:
+            chunks = chunks[:first_n]
+    prefix = "".join(chunks) if chunks else (resp.text or "")
+
+    needle = str(spec.value)
+    ci = "i" in spec.flags
+    hay = prefix.lower() if ci else prefix
+    target = needle.lower() if ci else needle
+    passed = target in hay
+    scope = "first %d chunk(s)" % first_n if first_n is not None else "stream"
+    return _result(
+        spec, passed, 1.0 if passed else 0.0, f"{needle!r} not in {scope}"
+    )
+
+
 # ─── Per-spec dispatch ──────────────────────────────────────────────────────
 
 
@@ -492,6 +531,9 @@ def _eval_one(
 
         if kind in ("python", "callable"):
             return _eval_custom(spec, case, resp, sandbox, allow_subprocess)
+
+        if kind in ("stream_contains", "first_n_tokens"):
+            return _eval_stream(spec, resp)
 
         if kind == "regex":
             passed = re.search(str(value), text, _re_flags(spec.flags)) is not None
