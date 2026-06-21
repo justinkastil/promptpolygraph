@@ -6,7 +6,29 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-21
+
+Relevance release: evaluate and red-team the systems people actually build in
+2026 — tool-using agents, RAG pipelines, multimodal and streaming targets — plus
+measurement checks that keep the synthetic numbers honest.
+
 ### Added
+- RAG / retrieval-poisoning attack surface. A `rag` adapter wraps a
+  retrieve-then-generate target and records the retrieved document ids on
+  `Response.raw["retrieved"]`; a bundled `MockRagTarget` (in-memory corpus) runs
+  offline. Poisoned documents are carried per case via
+  `Case.metadata["injected_docs"]`; a vulnerable target obeys an instruction
+  embedded in a retrieved doc (indirect injection). Three `rag_poisoning`
+  techniques (OWASP LLM01/LLM08 + ATLAS) and a `retrieved_contains` grounding
+  assertion. (#44)
+- Multimodal evaluation. `Case.attachments` (image/audio/document content
+  blocks, additive and default-empty); the HTTP adapter sends multipart when a
+  case has attachments and the LLM adapter attaches image blocks; three
+  `multimodal_injection` techniques (OCR'd instruction, document-embedded
+  injection, metadata/caption confusion). (#45)
+- Streaming evaluation. Optional `stream=True` LLM-adapter path captures chunks
+  on `Response.tokens_streamed`; `stream_contains` / `first_n_tokens` assertions
+  check partial / early-token output; a `streaming_evasion` technique. (#46)
 - Agentic / tool-call red-team surface. An `agent` adapter wraps a tool-using
   target (a callable returning text + tool calls; a deterministic mock tool agent
   is bundled) and records the calls on `Response.tool_calls`. The catalog adds
