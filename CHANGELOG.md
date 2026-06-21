@@ -15,6 +15,19 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
   (`redteam.agentic`) scores the action sequence against forbidden/destructive
   actions, falling back to the text judge when there are no calls. New `agentic`
   profile; `redteam.judge_kind = "tool_call"`. (#43)
+- Synthetic-to-real transfer validator (`polygraph transfer`): correlates a run's
+  synthetic scores against user-supplied real outcomes (Spearman/Pearson per
+  category + overall) and reports distribution shift (KS, Jensen-Shannon), flagging
+  categories where synthetic poorly predicts real. New stats helpers
+  (`pearson`, `spearman`, `ks_two_sample`, `js_divergence`). (#47)
+- Corpus coverage analysis (`polygraph analyze-corpus`): per-category counts +
+  normalized Shannon entropy, a pairwise prompt-similarity histogram (offline
+  embedder, Jaccard fallback), and a redundancy score, with thin-category and
+  high-redundancy warnings. (#48)
+- Contamination + judge-circularity detection (`polygraph check-contamination`):
+  exact + near-duplicate overlap between a corpus and a reference set, a
+  same-model warning when the generator equals the judge, and seed-bank leakage
+  detection; `--strict` exits non-zero. (#49)
 
 ## [1.1.1] - 2026-06-20
 
