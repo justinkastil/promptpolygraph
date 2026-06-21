@@ -6,6 +6,16 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+### Added
+- Agentic / tool-call red-team surface. An `agent` adapter wraps a tool-using
+  target (a callable returning text + tool calls; a deterministic mock tool agent
+  is bundled) and records the calls on `Response.tool_calls`. The catalog adds
+  five agentic techniques (destructive call, parameter injection, confused
+  deputy, privilege escalation, multi-step chain), and a tool-call judge
+  (`redteam.agentic`) scores the action sequence against forbidden/destructive
+  actions, falling back to the text judge when there are no calls. New `agentic`
+  profile; `redteam.judge_kind = "tool_call"`. (#43)
+
 ## [1.1.1] - 2026-06-20
 
 ### Fixed

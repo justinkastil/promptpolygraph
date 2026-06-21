@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import AdapterConfig
+from .agentic import AgentAdapter, make_agent_adapter
 from .base import Adapter, BaseAdapter
 from .callable import CallableAdapter
 from .demo import DemoAdapter
@@ -20,6 +21,7 @@ from .llm import LLMAdapter
 
 __all__ = [
     "Adapter",
+    "AgentAdapter",
     "BaseAdapter",
     "CallableAdapter",
     "DemoAdapter",
@@ -83,6 +85,13 @@ def build_adapter(cfg: AdapterConfig, **extra: Any) -> Adapter:
         return LlamaIndexAdapter(name=cfg.name or "llamaindex", **options)
     if kind == "dspy":
         return DSPyAdapter(name=cfg.name or "dspy", **options)
+    if kind == "agent":
+        # A live agent callable under fn/import/target/ref, else a mock tool agent.
+        fn = options.pop("fn", None)
+        ref = options.pop("import", None) or options.pop("target", None) or options.pop("ref", None)
+        if fn is None and isinstance(ref, str) and ref.strip():
+            fn = _resolve_callable(ref.strip())
+        return make_agent_adapter(cfg.name or "agent", fn=fn, **options)
     factory = _plugin_adapters().get(kind)
     if factory is not None:
         return factory(name=cfg.name or kind, **options)

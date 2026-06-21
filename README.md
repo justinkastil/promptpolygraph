@@ -272,7 +272,14 @@ polygraph redteam profiles      # list the preconfigured teams
 - **Preconfigured teams** — `all_frontier` (default; every strategy on a
   frontier model, each agent a distinct persona + temperature), `multi_frontier`
   (mixed vendors), `mixed` (local open + frontier), `local_swarm` (100% offline),
-  `pressure`, `quick`, and `deep` (adaptive smart multi-turn).
+  `pressure`, `quick`, `deep` (adaptive smart multi-turn), and `agentic`
+  (tool-using targets — see below).
+- **Agentic / tool-call targets** — point the `agent` adapter at a tool-using
+  target (a callable returning text + tool calls; a deterministic mock tool agent
+  is built in). The `agentic` profile pressurizes it toward destructive,
+  cross-user, or injected tool calls, and the tool-call judge scores the recorded
+  action sequence (`Response.tool_calls`), not just the text:
+  `polygraph redteam --profile agentic --adapter agent --mock`.
 - **OSS sources** — attackers seed + mutate from a catalog of known techniques.
   `--sources` folds in optional **garak**, **PyRIT**, **DeepTeam**, and on-demand
   **datasets** (AdvBench / HarmBench / JailbreakBench); each runs through the same

@@ -54,6 +54,9 @@ class AttackAttempt(BaseModel):
     turn: int = 1
     prompt: str = ""
     response: str = ""
+    # Tool/function calls the target made in response to this probe (agentic
+    # targets). Each entry is {"name": str, "args": dict}; empty for text targets.
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     latency_ms: int | None = None
     verdict: Optional[BreachVerdict] = None
 

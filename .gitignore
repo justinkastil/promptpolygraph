@@ -33,3 +33,4 @@ polygraph_out/
 
 # MkDocs build output
 site/
+.claude/
