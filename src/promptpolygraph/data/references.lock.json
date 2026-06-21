@@ -6,8 +6,8 @@
     "AML.T0056",
     "AML.T0057"
   ],
-  "count": 22,
-  "mapping_hash": "6b2cfa87c25b065362be9b3e4eed003d30281529dd823101e1bd2d04db5e9c14",
+  "count": 25,
+  "mapping_hash": "60565ae170c9b164fb024a6fc1095a4cc1d04fc2a6c4f48bf4e0ceb8d2d1549e",
   "owasp_categories": [
     "LLM01:Prompt Injection",
     "LLM02:Sensitive Information Disclosure",
@@ -81,12 +81,28 @@
       "strategy": "prompt_injection"
     },
     {
+      "atlas": "AML.T0051",
+      "id": "document_embedded_injection",
+      "name": "Document-embedded injection",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "1384cd0f0e1dbc3d",
+      "strategy": "multimodal_injection"
+    },
+    {
       "atlas": "AML.T0053",
       "id": "excessive_agency",
       "name": "Unauthorized tool/action",
       "owasp": "LLM06:Excessive Agency",
       "probe_checksum": "056ca6188f66f4fc",
       "strategy": "tool_abuse"
+    },
+    {
+      "atlas": "AML.T0051",
+      "id": "image_ocr_injection",
+      "name": "OCR'd instruction in an image",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "60782c2a88259add",
+      "strategy": "multimodal_injection"
     },
     {
       "atlas": "AML.T0051",
@@ -103,6 +119,14 @@
       "owasp": "LLM01:Prompt Injection",
       "probe_checksum": "8146a2376253fa56",
       "strategy": "obfuscation"
+    },
+    {
+      "atlas": "AML.T0051",
+      "id": "metadata_caption_confusion",
+      "name": "Metadata / caption confusion",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "eaab1c77bd6e0fe0",
+      "strategy": "multimodal_injection"
     },
     {
       "atlas": "AML.T0051",

@@ -24,11 +24,13 @@ final text is identical either way.
 
 from __future__ import annotations
 
+import base64
 import os
 import time
+from pathlib import Path
 from typing import Any
 
-from ..models import Case, Response
+from ..models import Attachment, Case, Response
 from .base import BaseAdapter
 
 # Small built-in per-1k-token price table (USD), keyed by a substring of the
@@ -75,6 +77,25 @@ def compute_cost(
     ti = tokens_in or 0
     to = tokens_out or 0
     return (ti / 1000.0) * (price_in or 0.0) + (to / 1000.0) * (price_out or 0.0)
+
+
+def _anthropic_image_block(att: Attachment) -> dict[str, Any] | None:
+    """An Anthropic content block for an image attachment, or None for a modality
+    the messages API cannot carry inline. base64 source is preferred; a url image
+    becomes a url source; a local path is read and base64-encoded lazily."""
+    if att.kind != "image":
+        return None
+    media_type = att.media_type or "image/png"
+    if att.data_b64:
+        return {"type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": att.data_b64}}
+    if att.url:
+        return {"type": "image", "source": {"type": "url", "url": att.url}}
+    if att.path:
+        data = base64.b64encode(Path(att.path).read_bytes()).decode("ascii")
+        return {"type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": data}}
+    return None
 
 
 class LLMAdapter(BaseAdapter):
@@ -145,7 +166,7 @@ class LLMAdapter(BaseAdapter):
                 if self._stream:
                     text, tin, tout, chunks = await self._anthropic_stream(case.prompt)
                 else:
-                    text, tin, tout = await self._anthropic(case.prompt)
+                    text, tin, tout = await self._anthropic(case.prompt, case.attachments)
             else:
                 if self._stream:
                     text, tin, tout, chunks = await self._openai_stream(case.prompt)
@@ -174,14 +195,23 @@ class LLMAdapter(BaseAdapter):
             tokens_streamed=chunks,
         )
 
-    async def _anthropic(self, prompt: str) -> tuple[str, int | None, int | None]:
+    async def _anthropic(
+        self, prompt: str, attachments: list[Attachment] | None = None
+    ) -> tuple[str, int | None, int | None]:
         client = self._ensure_client()
+        # Text-only path stays a bare string so requests are byte-identical to
+        # before; image blocks are only added when the case carries them.
+        content: Any = prompt
+        if attachments:
+            blocks = [b for att in attachments if (b := _anthropic_image_block(att))]
+            if blocks:
+                content = [{"type": "text", "text": prompt}, *blocks]
         msg = await client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             system=self._system or "",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
         )
         text = ""
         if msg.content:

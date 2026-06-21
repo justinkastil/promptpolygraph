@@ -48,6 +48,23 @@ class AssertionSpec(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)  # scorer-specific config
 
 
+class Attachment(BaseModel):
+    """A non-text content block sent alongside a case prompt.
+
+    Exactly one of `path`, `url`, or `data_b64` carries the payload; `media_type`
+    is the IANA type (e.g. "image/png", "audio/wav", "application/pdf"). `kind`
+    is the coarse modality the adapter dispatches on. Adapters that cannot carry
+    a given modality ignore it, so this is safe to attach to any corpus.
+    """
+
+    kind: str  # "image" | "audio" | "document"
+    media_type: str = ""
+    path: str | None = None
+    url: str | None = None
+    data_b64: str | None = None
+    name: str | None = None  # original filename, for multipart field naming
+
+
 class Case(BaseModel):
     """One synthetic probe sent to the system under test."""
 
@@ -61,6 +78,16 @@ class Case(BaseModel):
     expected_shape: str | None = None
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # v1.2 (additive) — non-text content blocks for multimodal targets. Empty by
+    # default so every existing text-only corpus validates unchanged.
+    attachments: list[Attachment] = Field(default_factory=list)
+
+    def has_attachments(self) -> bool:
+        return bool(self.attachments)
+
+    def is_multimodal(self) -> bool:
+        """Alias for has_attachments; reads naturally at adapter dispatch sites."""
+        return bool(self.attachments)
 
 
 # ─── Target responses ───────────────────────────────────────────────────────

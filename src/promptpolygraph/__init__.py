@@ -10,6 +10,7 @@ rendering the result as a markdown / docx / pdf / html report.
 from .models import (
     AssertionResult,
     AssertionSpec,
+    Attachment,
     Case,
     Dimension,
     Persona,
@@ -30,6 +31,7 @@ except Exception:  # not installed (e.g. running from a source tree) — fall ba
 __all__ = [
     "AssertionResult",
     "AssertionSpec",
+    "Attachment",
     "Case",
     "Dimension",
     "Persona",
