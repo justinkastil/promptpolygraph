@@ -6,8 +6,8 @@
     "AML.T0056",
     "AML.T0057"
   ],
-  "count": 21,
-  "mapping_hash": "8bdcade784c3df985899ab774a5021c607136b9908ffbf2ca8779cb74bbb33a6",
+  "count": 22,
+  "mapping_hash": "6b2cfa87c25b065362be9b3e4eed003d30281529dd823101e1bd2d04db5e9c14",
   "owasp_categories": [
     "LLM01:Prompt Injection",
     "LLM02:Sensitive Information Disclosure",
@@ -157,8 +157,16 @@
       "id": "social_pressure",
       "name": "Social-engineering pressure",
       "owasp": "LLM01:Prompt Injection",
-      "probe_checksum": "6ae5b891b87e26cc",
+      "probe_checksum": "c0d8bd8562f5327f",
       "strategy": "refusal_robustness"
+    },
+    {
+      "atlas": "AML.T0051",
+      "id": "streaming_evasion",
+      "name": "Streaming early-token evasion",
+      "owasp": "LLM01:Prompt Injection",
+      "probe_checksum": "a4fc477b774c2b1c",
+      "strategy": "obfuscation"
     },
     {
       "atlas": "AML.T0056",

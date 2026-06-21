@@ -14,6 +14,12 @@ under an optional system prompt.
         max_tokens: 512
         # base_url: https://...        # openai-compatible servers
         # api_key_env: OPENAI_API_KEY
+        # stream: true                 # consume token stream; fills tokens_streamed
+
+The default is a single awaited completion. Setting `stream: true` consumes the
+provider's token stream instead, recording each chunk on Response.tokens_streamed
+so streaming-aware assertions can inspect partial/early output. The assembled
+final text is identical either way.
 """
 
 from __future__ import annotations
@@ -87,6 +93,7 @@ class LLMAdapter(BaseAdapter):
         api_key_env: str | None = None,
         price_per_1k_in: float | None = None,
         price_per_1k_out: float | None = None,
+        stream: bool = False,
         **_: Any,
     ):
         super().__init__(name)
@@ -105,6 +112,7 @@ class LLMAdapter(BaseAdapter):
         self._api_key_env = api_key_env
         self._price_in = price_per_1k_in
         self._price_out = price_per_1k_out
+        self._stream = stream
         self._client: Any = None
 
     def _ensure_client(self) -> Any:
@@ -131,11 +139,18 @@ class LLMAdapter(BaseAdapter):
 
     async def query(self, case: Case) -> Response:
         start = time.perf_counter()
+        chunks: list[str] = []
         try:
             if self._provider == "anthropic":
-                text, tin, tout = await self._anthropic(case.prompt)
+                if self._stream:
+                    text, tin, tout, chunks = await self._anthropic_stream(case.prompt)
+                else:
+                    text, tin, tout = await self._anthropic(case.prompt)
             else:
-                text, tin, tout = await self._openai(case.prompt)
+                if self._stream:
+                    text, tin, tout, chunks = await self._openai_stream(case.prompt)
+                else:
+                    text, tin, tout = await self._openai(case.prompt)
         except Exception as exc:
             return Response(
                 case_id=case.id,
@@ -156,6 +171,7 @@ class LLMAdapter(BaseAdapter):
             ),
             model=self._model,
             source=self.name,
+            tokens_streamed=chunks,
         )
 
     async def _anthropic(self, prompt: str) -> tuple[str, int | None, int | None]:
@@ -196,3 +212,68 @@ class LLMAdapter(BaseAdapter):
         tin = getattr(usage, "prompt_tokens", None) if usage else None
         tout = getattr(usage, "completion_tokens", None) if usage else None
         return text, tin, tout
+
+    async def _anthropic_stream(
+        self, prompt: str
+    ) -> tuple[str, int | None, int | None, list[str]]:
+        """Consume the Anthropic event stream, collecting text deltas in order.
+
+        Returns the assembled text plus the per-delta chunk list. Token usage is
+        read from the terminal message when the SDK exposes it; it stays None
+        otherwise rather than guessing.
+        """
+        client = self._ensure_client()
+        chunks: list[str] = []
+        tin = tout = None
+        async with client.messages.stream(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+            system=self._system or "",
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            async for delta in stream.text_stream:
+                if delta:
+                    chunks.append(delta)
+            final = await stream.get_final_message()
+            usage = getattr(final, "usage", None)
+            tin = getattr(usage, "input_tokens", None) if usage else None
+            tout = getattr(usage, "output_tokens", None) if usage else None
+        return "".join(chunks), tin, tout, chunks
+
+    async def _openai_stream(
+        self, prompt: str
+    ) -> tuple[str, int | None, int | None, list[str]]:
+        """Consume an OpenAI-compatible chat stream, collecting content deltas.
+
+        Usage is requested via stream_options when the server honors it; absent
+        that, token counts stay None (streamed responses often omit usage).
+        """
+        client = self._ensure_client()
+        messages = []
+        if self._system:
+            messages.append({"role": "system", "content": self._system})
+        messages.append({"role": "user", "content": prompt})
+        stream = await client.chat.completions.create(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+            messages=messages,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        chunks: list[str] = []
+        tin = tout = None
+        async for event in stream:
+            usage = getattr(event, "usage", None)
+            if usage is not None:
+                tin = getattr(usage, "prompt_tokens", None)
+                tout = getattr(usage, "completion_tokens", None)
+            choices = getattr(event, "choices", None) or []
+            if not choices:
+                continue
+            delta = getattr(choices[0], "delta", None)
+            piece = getattr(delta, "content", None) if delta is not None else None
+            if piece:
+                chunks.append(piece)
+        return "".join(chunks), tin, tout, chunks

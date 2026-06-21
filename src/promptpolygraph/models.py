@@ -81,6 +81,11 @@ class Response(BaseModel):
     # Tool/function calls the target chose to make, for agentic targets. Each
     # entry is {"name": str, "args": dict}. Empty for plain text targets.
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    # Ordered streamed chunks as emitted by the target, when the adapter ran in
+    # streaming mode. Empty on the non-streaming path. Lets assertions inspect
+    # partial/early output (e.g. first-N-token leakage) rather than only the
+    # assembled `text`.
+    tokens_streamed: list[str] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=now_iso)
 
