@@ -916,6 +916,8 @@ def _add_corpus_dials(p: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from .analyze import coverage as cov
+
     parser = argparse.ArgumentParser(prog="polygraph", description=__doc__.split("\n")[0])
     # Common options live on a parent so they work in either position
     # (e.g. `polygraph --mock all ...` and `polygraph all --mock ...`).
@@ -1106,6 +1108,21 @@ def build_parser() -> argparse.ArgumentParser:
     pcan.add_argument("--out", help="write the canary report JSON here")
     pcan.add_argument("--min-pass-rate", dest="min_pass_rate", type=float, default=1.0,
                       help="exit non-zero (drift) below this pass-rate; default 1.0")
+
+    pac = sub.add_parser("analyze-corpus", parents=[common],
+                         help="measure corpus category coverage, entropy, and prompt redundancy")
+    pac.add_argument("--corpus", help="corpus dir/file to analyze")
+    pac.add_argument("--run", help="analyze the cases of a stored run instead of a corpus")
+    pac.add_argument("--out", help="write the coverage report JSON here")
+    pac.add_argument("--min-per-category", dest="min_per_category", type=int,
+                     default=cov.DEFAULT_MIN_PER_CATEGORY,
+                     help=f"warn below this many prompts per category (default {cov.DEFAULT_MIN_PER_CATEGORY})")
+    pac.add_argument("--redundancy-threshold", dest="redundancy_threshold", type=float,
+                     default=cov.DEFAULT_REDUNDANCY_THRESHOLD,
+                     help="similarity at/above which a near-neighbour pair is redundant "
+                          f"(default {cov.DEFAULT_REDUNDANCY_THRESHOLD})")
+    pac.add_argument("--jaccard", action="store_true",
+                     help="use token-overlap Jaccard instead of the offline embedder")
 
     pref = sub.add_parser("references", parents=[common],
                           help="check or update the pinned OWASP/ATLAS technique mapping")
@@ -1374,6 +1391,47 @@ def cmd_manifest(cfg: Config, args) -> int:
     return 0
 
 
+def cmd_analyze_corpus(cfg: Config, args) -> int:
+    from .analyze import coverage as cov
+
+    if args.run:
+        cases = _store(cfg).get_cases(args.run)
+        src = f"run {args.run[:8]}"
+    elif args.corpus:
+        from . import corpus as C
+
+        cases = C.load_corpus(cfg.resolve(args.corpus) or args.corpus)
+        src = f"corpus {args.corpus}"
+    else:
+        print(_color("analyze-corpus requires --corpus <path> or --run <id>", "red"))
+        return 2
+
+    embedder = None if getattr(args, "jaccard", False) else cov.MockEmbedder()
+    report = cov.analyze_coverage(
+        cases,
+        embedder=embedder,
+        min_per_category=args.min_per_category,
+        redundancy_threshold=args.redundancy_threshold,
+    )
+
+    out = Path(args.out) if getattr(args, "out", None) else _run_dir(cfg, "coverage") / "coverage.json"
+    _save_json(out, report)
+
+    print(f"corpus coverage ({src}, {report['similarity_metric']}): "
+          f"{report['total_prompts']} prompts in {report['category_count']} categories")
+    print(f"  entropy={report['category_entropy']:.2f} "
+          f"redundancy={report['redundancy']:.0%} "
+          f"({report['redundant_prompts']}/{report['total_prompts']} "
+          f"≥{report['redundancy_threshold']:.2f}) "
+          f"mean-sim={report['mean_pairwise_similarity']:.2f}")
+    for cat, c in report["per_category"].items():
+        print(f"    {cat:24} {c}")
+    for w in report["warnings"]:
+        print(_color(f"  ⚠ {w}", "yellow"))
+    print(f"  report: {out}")
+    return 0
+
+
 def cmd_references(cfg: Config, args) -> int:
     from . import provenance as P
 
@@ -1551,6 +1609,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_canary(cfg, args)
     elif args.cmd == "transfer":
         return cmd_transfer(cfg, args)
+    elif args.cmd == "analyze-corpus":
+        return cmd_analyze_corpus(cfg, args)
     elif args.cmd == "bundle":
         return cmd_bundle(cfg, args)
     elif args.cmd == "verify":
