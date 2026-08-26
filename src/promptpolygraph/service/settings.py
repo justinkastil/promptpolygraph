@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # Optional cron schedules file (YAML). When set, the API starts a scheduler.
     schedules_path: str | None = None
 
+    # Dependency probes are opt-in so ordinary startup never creates network I/O.
+    startup_llm_check: bool = False
+    readiness_llm_check: bool = False
+    queue_max_depth: int = 1000
+
     # Optional global webhook fired on every run completion.
     webhook_url: str | None = None
 
