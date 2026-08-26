@@ -7,18 +7,9 @@
 from __future__ import annotations
 
 import os
-import sys
 
 
 def main() -> None:
-    if "--validate-config" in sys.argv[1:]:
-        from .startup_validate import run
-
-        ok, report = run()
-        for item in report:
-            print(f"{item['status'].upper():4} {item['check']}: {item['detail']}")
-        raise SystemExit(0 if ok else 1)
-
     import uvicorn
 
     uvicorn.run(
