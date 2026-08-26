@@ -36,6 +36,7 @@ from .schemas import (
     RunStatus,
 )
 from .settings import get_settings
+from . import readiness, startup_validate
 
 settings = get_settings()
 store: SqlStore = make_store(settings.database_url)
@@ -44,6 +45,10 @@ store: SqlStore = make_store(settings.database_url)
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     """Start the optional in-process worker + scheduler, and clean them up."""
+    ok, report = startup_validate.run(settings=settings)
+    if not ok:
+        failures = "; ".join(item["detail"] for item in report if item["status"] == "fail")
+        raise RuntimeError(f"service startup validation failed: {failures}")
     bg = None
     scheduler = None
     if settings.inprocess_worker:
@@ -71,6 +76,15 @@ app = FastAPI(title=settings.title, version="0.1.0", lifespan=_lifespan)
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "database": store.engine.dialect.name}
+
+
+@app.get("/healthz/ready")
+def healthz_ready() -> JSONResponse:
+    ok, checks = readiness.check(store, settings)
+    return JSONResponse(
+        status_code=200 if ok else 503,
+        content={"status": "ready" if ok else "not_ready", "checks": checks},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
