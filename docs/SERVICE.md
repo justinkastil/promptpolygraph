@@ -41,6 +41,32 @@ Set configuration via `POLYGRAPH_*` environment variables (or a `.env` file):
 Other useful dials: `POLYGRAPH_WORKER_POLL_S` (idle poll interval),
 `POLYGRAPH_WORKER_CONCURRENCY`, `POLYGRAPH_HOST` / `POLYGRAPH_PORT`.
 
+Validate critical dependencies without starting the server:
+
+```bash
+polygraph-server --validate-config
+```
+
+Validation requires a live-mode `ANTHROPIC_API_KEY` (or mock mode), loads the
+run configurations under `CONFIG_DIR`, and parses a configured schedules file.
+`POLYGRAPH_STARTUP_LLM_CHECK` is off by default; callers may supply an
+offline-testable probe when opting into that check.
+
+### Kubernetes health probes
+
+`GET /healthz` is process **liveness** only. `GET /healthz/ready` is
+**readiness**: it checks the database/store, ensures queued-job count is no
+greater than `POLYGRAPH_QUEUE_MAX_DEPTH` (default `1000`), and can include an
+opt-in LLM probe with `POLYGRAPH_READINESS_LLM_CHECK=true`. A failed readiness
+dependency returns HTTP `503`.
+
+```yaml
+livenessProbe:
+  httpGet: {path: /healthz, port: 8080}
+readinessProbe:
+  httpGet: {path: /healthz/ready, port: 8080}
+```
+
 Start the two roles (separate terminals for local dev, or one with the
 in-process worker):
 
