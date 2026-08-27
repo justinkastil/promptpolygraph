@@ -25,6 +25,7 @@ from sqlalchemy import (
     Table,
     Text,
     create_engine,
+    inspect,
     func,
     select,
     text,
@@ -80,20 +81,54 @@ jobs = Table(
     Column("created_at", String(40)),
     Column("started_at", String(40)),
     Column("finished_at", String(40)),
+    Column("next_retry_at", String(40), index=True),
+    Column("backoff_seconds", Integer),
 )
+
+
+def engine_kwargs(settings: Any, url: str) -> dict[str, Any]:
+    """Return dialect-appropriate engine options."""
+    if url.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False}}
+    return {
+        "pool_size": settings.db_pool_size,
+        "max_overflow": settings.db_max_overflow,
+        "pool_recycle": settings.db_pool_recycle,
+        "pool_pre_ping": True,
+        "connect_args": {
+            "connect_timeout": settings.db_connect_timeout,
+            "options": f"-c statement_timeout={settings.db_statement_timeout}",
+        },
+    }
 
 
 class SqlStore:
     """Store protocol + job queue over a SQLAlchemy engine."""
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, settings: Any | None = None):
         self.url = url
-        connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-        self.engine: Engine = create_engine(url, future=True, connect_args=connect_args)
+        if settings is None:
+            from .settings import get_settings
+            settings = get_settings()
+        self.settings = settings
+        self.engine: Engine = create_engine(url, future=True, **engine_kwargs(settings, url))
         if url.startswith("sqlite"):
             with self.engine.begin() as c:
                 c.execute(text("PRAGMA journal_mode=WAL"))
         _meta.create_all(self.engine)
+        self._ensure_job_columns()
+
+    def _ensure_job_columns(self) -> None:
+        """Add retry columns for databases created before issue #54."""
+        names = {column["name"] for column in inspect(self.engine).get_columns("jobs")}
+        with self.engine.begin() as connection:
+            if "next_retry_at" not in names:
+                connection.execute(text("ALTER TABLE jobs ADD COLUMN next_retry_at VARCHAR(40)"))
+            if "backoff_seconds" not in names:
+                connection.execute(text("ALTER TABLE jobs ADD COLUMN backoff_seconds INTEGER"))
+            connection.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_jobs_next_retry_at ON jobs (next_retry_at)"
+            ))
 
     @property
     def is_postgres(self) -> bool:
@@ -187,6 +222,7 @@ class SqlStore:
                 "config": json.dumps(config, default=str), "progress": None,
                 "error": None, "created_at": now_iso(),
                 "started_at": None, "finished_at": None,
+                "next_retry_at": None, "backoff_seconds": None,
             })
         return {"job_id": job_id, "run_id": run_id}
 
@@ -196,12 +232,16 @@ class SqlStore:
             if self.is_postgres:
                 row = c.execute(text(
                     "SELECT job_id FROM jobs WHERE status='queued' "
+                    "AND (next_retry_at IS NULL OR next_retry_at <= :now) "
                     "ORDER BY priority DESC, created_at ASC LIMIT 1 "
                     "FOR UPDATE SKIP LOCKED"
-                )).first()
+                ), {"now": now_iso()}).first()
             else:
                 row = c.execute(
-                    select(jobs.c.job_id).where(jobs.c.status == "queued")
+                    select(jobs.c.job_id).where(
+                        jobs.c.status == "queued",
+                        (jobs.c.next_retry_at.is_(None)) | (jobs.c.next_retry_at <= now_iso()),
+                    )
                     .order_by(jobs.c.priority.desc(), jobs.c.created_at.asc()).limit(1)
                 ).first()
             if not row:
@@ -253,6 +293,17 @@ class SqlStore:
             ).values(status="canceled", finished_at=now_iso()))
         return res.rowcount > 0
 
+    def retry_job(self, job_id: str) -> Optional[dict[str, Any]]:
+        with self.engine.begin() as c:
+            result = c.execute(update(jobs).where(
+                jobs.c.job_id == job_id, jobs.c.status.in_(("failed", "dead_letter"))
+            ).values(status="queued", attempts=0, error=None, finished_at=None,
+                     started_at=None, next_retry_at=None, backoff_seconds=None))
+            if not result.rowcount:
+                return None
+            row = c.execute(select(jobs).where(jobs.c.job_id == job_id)).mappings().first()
+        return dict(row) if row else None
+
     # ─── helpers ──────────────────────────────────────────────────────────
     def _upsert(self, table: Table, key_col: str, key_val: str, values: dict) -> None:
         with self.engine.begin() as c:
@@ -281,4 +332,5 @@ class SqlStore:
 def make_store(url: str | None = None) -> SqlStore:
     from .settings import get_settings
 
-    return SqlStore(url or get_settings().database_url)
+    settings = get_settings()
+    return SqlStore(url or settings.database_url, settings=settings)
