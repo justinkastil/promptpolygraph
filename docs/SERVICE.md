@@ -41,38 +41,6 @@ Set configuration via `POLYGRAPH_*` environment variables (or a `.env` file):
 Other useful dials: `POLYGRAPH_WORKER_POLL_S` (idle poll interval),
 `POLYGRAPH_WORKER_CONCURRENCY`, `POLYGRAPH_HOST` / `POLYGRAPH_PORT`.
 
-Reliability controls include `POLYGRAPH_JOB_MAX_ATTEMPTS` (default `3`),
-`POLYGRAPH_JOB_RETRY_BASE_SECONDS` and `POLYGRAPH_JOB_RETRY_MAX_SECONDS` for
-bounded exponential retry, plus `POLYGRAPH_SHUTDOWN_DRAIN_SECONDS` for the
-maximum graceful-shutdown wait. During drain, workers stop claiming jobs,
-`/healthz/ready` returns 503, and `/healthz` remains live. Exhausted jobs are
-listed at `GET /api/jobs/dead-letter`; an editor can requeue one with
-`POST /api/jobs/{job_id}/retry`.
-
-## Retention and backup
-
-Call `promptpolygraph.service.retention.purge(store)` from an operator-owned
-scheduled task. `POLYGRAPH_JOB_RETENTION_DAYS` and
-`POLYGRAPH_RUN_RETENTION_DAYS` set the age thresholds; executing jobs and their
-runs are preserved. The cleanup deletes only eligible rows and never drops
-tables.
-
-For file-backed SQLite, `backup.create_snapshot(store, dest=...)` uses the
-SQLite backup API and produces a consistent database file. Test restoration by
-opening the snapshot with SQLite and querying `jobs` and `runs` before rotating
-the prior backup.
-
-For production Postgres on Amazon RDS, configure automated RDS snapshots and
-take a manual snapshot before upgrades. Regularly restore a snapshot into an
-isolated RDS instance and validate row counts and representative reports.
-Choose snapshot retention to cover the organization recovery window and keep
-at least one verified copy beyond the application row-retention horizon.
-
-Configure PostgreSQL WAL retention/archiving for point-in-time recovery, and
-monitor archive delivery and storage. WAL retention must span the required
-recovery-point objective; periodically perform a point-in-time restore rather
-than assuming retained WAL segments are usable.
-
 Validate critical dependencies without starting the server:
 
 ```bash

@@ -30,19 +30,7 @@ class Settings(BaseSettings):
     default_mock: bool = False
     worker_poll_s: float = 2.0
     worker_concurrency: int = 1  # jobs processed at once per worker
-    job_max_attempts: int = 3
-    job_retry_base_seconds: int = 1
-    job_retry_max_seconds: int = 300
-    shutdown_drain_seconds: float = 30.0
-
-    # Database pool and retention controls.
-    db_pool_size: int = 5
-    db_max_overflow: int = 10
-    db_pool_recycle: int = 1800
-    db_connect_timeout: int = 10
-    db_statement_timeout: int = 30000
-    job_retention_days: int = 30
-    run_retention_days: int = 90
+    job_max_attempts: int = 1
 
     # When true, the API process also runs a background worker thread — handy
     # for single-container / local use. In production run dedicated workers and
