@@ -36,7 +36,7 @@ from .schemas import (
     RunStatus,
 )
 from .settings import get_settings
-from . import readiness, startup_validate
+from . import readiness, shutdown, startup_validate
 
 settings = get_settings()
 store: SqlStore = make_store(settings.database_url)
@@ -61,10 +61,18 @@ async def _lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        shutdown.begin_drain()
         if bg is not None:
             bg.set()
+            thread = getattr(bg, "_worker_thread", None)
+            if thread is not None:
+                thread.join(timeout=settings.shutdown_drain_seconds)
+        summary = shutdown.wait(settings.shutdown_drain_seconds)
+        import logging
+        logging.getLogger("promptpolygraph.service.shutdown").info("shutdown summary: %s", summary)
         if scheduler is not None:
-            scheduler.shutdown(wait=False)
+            scheduler.shutdown(wait=True)
+        shutdown.end_drain()
 
 
 app = FastAPI(title=settings.title, version="0.1.0", lifespan=_lifespan)
@@ -386,6 +394,28 @@ def list_jobs(status: str | None = None, limit: int = Query(100, ge=1, le=500),
             if tenancy.owns_run(j["run_id"], principal.workspace_id)]
 
 
+@app.get("/api/jobs/dead-letter")
+def dead_letter_jobs(limit: int = Query(100, ge=1, le=500),
+                     principal: Principal = Depends(require_role("viewer"))) -> list[dict]:
+    tenancy = get_tenancy()
+    return [_job_public(j) for j in store.list_jobs(status="dead_letter", limit=limit)
+            if tenancy.owns_run(j["run_id"], principal.workspace_id)]
+
+
+@app.post("/api/jobs/{job_id}/retry")
+def retry_job(job_id: str,
+              principal: Principal = Depends(require_role("editor"))) -> dict:
+    from .retry import manual_retry
+
+    existing = store.get_job(job_id)
+    if existing is None or not get_tenancy().owns_run(existing["run_id"], principal.workspace_id):
+        raise HTTPException(404, "job not found")
+    job = manual_retry(store, job_id)
+    if job is None:
+        raise HTTPException(409, "job is not dead-lettered")
+    return _job_public(job)
+
+
 # ─── compare ────────────────────────────────────────────────────────────────
 
 
@@ -549,7 +579,7 @@ def _job_public(j: dict) -> dict:
         "job_id": j["job_id"], "run_id": j["run_id"], "status": j["status"],
         "attempts": j.get("attempts"), "error": j.get("error"),
         "created_at": j.get("created_at"), "started_at": j.get("started_at"),
-        "finished_at": j.get("finished_at"),
+        "finished_at": j.get("finished_at"), "next_retry_at": j.get("next_retry_at"),
     }
 
 
