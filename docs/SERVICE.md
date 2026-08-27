@@ -41,6 +41,12 @@ Set configuration via `POLYGRAPH_*` environment variables (or a `.env` file):
 Other useful dials: `POLYGRAPH_WORKER_POLL_S` (idle poll interval),
 `POLYGRAPH_WORKER_CONCURRENCY`, `POLYGRAPH_HOST` / `POLYGRAPH_PORT`.
 
+Failed jobs retry with bounded exponential backoff. Configure the attempt cap
+with `POLYGRAPH_JOB_MAX_ATTEMPTS` (default `3`) and the delay bounds with
+`POLYGRAPH_JOB_RETRY_BASE_SECONDS` and `POLYGRAPH_JOB_RETRY_MAX_SECONDS`.
+Exhausted jobs are queryable at `GET /api/jobs/dead-letter` and can be requeued
+with `POST /api/jobs/<job_id>/retry`.
+
 Validate critical dependencies without starting the server:
 
 ```bash
@@ -66,6 +72,25 @@ livenessProbe:
 readinessProbe:
   httpGet: {path: /healthz/ready, port: 8080}
 ```
+
+At shutdown the process enters drain mode immediately, making readiness return
+`503` while liveness remains `200`. Workers stop claiming new work and wait up
+to `POLYGRAPH_SHUTDOWN_DRAIN_SECONDS` for active work before logging a summary.
+
+### Retention and backups
+
+`POLYGRAPH_JOB_RETENTION_DAYS` and `POLYGRAPH_RUN_RETENTION_DAYS` control the
+scheduled/callable cleanup windows; `promptpolygraph.service.retention.purge`
+deletes aged rows without altering the schema. For SQLite,
+`promptpolygraph.service.backup.create_snapshot` uses the online backup API to
+produce a consistent, restorable snapshot even while WAL mode is active.
+
+For production Postgres on AWS RDS, enable automated backups and retain daily
+snapshots for the organization's recovery window. Keep transaction-log/WAL
+retention long enough to cover the required point-in-time recovery interval,
+test restores regularly, and take a manual RDS snapshot before migrations or
+retention-policy changes. Application retention is not a substitute for RDS
+snapshot and WAL backups.
 
 Start the two roles (separate terminals for local dev, or one with the
 in-process worker):
