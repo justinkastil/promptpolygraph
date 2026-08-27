@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import signal
 import threading
 import time
 import traceback
@@ -22,8 +21,6 @@ from ..pipeline import run_pipeline
 from .db import SqlStore, make_store
 from .jobspec import config_from_payload
 from .settings import Settings, get_settings
-from .retry import record_failure
-from . import shutdown
 from .webhooks import notify
 
 log = logging.getLogger("promptpolygraph.service.worker")
@@ -58,11 +55,9 @@ def execute_job(store: SqlStore, job: dict[str, Any], settings: Settings) -> dic
         return result
     except Exception as exc:
         err = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
-        failed = record_failure(store, job_id, error=err)
-        terminal = failed["status"] in {"failed", "dead_letter", "dead-letter"}
+        store.finish_job(job_id, status="failed", error=err)
         notify(payload.get("webhook_url"), {
-            "run_id": run_id, "job_id": job_id,
-            "status": "failed" if terminal else "retry_wait", "error": str(exc),
+            "run_id": run_id, "job_id": job_id, "status": "failed", "error": str(exc),
         })
         log.exception("job %s failed (run %s)", job_id, run_id)
         return None
@@ -71,16 +66,10 @@ def execute_job(store: SqlStore, job: dict[str, Any], settings: Settings) -> dic
 def run_one(store: SqlStore, settings: Settings | None = None) -> bool:
     """Claim and execute a single job. Returns True if one ran, False if idle."""
     settings = settings or get_settings()
-    if shutdown.is_draining():
-        return False
     job = store.claim_job()
     if not job:
         return False
-    shutdown.job_started()
-    try:
-        execute_job(store, job, settings)
-    finally:
-        shutdown.job_finished()
+    execute_job(store, job, settings)
     return True
 
 
@@ -107,24 +96,12 @@ def start_background_worker(settings: Settings | None = None) -> threading.Event
     store = make_store(settings.database_url)
     t = threading.Thread(target=serve, args=(store, settings, stop), daemon=True, name="pp-worker")
     t.start()
-    stop._worker_thread = t  # type: ignore[attr-defined]
     return stop
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    settings = get_settings()
-    stop = threading.Event()
-
-    def _drain(_signum, _frame) -> None:
-        shutdown.begin_drain()
-        stop.set()
-
-    signal.signal(signal.SIGTERM, _drain)
-    signal.signal(signal.SIGINT, _drain)
-    serve(settings=settings, stop=stop)
-    if shutdown.is_draining():
-        log.info("shutdown summary: %s", shutdown.wait(settings.shutdown_drain_seconds))
+    serve()
 
 
 if __name__ == "__main__":

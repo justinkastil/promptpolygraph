@@ -80,46 +80,20 @@ jobs = Table(
     Column("created_at", String(40)),
     Column("started_at", String(40)),
     Column("finished_at", String(40)),
-    Column("next_retry_at", String(40)),
 )
-
-
-def engine_kwargs(settings: Any, url: str) -> dict[str, Any]:
-    """Return bounded SQLAlchemy pool and timeout options for *url*."""
-    if url.startswith("sqlite"):
-        return {"connect_args": {"check_same_thread": False}}
-    return {
-        "pool_size": settings.db_pool_size,
-        "max_overflow": settings.db_max_overflow,
-        "pool_recycle": settings.db_pool_recycle,
-        "pool_pre_ping": True,
-        "connect_args": {
-            "connect_timeout": settings.db_connect_timeout,
-            "options": f"-c statement_timeout={settings.db_statement_timeout}",
-        },
-    }
 
 
 class SqlStore:
     """Store protocol + job queue over a SQLAlchemy engine."""
 
-    def __init__(self, url: str, settings: Any | None = None):
-        from .settings import get_settings
-
+    def __init__(self, url: str):
         self.url = url
-        self.engine: Engine = create_engine(
-            url, future=True, **engine_kwargs(settings or get_settings(), url)
-        )
+        connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+        self.engine: Engine = create_engine(url, future=True, connect_args=connect_args)
         if url.startswith("sqlite"):
             with self.engine.begin() as c:
                 c.execute(text("PRAGMA journal_mode=WAL"))
         _meta.create_all(self.engine)
-        # create_all does not extend installations created by older releases.
-        if url.startswith("sqlite"):
-            with self.engine.begin() as c:
-                columns = {row[1] for row in c.execute(text("PRAGMA table_info(jobs)"))}
-                if "next_retry_at" not in columns:
-                    c.execute(text("ALTER TABLE jobs ADD COLUMN next_retry_at VARCHAR(40)"))
 
     @property
     def is_postgres(self) -> bool:
@@ -221,17 +195,13 @@ class SqlStore:
         with self.engine.begin() as c:
             if self.is_postgres:
                 row = c.execute(text(
-                    "SELECT job_id FROM jobs WHERE (status='queued' OR "
-                    "(status='retry_wait' AND (next_retry_at IS NULL OR next_retry_at <= :now))) "
+                    "SELECT job_id FROM jobs WHERE status='queued' "
                     "ORDER BY priority DESC, created_at ASC LIMIT 1 "
                     "FOR UPDATE SKIP LOCKED"
-                ), {"now": now_iso()}).first()
+                )).first()
             else:
                 row = c.execute(
-                    select(jobs.c.job_id).where(
-                        jobs.c.status.in_(("queued", "retry_wait")),
-                        (jobs.c.next_retry_at.is_(None)) | (jobs.c.next_retry_at <= now_iso()),
-                    )
+                    select(jobs.c.job_id).where(jobs.c.status == "queued")
                     .order_by(jobs.c.priority.desc(), jobs.c.created_at.asc()).limit(1)
                 ).first()
             if not row:

@@ -9,15 +9,12 @@ from sqlalchemy import func, select, text
 
 from .db import SqlStore, jobs
 from .settings import Settings
-from . import shutdown
 
 Probe = Callable[[], Any]
 
 
 def check(store: SqlStore, settings: Settings, llm_probe: Probe | None = None) -> tuple[bool, list[dict[str, Any]]]:
     report: list[dict[str, Any]] = []
-    if shutdown.is_draining():
-        report.append({"check": "drain", "status": "fail", "detail": "shutdown drain in progress"})
     try:
         with store.engine.connect() as connection:
             connection.execute(text("SELECT 1")).scalar_one()
