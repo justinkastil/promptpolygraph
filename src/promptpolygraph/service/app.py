@@ -36,7 +36,7 @@ from .schemas import (
     RunStatus,
 )
 from .settings import get_settings
-from . import readiness, startup_validate
+from . import readiness, shutdown, startup_validate
 
 settings = get_settings()
 store: SqlStore = make_store(settings.database_url)
@@ -61,10 +61,17 @@ async def _lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        shutdown.begin_drain()
         if bg is not None:
             bg.set()
         if scheduler is not None:
             scheduler.shutdown(wait=False)
+        drained = shutdown.wait(settings.shutdown_drain_seconds)
+        if bg is not None:
+            bg.join(timeout=0)
+        import logging
+        logging.getLogger("promptpolygraph.service").info(
+            "shutdown summary: %s drained=%s", shutdown.summary(), drained)
 
 
 app = FastAPI(title=settings.title, version="0.1.0", lifespan=_lifespan)
@@ -81,6 +88,9 @@ def healthz() -> dict:
 @app.get("/healthz/ready")
 def healthz_ready() -> JSONResponse:
     ok, checks = readiness.check(store, settings)
+    if shutdown.is_draining():
+        ok = False
+        checks.append({"check": "drain", "status": "fail", "detail": "service is draining"})
     return JSONResponse(
         status_code=200 if ok else 503,
         content={"status": "ready" if ok else "not_ready", "checks": checks},
@@ -384,6 +394,25 @@ def list_jobs(status: str | None = None, limit: int = Query(100, ge=1, le=500),
     tenancy = get_tenancy()
     return [_job_public(j) for j in store.list_jobs(status=status, limit=limit)
             if tenancy.owns_run(j["run_id"], principal.workspace_id)]
+
+
+@app.get("/api/jobs/dead-letter")
+def dead_letter_jobs(limit: int = Query(100, ge=1, le=500),
+                     principal: Principal = Depends(require_role("viewer"))) -> list[dict]:
+    tenancy = get_tenancy()
+    return [_job_public(j) for j in store.list_jobs(status="dead_letter", limit=limit)
+            if tenancy.owns_run(j["run_id"], principal.workspace_id)]
+
+
+@app.post("/api/jobs/{job_id}/retry")
+def retry_job(job_id: str, principal: Principal = Depends(require_role("editor"))) -> dict:
+    job = store.get_job(job_id)
+    if not job or not get_tenancy().owns_run(job["run_id"], principal.workspace_id):
+        raise HTTPException(404, "job not found")
+    retried = store.retry_job(job_id)
+    if retried is None:
+        raise HTTPException(409, "job is not eligible for retry")
+    return _job_public(retried)
 
 
 # ─── compare ────────────────────────────────────────────────────────────────
