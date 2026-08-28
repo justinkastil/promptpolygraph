@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
 from .. import analyze as A
@@ -37,9 +39,15 @@ from .schemas import (
 )
 from .settings import get_settings
 from . import readiness, shutdown, startup_validate
+from . import metrics
+from .logging import configure as configure_logging
+from .logging import inbound_trace, span_id_var, trace_id_var
 
 settings = get_settings()
 store: SqlStore = make_store(settings.database_url)
+metrics.configure(store)
+configure_logging()
+log = logging.getLogger("promptpolygraph.service.http")
 
 
 @asynccontextmanager
@@ -77,12 +85,34 @@ async def _lifespan(_app: FastAPI):
 app = FastAPI(title=settings.title, version="0.1.0", lifespan=_lifespan)
 
 
+@app.middleware("http")
+async def correlate_logs(request: Request, call_next):
+    trace_id, span_id = inbound_trace(request.headers.get("traceparent"))
+    trace_reset = trace_id_var.set(trace_id)
+    span_reset = span_id_var.set(span_id)
+    started = time.monotonic()
+    try:
+        response = await call_next(request)
+        log.info("request complete method=%s path=%s status=%s duration_ms=%.3f",
+                 request.method, request.url.path, response.status_code,
+                 (time.monotonic() - started) * 1000)
+        return response
+    finally:
+        span_id_var.reset(span_reset)
+        trace_id_var.reset(trace_reset)
+
+
 # ─── liveness + dashboard ───────────────────────────────────────────────────
 
 
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "database": store.engine.dialect.name}
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def prometheus_metrics() -> PlainTextResponse:
+    return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4")
 
 
 @app.get("/healthz/ready")
@@ -281,12 +311,39 @@ def create_run(req: CreateRunRequest,
     payload = payload_from_request(req, settings)
     if payload.get("webhook_url") is None and settings.webhook_url:
         payload["webhook_url"] = settings.webhook_url
-    ids = store.enqueue_job(payload, priority=req.priority)
+    ids, _usage, exceeded = store.enqueue_with_quota(
+        payload, principal.workspace_id,
+        max_concurrent_runs=settings.max_concurrent_runs,
+        jobs_per_day=settings.jobs_per_day,
+        monthly_cost_budget=settings.monthly_cost_budget,
+        priority=req.priority,
+    )
+    if ids is None:
+        raise HTTPException(429, f"quota exceeded: {exceeded}")
     tenancy = get_tenancy()
     tenancy.claim_run(ids["run_id"], principal.workspace_id)
     tenancy.audit(principal.workspace_id, "run_created", actor=principal.subject,
                   run_id=ids["run_id"], job_id=ids["job_id"])
     return CreateRunResponse(run_id=ids["run_id"], job_id=ids["job_id"], status="queued")
+
+
+@app.get("/api/usage")
+def get_usage(principal: Principal = Depends(require_role("viewer"))) -> dict:
+    current = store.quota_usage(principal.workspace_id)
+    return {
+        "concurrent_runs": {
+            "current": current["concurrent_runs"],
+            "ceiling": settings.max_concurrent_runs,
+        },
+        "jobs_per_day": {
+            "current": current["jobs_today"],
+            "ceiling": settings.jobs_per_day,
+        },
+        "monthly_cost": {
+            "current": current["monthly_cost"],
+            "ceiling": settings.monthly_cost_budget,
+        },
+    }
 
 
 @app.get("/api/runs")

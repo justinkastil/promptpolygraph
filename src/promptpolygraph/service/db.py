@@ -83,6 +83,12 @@ jobs = Table(
     Column("finished_at", String(40)),
     Column("next_retry_at", String(40), index=True),
     Column("backoff_seconds", Integer),
+    Column("workspace_id", String(64), index=True),
+)
+
+quota_locks = Table(
+    "quota_locks", _meta,
+    Column("workspace_id", String(64), primary_key=True),
 )
 
 
@@ -126,8 +132,13 @@ class SqlStore:
                 connection.execute(text("ALTER TABLE jobs ADD COLUMN next_retry_at VARCHAR(40)"))
             if "backoff_seconds" not in names:
                 connection.execute(text("ALTER TABLE jobs ADD COLUMN backoff_seconds INTEGER"))
+            if "workspace_id" not in names:
+                connection.execute(text("ALTER TABLE jobs ADD COLUMN workspace_id VARCHAR(64)"))
             connection.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_jobs_next_retry_at ON jobs (next_retry_at)"
+            ))
+            connection.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_jobs_workspace_id ON jobs (workspace_id)"
             ))
 
     @property
@@ -212,7 +223,7 @@ class SqlStore:
 
     # ─── job queue ──────────────────────────────────────────────────────────
     def enqueue_job(self, config: dict[str, Any], *, run_id: str | None = None,
-                    priority: int = 0) -> dict[str, str]:
+                    priority: int = 0, workspace_id: str | None = None) -> dict[str, str]:
         job_id = new_id()
         run_id = run_id or new_id()
         with self.engine.begin() as c:
@@ -223,8 +234,97 @@ class SqlStore:
                 "error": None, "created_at": now_iso(),
                 "started_at": None, "finished_at": None,
                 "next_retry_at": None, "backoff_seconds": None,
+                "workspace_id": workspace_id,
             })
         return {"job_id": job_id, "run_id": run_id}
+
+    def quota_usage(self, workspace_id: str) -> dict[str, float | int]:
+        """Return persisted usage for one workspace in current UTC windows."""
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        with self.engine.connect() as c:
+            return self._quota_usage(c, workspace_id, day_start, month_start)
+
+    def _quota_usage(self, connection, workspace_id: str, day_start: str,
+                     month_start: str) -> dict[str, float | int]:
+        owned = jobs.c.workspace_id == workspace_id
+        concurrent = connection.execute(select(func.count()).select_from(jobs).where(
+            owned, jobs.c.status.in_(("queued", "running")))).scalar_one()
+        daily = connection.execute(select(func.count()).select_from(jobs).where(
+            owned, jobs.c.created_at >= day_start)).scalar_one()
+        run_ids = connection.execute(select(jobs.c.run_id).where(
+            owned, jobs.c.created_at >= month_start)).scalars().all()
+        monthly_cost = 0.0
+        if run_ids:
+            payloads = connection.execute(select(responses.c.data).where(
+                responses.c.run_id.in_(run_ids))).scalars().all()
+            for payload in payloads:
+                try:
+                    value = json.loads(payload).get("cost_usd")
+                    if value is not None:
+                        monthly_cost += float(value)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+        return {"concurrent_runs": int(concurrent), "jobs_today": int(daily),
+                "monthly_cost": monthly_cost}
+
+    def enqueue_with_quota(self, config: dict[str, Any], workspace_id: str, *,
+                           max_concurrent_runs: int, jobs_per_day: int,
+                           monthly_cost_budget: float, priority: int = 0) -> tuple[dict[str, str] | None, dict[str, float | int], str | None]:
+        """Atomically check one workspace's ceilings and enqueue if admitted."""
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        created_at = now.isoformat()
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        connection = self.engine.connect()
+        try:
+            if self.is_postgres:
+                transaction = connection.begin()
+                connection.execute(text("SELECT pg_advisory_xact_lock(hashtext(:workspace))"),
+                                   {"workspace": workspace_id})
+            else:
+                connection.exec_driver_sql("BEGIN IMMEDIATE")
+                transaction = None
+                if not connection.execute(select(quota_locks.c.workspace_id).where(
+                        quota_locks.c.workspace_id == workspace_id)).first():
+                    connection.execute(quota_locks.insert(), {"workspace_id": workspace_id})
+            usage = self._quota_usage(connection, workspace_id, day_start, month_start)
+            exceeded = None
+            if usage["concurrent_runs"] >= max_concurrent_runs:
+                exceeded = "max_concurrent_runs"
+            elif usage["jobs_today"] >= jobs_per_day:
+                exceeded = "jobs_per_day"
+            elif usage["monthly_cost"] >= monthly_cost_budget:
+                exceeded = "monthly_cost_budget"
+            if exceeded:
+                if transaction is not None:
+                    transaction.commit()
+                else:
+                    connection.commit()
+                return None, usage, exceeded
+            ids = {"job_id": new_id(), "run_id": new_id()}
+            connection.execute(jobs.insert(), {
+                **ids, "status": "queued", "priority": priority, "attempts": 0,
+                "config": json.dumps(config, default=str), "progress": None,
+                "error": None, "created_at": created_at, "started_at": None,
+                "finished_at": None, "next_retry_at": None, "backoff_seconds": None,
+                "workspace_id": workspace_id,
+            })
+            if transaction is not None:
+                transaction.commit()
+            else:
+                connection.commit()
+            return ids, usage, None
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def claim_job(self) -> Optional[dict[str, Any]]:
         """Atomically claim the highest-priority queued job; None if none."""
