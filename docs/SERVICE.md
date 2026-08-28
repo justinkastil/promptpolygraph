@@ -167,6 +167,172 @@ categories, difficulty, concurrency, judges), `mock`, `priority`, `formats`,
 
 ---
 
+## Observability — `/metrics` and structured logs
+
+The service is instrumented for Prometheus scrapes and JSON log ingestion using
+**the standard library only**. Nothing on this path pulls in
+`prometheus_client`, `structlog`, or OpenTelemetry; the OTLP extra described at
+the end of this section is strictly optional.
+
+### `GET /metrics`
+
+Prometheus text exposition format `0.0.4`, served as
+`text/plain; version=0.0.4`. The endpoint is **unauthenticated** and excluded
+from the OpenAPI schema: a scraper is infrastructure, not a tenant, and must not
+need an `X-API-Key`. The body carries no run ids, config names, or tenant
+identifiers — only bounded labels — but it does reveal traffic shape, so keep it
+on an internal listener or restrict it at the ingress.
+
+```bash
+curl -s http://localhost:8080/metrics
+```
+
+| Series | Type | Labels | Meaning |
+|--------|------|--------|---------|
+| `polygraph_queue_depth` | gauge | `state` = `queued` / `running` | Job-queue backlog. Alert on sustained `queued` growth. |
+| `polygraph_jobs_started_total` | counter | — | Jobs claimed by a worker. |
+| `polygraph_jobs_total` | counter | `outcome` = `done` / `failed` / `canceled` | Jobs that reached a terminal state. |
+| `polygraph_runs_total` | counter | `outcome` | Runs that reached a terminal state. |
+| `polygraph_job_duration_seconds` | histogram | — | Wall-clock seconds a job took to execute. |
+| `polygraph_http_requests_total` | counter | `method`, `route`, `status` | Requests handled. `status` is the *class* (`2xx`, `4xx`, `5xx`), not the code. |
+| `polygraph_http_errors_total` | counter | `method`, `route` | Requests answered with `5xx`. |
+| `polygraph_http_request_duration_seconds` | histogram | `method`, `route` | API latency. |
+| `polygraph_http_error_ratio` | gauge | — | Share of all requests answered `5xx` since process start. |
+| `polygraph_run_cost_usd_total` | counter | — | Observed spend in USD. **Absent until a run reports a cost** — see below. |
+
+`route` is the route *template* (`/api/runs/{run_id}`), never an expanded id, so
+scrape cardinality stays bounded; requests that matched no route (404s, probes,
+scanners) are labelled `route="unmatched"`. Each metric also caps the number of
+distinct label sets it will hold and folds the rest into a single
+`__overflow__` series rather than growing without limit.
+
+Counters that can exist at zero are pre-seeded, so a scraper sees `0` rather
+than a missing series on a freshly started process. The one deliberate
+exception is cost: `polygraph_run_cost_usd_total` is registered on the *first*
+reported cost, so an absent series means "cost is not instrumented on this
+deployment" rather than "these runs were free". Do not collapse those two cases
+in a dashboard.
+
+Error rate is a ratio of two counters, computed in your query language:
+
+```promql
+rate(polygraph_http_errors_total[5m]) / rate(polygraph_http_requests_total[5m])
+```
+
+The same body is available in-process, without HTTP — this is the public hook:
+
+```python
+from promptpolygraph.service import metrics
+
+body = metrics.render()          # -> str, Prometheus text format 0.0.4
+```
+
+### Structured (JSON) logs
+
+The API (from its lifespan) and `polygraph-worker` both configure logging to
+emit **one JSON object per line on stderr** — no grok pattern needed for
+Datadog, Loki, or CloudWatch. Importing the service never mutates global
+logging state, so embedding applications and pytest keep their own handlers.
+
+```json
+{"timestamp":"2026-06-21T09:14:02.318Z","level":"INFO","logger":"promptpolygraph.service.worker","message":"job finished","service":"promptpolygraph","request_id":"9f2c1e...","job_id":"..."}
+```
+
+`timestamp` (UTC, ISO-8601 with milliseconds), `level`, `logger`, `message`, and
+`service` are always present. Correlation ids are added **when one exists**, and
+omitted rather than emitted empty:
+
+- `request_id` — set per HTTP request. An inbound `X-Request-ID` or
+  `X-Correlation-ID` is honoured; otherwise one is generated. Either way it is
+  echoed back on the response as `X-Request-ID`, so a client can join its own
+  logs to the service's.
+- `trace_id` / `span_id` — the active trace and span when a tracing context is
+  in scope (see the OTLP extra below). Absent on the default path.
+
+Anything passed as `extra={...}` on a log call is merged into the object, and a
+log call never raises on an unserialisable value.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `POLYGRAPH_LOG_LEVEL` | `INFO` | Level name. |
+| `POLYGRAPH_LOG_FORMAT` | `json` | `json`, or `text` for human-readable local dev. |
+| `POLYGRAPH_SERVICE_NAME` | `promptpolygraph` | Value of the `service` field. |
+| `POLYGRAPH_OTLP_ENDPOINT` | *(unset)* | OTLP collector endpoint; see below. |
+
+### OpenTelemetry / OTLP — optional
+
+**OpenTelemetry is not a dependency of the `service` extra and is not required
+to run anything above.** `/metrics` and the JSON logs are stdlib-only; tracing
+is reached through a soft import that no-ops when the package is not installed.
+Prometheus-only shops never install it.
+
+To additionally export spans to a collector (Honeycomb, Datadog, Tempo, Grafana
+Alloy):
+
+```bash
+pip install 'promptpolygraph[otlp]'
+export POLYGRAPH_OTLP_ENDPOINT=http://otel-collector:4318
+```
+
+With the extra absent *or* the endpoint unset this is a silent no-op — the only
+visible difference is that log lines carry no `trace_id`/`span_id`.
+
+---
+
+## Quotas, rate limits, and cost ceilings
+
+`POST /api/runs` is metered per workspace. A request that would push a
+workspace past one of its ceilings is refused with HTTP **429** and the run is
+**not** enqueued — no half-created job row, nothing for a worker to claim.
+Unmetered paths stay open: `/healthz`, `/healthz/ready`, and `/metrics` are
+never quota-limited, so a tenant at its ceiling is still observable.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `POLYGRAPH_MAX_CONCURRENT_RUNS` | *(unset — no ceiling)* | Runs a workspace may have queued **or** running at one time. |
+| `POLYGRAPH_JOBS_PER_DAY` | *(unset — no ceiling)* | Jobs a workspace may enqueue per day. |
+| `POLYGRAPH_MONTHLY_COST_BUDGET` | *(unset — no ceiling)* | USD ceiling on observed spend for the current month. |
+
+**`0` means hard deny, not "unlimited".** Setting any of the three to `0` makes
+every `POST /api/runs` return `429` — that is the intended kill switch for
+pausing intake (draining before an upgrade, freezing a tenant that has blown its
+budget). Leave a variable unset to not enforce that ceiling at all; the two are
+different states, and `0` is the restrictive one.
+
+Per-API-key request rate may additionally be smoothed with a token bucket. The
+contract is the status code, not the mechanism: **any refusal to enqueue for
+quota, concurrency, budget, or rate reasons is a `429`** — never a `500`, and
+never a silently dropped job. Clients should treat `429` as retryable with
+backoff.
+
+### `GET /api/usage`
+
+Returns the calling workspace's current consumption against each ceiling, so a
+tenant — or your own dashboard — can see how close it is *before* being
+refused. It requires `X-API-Key` like every other `/api/*` route.
+
+```bash
+curl -s $BASE/api/usage -H "X-API-Key: $KEY"
+```
+
+The response is a nonempty JSON object pairing each metered dimension with its
+limit. Shape (values illustrative):
+
+```json
+{
+  "concurrent_runs":  {"current": 1,    "limit": 5},
+  "jobs_today":       {"current": 12,   "limit": 100},
+  "monthly_cost_usd": {"current": 3.41, "limit": 10.0}
+}
+```
+
+A `limit` of `null` means that ceiling is not configured; a `limit` of `0`
+denies every request, as above. The payload is additive — read the fields you
+need rather than asserting an exact schema, so a later release can report more
+dimensions without breaking your integration.
+
+---
+
 ## Scheduling
 
 Point `POLYGRAPH_SCHEDULES_PATH` at a `schedules.yaml`. Each entry is a standard

@@ -6,6 +6,29 @@ on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 
 ## [Unreleased]
 
+### Added
+- Service observability: an unauthenticated `GET /metrics` endpoint in
+  Prometheus text exposition format `0.0.4` covering queue depth, job counts and
+  duration, run counts, HTTP request rate/latency/error ratio, and observed run
+  cost; `promptpolygraph.service.metrics.render()` exposes the same body
+  in-process. Service and worker logs are now one JSON object per line carrying
+  `request_id` (honouring an inbound `X-Request-ID`/`X-Correlation-ID` and
+  echoing it back) plus `trace_id`/`span_id` when a tracing context exists.
+  Tuned with `POLYGRAPH_LOG_LEVEL`, `POLYGRAPH_LOG_FORMAT`, and
+  `POLYGRAPH_SERVICE_NAME`. Both paths are standard-library only: OTLP span
+  export is an additive, optional `[otlp]` extra enabled with
+  `POLYGRAPH_OTLP_ENDPOINT`, and OpenTelemetry is **not** a dependency of the
+  `service` extra. (#52)
+- Per-tenant quotas, rate limiting, and cost ceilings on `POST /api/runs`,
+  configured with `POLYGRAPH_MAX_CONCURRENT_RUNS`, `POLYGRAPH_JOBS_PER_DAY`, and
+  `POLYGRAPH_MONTHLY_COST_BUDGET`. Exceeding a ceiling returns HTTP `429` and
+  enqueues nothing; a ceiling of `0` is a hard deny (the intake kill switch),
+  while leaving a variable unset does not enforce that ceiling. `GET /api/usage`
+  reports current consumption against each ceiling. Health and metrics endpoints
+  are never quota-limited. (#53)
+
+See [`docs/SERVICE.md`](docs/SERVICE.md) for the operator runbook covering both.
+
 ## [1.2.0] - 2026-06-21
 
 Relevance release: evaluate and red-team the systems people actually build in
