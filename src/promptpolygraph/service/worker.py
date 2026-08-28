@@ -25,6 +25,7 @@ from .settings import Settings, get_settings
 from .webhooks import notify
 from . import shutdown
 from .retry import record_failure
+from .logging import configure as configure_logging
 
 log = logging.getLogger("promptpolygraph.service.worker")
 
@@ -118,7 +119,7 @@ def start_background_worker(settings: Settings | None = None) -> WorkerHandle:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    configure_logging()
     settings = get_settings()
     stop = threading.Event()
 

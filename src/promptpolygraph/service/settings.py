@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     readiness_llm_check: bool = False
     queue_max_depth: int = 1000
 
+    # Per-workspace admission ceilings. These deliberately have generous,
+    # backward-compatible defaults; operators opt into tighter limits with
+    # POLYGRAPH_MAX_CONCURRENT_RUNS, POLYGRAPH_JOBS_PER_DAY, and
+    # POLYGRAPH_MONTHLY_COST_BUDGET.
+    max_concurrent_runs: int = 100
+    jobs_per_day: int = 10000
+    monthly_cost_budget: float = 10000.0
+
     # Optional global webhook fired on every run completion.
     webhook_url: str | None = None
 
