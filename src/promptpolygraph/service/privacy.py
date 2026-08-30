@@ -57,6 +57,34 @@ the ``Response.tokens_streamed`` chunks that reconstruct it. It deliberately
 leaves ``Response.error`` and ``Response.raw`` alone, and nothing here touches
 the ``cache`` table: the cache is a keyed replay of what the target returned,
 and every cache hit is re-scrubbed on its way through ``save_response`` anyway.
+
+Chunk boundaries (GitHub #50 follow-up)
+---------------------------------------
+``tokens_streamed`` is an arbitrary transport-level split of one body: a target
+may emit ``["Contact jane.doe@", "example.com"]``. Redacting each chunk on its
+own leaves both halves intact, and the address reappears the moment anything
+joins them. ``scrub_response`` therefore redacts over the *concatenation*: it
+computes the spans ``scrub_pii`` would replace in ``"".join(tokens_streamed)``
+and writes the result back across the chunk list, so that
+
+    "".join(scrub_response(resp).tokens_streamed) == scrub_pii(joined)
+
+for any list of ``str`` chunks. The redistribution keeps the list shape the
+callers and the ``Response`` model expect:
+
+* the output is a ``list[str]`` of the same length, in the same order;
+* each placeholder is emitted whole into the chunk where its match *started*,
+  so no chunk ever holds a torn ``[REDACTED-`` fragment;
+* chunks whose text was swallowed by a placeholder that began earlier shrink,
+  possibly to ``""``. Empty chunks are kept rather than dropped, because the
+  chunk count is itself observable (assertions inspect first-N-token output).
+
+A ``tokens_streamed`` that is absent, ``None``, or not a list of ``str`` is
+left untouched rather than coerced: unlike ``scrub_pii``'s ingest-path input,
+this value's shape is fixed by the ``Response`` model, so an off-shape value is
+someone else's object and rewriting it would be a surprising side effect. Note
+this differs from ``Response.text``, which is scrubbed only when it is a
+``str`` for the same reason.
 """
 from __future__ import annotations
 
@@ -97,6 +125,81 @@ def scrub_pii(text: str) -> str:
     return _SSN_RE.sub(SSN_PLACEHOLDER, _EMAIL_RE.sub(EMAIL_PLACEHOLDER, _coerce(text)))
 
 
+def _redaction_spans(text: str) -> list[tuple[int, int, str]]:
+    """Return the ``(start, end, placeholder)`` spans ``scrub_pii`` replaces.
+
+    Reproduces ``scrub_pii``'s two-pass order -- emails first, then SSNs over
+    the *already email-substituted* text -- while reporting every span in
+    coordinates of the original ``text``, which is what the chunk walker needs.
+
+    The second pass runs against the substituted string (not against the gaps
+    between email matches) because ``\\b`` resolves differently there: an SSN
+    abutting an address sees the placeholder's ``]``, a non-word character,
+    where the original text had a word character. Positions are carried back
+    through ``origin``. No SSN match can overlap a placeholder -- the SSN
+    pattern is digits and separators only, and ``[REDACTED-EMAIL]`` contains no
+    digit -- so the spans are disjoint; the guard below is belt-and-braces.
+    """
+    spans: list[tuple[int, int, str]] = []
+    parts: list[str] = []
+    origin: list[int] = []  # substituted index -> original index, -1 if injected
+    pos = 0
+    for match in _EMAIL_RE.finditer(text):
+        spans.append((match.start(), match.end(), EMAIL_PLACEHOLDER))
+        parts.append(text[pos : match.start()])
+        origin.extend(range(pos, match.start()))
+        parts.append(EMAIL_PLACEHOLDER)
+        origin.extend([-1] * len(EMAIL_PLACEHOLDER))
+        pos = match.end()
+    parts.append(text[pos:])
+    origin.extend(range(pos, len(text)))
+
+    for match in _SSN_RE.finditer("".join(parts)):
+        start = origin[match.start()]
+        end = origin[match.end() - 1] + 1
+        if start >= 0 and end > start:
+            spans.append((start, end, SSN_PLACEHOLDER))
+
+    spans.sort()
+    return spans
+
+
+def _scrub_chunks(chunks: list[str]) -> list[str]:
+    """Redact ``chunks`` as one body, returning one output chunk per input one.
+
+    ``"".join(_scrub_chunks(cs)) == scrub_pii("".join(cs))`` and
+    ``len(_scrub_chunks(cs)) == len(cs)``. Each placeholder lands whole in the
+    chunk holding the start of its match; chunks covered by a span that began
+    in an earlier chunk lose the covered text and may come back ``""``.
+    """
+    joined = "".join(chunks)
+    spans = _redaction_spans(joined)
+    if not spans:
+        return list(chunks)
+
+    out: list[str] = []
+    cursor = 0  # next index of `joined` not yet emitted or consumed
+    index = 0  # next span to place
+    start = 0  # index of the current chunk within `joined`
+    for chunk in chunks:
+        stop = start + len(chunk)
+        buf: list[str] = []
+        while index < len(spans) and spans[index][0] < stop:
+            span_start, span_end, placeholder = spans[index]
+            index += 1
+            if span_end <= cursor:  # wholly inside an earlier placeholder
+                continue
+            buf.append(joined[cursor:span_start])
+            buf.append(placeholder)
+            cursor = max(cursor, span_end)
+        if cursor < stop:
+            buf.append(joined[cursor:stop])
+            cursor = stop
+        out.append("".join(buf))
+        start = stop
+    return out
+
+
 _R = TypeVar("_R")
 
 
@@ -115,9 +218,11 @@ def scrub_response(resp: _R) -> _R:
     chunks = getattr(resp, "tokens_streamed", None)
 
     new_text = scrub_pii(text) if isinstance(text, str) else None
+    # Only a genuine list[str] is rewritten; see "Chunk boundaries" above for
+    # why an off-shape value is left exactly as the caller had it.
     new_chunks = (
-        [scrub_pii(c) if isinstance(c, str) else c for c in chunks]
-        if isinstance(chunks, list)
+        _scrub_chunks(chunks)
+        if isinstance(chunks, list) and all(isinstance(c, str) for c in chunks)
         else None
     )
 
