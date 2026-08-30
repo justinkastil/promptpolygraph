@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional, Protocol
 
 from ..models import Case, Response, RunMeta, Score
+from ..service.privacy import scrub_response
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -124,6 +125,10 @@ class SQLiteStore:
 
     # ─── responses ──────────────────────────────────────────────────────────
     def save_response(self, run_id: str, resp: Response) -> None:
+        # #50: the single chokepoint that writes the `responses` table, so PII
+        # is redacted on ingest and never lands verbatim on disk. `resp` itself
+        # is not mutated — the caller keeps the unredacted in-memory object.
+        resp = scrub_response(resp)
         with self._conn() as c:
             c.execute(
                 "INSERT OR REPLACE INTO responses (run_id, case_id, data) VALUES (?, ?, ?)",
@@ -164,16 +169,25 @@ class SQLiteStore:
                 (key, resp.model_dump_json()),
             )
 
-    def export_jsonl(self, run_id: str, path: str | Path) -> None:
-        """Dump every case + response + score as one JSON object per line."""
+    def export_jsonl(self, run_id: str, path: str | Path, *, redact: bool = False) -> None:
+        """Dump every case + response + score as one JSON object per line.
+
+        `redact` (#50, opt-in, default off) re-scrubs response bodies on the way
+        out. Bodies written after #50 are already redacted at ingest, so this is
+        for rows persisted by an earlier version. With `redact=False` the output
+        bytes are identical to the pre-#50 behaviour.
+        """
         cases = {c.id: c for c in self.get_cases(run_id)}
         responses = {r.case_id: r for r in self.get_responses(run_id)}
         scores = {s.case_id: s for s in self.get_scores(run_id)}
         with open(Path(path).expanduser(), "w", encoding="utf-8") as fh:
             for cid, case in cases.items():
+                resp = responses.get(cid)
+                if redact and resp is not None:
+                    resp = scrub_response(resp)
                 row = {
                     "case": case.model_dump(),
-                    "response": responses[cid].model_dump() if cid in responses else None,
+                    "response": resp.model_dump() if resp is not None else None,
                     "score": scores[cid].model_dump() if cid in scores else None,
                 }
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")

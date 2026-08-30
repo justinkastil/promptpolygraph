@@ -635,6 +635,28 @@ def cmd_export(cfg: Config, args) -> None:
     else:
         rows = [c.model_dump(mode="json", exclude={"id"}) for c in cases]
 
+    # #50: opt-in PII scrub on the way out. Off by default, and when off nothing
+    # below is touched, so unflagged output is byte-identical to pre-#50.
+    if getattr(args, "redact", False):
+        from .service.privacy import scrub_pii
+
+        def _scrub(value):
+            """Redact every string reachable in an exported row, in place-ish."""
+            if isinstance(value, str):
+                return scrub_pii(value)
+            if isinstance(value, dict):
+                return {k: _scrub(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_scrub(v) for v in value]
+            return value
+
+        rows = [_scrub(r) for r in rows]
+    else:
+        scrub_pii = None  # type: ignore[assignment]
+
+    def _maybe(value: str) -> str:
+        return scrub_pii(value) if scrub_pii is not None else value
+
     if fmt == "json":
         out.write_text(json.dumps(rows, indent=2, ensure_ascii=False))
     elif fmt == "jsonl":
@@ -645,9 +667,10 @@ def cmd_export(cfg: Config, args) -> None:
             w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
             w.writeheader()
             for c in cases:
-                w.writerow({"prompt": c.prompt, "category": c.category,
-                            "subcategory": c.subcategory or "", "expected_shape": c.expected_shape or "",
-                            "expected_behavior": c.expected_behavior or ""})
+                w.writerow({"prompt": _maybe(c.prompt), "category": c.category,
+                            "subcategory": c.subcategory or "",
+                            "expected_shape": _maybe(c.expected_shape or ""),
+                            "expected_behavior": _maybe(c.expected_behavior or "")})
     else:
         raise SystemExit(f"unknown format: {fmt}")
     print(f"exported {len(cases)} prompts from {src} -> {out} ({fmt})")
@@ -998,6 +1021,9 @@ def build_parser() -> argparse.ArgumentParser:
     px.add_argument("--format", default="json", choices=["json", "jsonl", "csv"])
     px.add_argument("--prompts-only", dest="prompts_only", action="store_true",
                     help="export just prompt + category (a clean prompt corpus)")
+    px.add_argument("--redact", action="store_true",
+                    help="scrub emails / US SSNs out of the exported text (off by default; "
+                         "see docs/PRIVACY.md)")
 
     pe = sub.add_parser("elicit", parents=[common], help="bootstrap an expert-validated golden probe set")
     esub = pe.add_subparsers(dest="elicit_cmd", required=True)

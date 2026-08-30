@@ -4,13 +4,18 @@ Examples:
     POLYGRAPH_DATABASE_URL=postgresql+psycopg://user:pw@host/db
     POLYGRAPH_API_KEYS=key-alice,key-bob
     POLYGRAPH_OUT_DIR=/data/out
+    POLYGRAPH_DATA_RESIDENCY=eu
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any, Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DataResidency = Literal["eu", "us", "none"]
 
 
 class Settings(BaseSettings):
@@ -76,8 +81,35 @@ class Settings(BaseSettings):
     oidc_email_claim: str = "email"
     oidc_require_mfa: bool = False   # enforce an MFA amr/acr claim
 
+    # Data residency of stored run/response data (GitHub #50). Declarative: it
+    # records the region the operator has committed to storing this deployment's
+    # data in, so the dashboard, docs and audits can state it. It does not by
+    # itself move data — pointing POLYGRAPH_DATABASE_URL and POLYGRAPH_OUT_DIR
+    # at in-region storage is the operator's job. See docs/PRIVACY.md.
+    #
+    # Default "none" is the safe one: it asserts no guarantee rather than
+    # silently claiming a region the storage may not honour. Override with
+    # POLYGRAPH_DATA_RESIDENCY=eu|us|none (case/whitespace-insensitive).
+    data_residency: DataResidency = "none"
+
     # Presentation.
     title: str = "PromptPolygraph"
+
+    @field_validator("data_residency", mode="before")
+    @classmethod
+    def _normalize_data_residency(cls, value: Any) -> Any:
+        """Accept ``EU``/`` us ``/unset from the environment; reject typos loudly.
+
+        An unset or blank env var means "no commitment", i.e. the default. An
+        unrecognised value is left for ``Literal`` validation to reject rather
+        than being coerced to "none": an operator who wrote ``eur`` intended a
+        guarantee, and silently downgrading it would be the wrong failure.
+        """
+        if value is None:
+            return "none"
+        if isinstance(value, str):
+            return value.strip().lower() or "none"
+        return value
 
     @property
     def api_key_set(self) -> set[str]:
