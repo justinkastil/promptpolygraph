@@ -119,11 +119,24 @@ def test_placeholders_contain_no_at_sign_and_no_digits() -> None:
         assert not any(character.isdigit() for character in placeholder)
 
 
-def test_non_str_input_raises_type_error() -> None:
-    """Contract stated in the module docstring of privacy.py: raise, never coerce."""
+def test_non_str_input_is_coerced_not_raised() -> None:
+    """Contract stated in the module docstring of privacy.py: total, never raises.
+
+    `scrub_pii` sits on the persistence ingest path (`Store.save_response`), so
+    raising on an unexpected body type would turn a privacy control into a
+    failed write. It coerces instead, and the coerced text is still scrubbed.
+    """
     for bad in (None, 123, 4.5, b"jane.doe@example.com", ["a"], {"a": 1}, object()):
-        with pytest.raises(TypeError):
-            scrub_pii(bad)  # type: ignore[arg-type]
+        out = scrub_pii(bad)  # type: ignore[arg-type]
+        assert isinstance(out, str), f"scrub_pii must return str for {bad!r}"
+
+    # `None` means "no body" and must not become the literal string "None".
+    assert scrub_pii(None) == ""  # type: ignore[arg-type]
+    # bytes are decoded, not repr()'d, and the decoded PII is still redacted.
+    assert scrub_pii(b"jane.doe@example.com") == "[REDACTED-EMAIL]"  # type: ignore[arg-type]
+    assert scrub_pii(bytearray(b"SSN 123-45-6789")) == "SSN [REDACTED-SSN]"  # type: ignore[arg-type]
+    # Anything else falls back to str(), and is scrubbed rather than passed through.
+    assert "123-45-6789" not in scrub_pii(["123-45-6789"])  # type: ignore[arg-type]
 
 
 def _string_literals_in_this_module() -> list[str]:

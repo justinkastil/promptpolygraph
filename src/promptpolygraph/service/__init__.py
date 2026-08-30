@@ -17,6 +17,33 @@ Postgres in production, on AWS or GCP.
 
 from __future__ import annotations
 
-from .settings import Settings, get_settings
+from typing import TYPE_CHECKING, Any
 
 __all__ = ["Settings", "get_settings"]
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .settings import Settings, get_settings
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve ``Settings``/``get_settings`` lazily (PEP 562).
+
+    ``.settings`` needs ``pydantic-settings`` from the optional ``[service]``
+    extra. The core engine has no such dependency, yet
+    ``promptpolygraph.runner.store`` imports the stdlib-only
+    ``promptpolygraph.service.privacy`` for #50 PII redaction on ingest --
+    which executes this ``__init__``. Deferring the import keeps that path
+    working on a core-only install while ``from promptpolygraph.service import
+    get_settings`` behaves exactly as before. Unknown names raise
+    ``AttributeError`` so the import machinery still falls back to loading
+    submodules (``from promptpolygraph.service import metrics``, ...).
+    """
+    if name in __all__:
+        from . import settings as _settings
+
+        return getattr(_settings, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})

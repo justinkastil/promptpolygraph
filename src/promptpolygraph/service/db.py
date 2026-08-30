@@ -34,6 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 
 from ..models import Case, Response, RunMeta, Score, new_id, now_iso
+from .privacy import scrub_response
 
 _meta = MetaData()
 
@@ -182,7 +183,11 @@ class SqlStore:
         return [Case.model_validate_json(r[0]) for r in rows]
 
     def save_response(self, run_id: str, resp: Response) -> None:
-        self._upsert_pair(responses, run_id, resp.case_id, resp.model_dump_json())
+        # #50: chokepoint for the `responses` table — redact PII on ingest so it
+        # never lands verbatim in sqlite/Postgres. `resp` itself is not mutated.
+        self._upsert_pair(
+            responses, run_id, resp.case_id, scrub_response(resp).model_dump_json()
+        )
 
     def get_responses(self, run_id: str) -> list[Response]:
         with self.engine.connect() as c:
@@ -206,15 +211,24 @@ class SqlStore:
     def cache_put(self, key: str, resp: Response) -> None:
         self._upsert(cache, "key", key, {"key": key, "data": resp.model_dump_json()})
 
-    def export_jsonl(self, run_id: str, path: str | Path) -> None:
+    def export_jsonl(self, run_id: str, path: str | Path, *, redact: bool = False) -> None:
+        """Dump every case + response + score as one JSON object per line.
+
+        `redact` (#50, opt-in, default off) re-scrubs response bodies on the way
+        out, for rows persisted before redaction-on-ingest existed. With
+        `redact=False` the output bytes are identical to the pre-#50 behaviour.
+        """
         cmap = {c.id: c for c in self.get_cases(run_id)}
         rmap = {r.case_id: r for r in self.get_responses(run_id)}
         smap = {s.case_id: s for s in self.get_scores(run_id)}
         with open(Path(path).expanduser(), "w", encoding="utf-8") as fh:
             for cid, case in cmap.items():
+                resp = rmap.get(cid)
+                if redact and resp is not None:
+                    resp = scrub_response(resp)
                 fh.write(json.dumps({
                     "case": case.model_dump(),
-                    "response": rmap[cid].model_dump() if cid in rmap else None,
+                    "response": resp.model_dump() if resp is not None else None,
                     "score": smap[cid].model_dump() if cid in smap else None,
                 }, ensure_ascii=False, default=str) + "\n")
 
