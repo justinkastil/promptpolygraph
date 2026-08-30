@@ -58,6 +58,7 @@ nav:
   - Validation: VALIDATION.md
   - Architecture: ARCHITECTURE.md
   - Threat model: THREAT_MODEL.md
+  - Privacy: PRIVACY.md
   - Contributing: contributing.md
   - Reference:
       - Providers: PROVIDERS.md
